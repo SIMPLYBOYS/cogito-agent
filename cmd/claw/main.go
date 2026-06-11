@@ -8,37 +8,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/yourname/go-tiny-claw/internal/engine"
 	"github.com/yourname/go-tiny-claw/internal/provider"
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/yourname/go-tiny-claw/internal/tools"
 )
-
-type mockRegistry struct{}
-
-func (m *mockRegistry) GetAvailableTools() []schema.ToolDefinition {
-	return []schema.ToolDefinition{
-		{
-			Name:        "get_weather",
-			Description: "获取指定城市的当前天气情况。",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"city": map[string]interface{}{
-						"type": "string",
-					},
-				},
-				"required": []string{"city"},
-			},
-		},
-	}
-}
-
-func (m *mockRegistry) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
-	log.Printf("  -> [Mock 工具执行] 获取 %s 的天气中...\n", call.Name)
-	return schema.ToolResult{
-		ToolCallID: call.ID,
-		Output:     "API 返回：今天是晴天，气温 25 度。",
-		IsError:    false,
-	}
-}
 
 func main() {
 	// 读取当前目录的 .env（文件不存在也不报错；不会覆盖已存在的环境变量）
@@ -51,11 +22,15 @@ func main() {
 	workDir, _ := os.Getwd()
 
 	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
-	registry := &mockRegistry{}
 
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	registry := tools.NewRegistry()
 
-	prompt := "我想去北京跑步，帮我查查天气适合吗？"
+	readFileTool := tools.NewReadFileTool(workDir)
+	registry.Register(readFileTool)
+
+	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
+
+	prompt := "请调用工具读取一下当前工作区目录下 hello.txt 文件的内容，并用一句话向我总结它说了什么。"
 
 	err := eng.Run(context.Background(), prompt)
 	if err != nil {
