@@ -16,18 +16,6 @@ type ClaudeProvider struct {
 	model  string
 }
 
-func NewZhipuClaudeProvider(model string) *ClaudeProvider {
-	apiKey := os.Getenv("ZHIPU_API_KEY")
-	if apiKey == "" {
-		panic("请设置 ZHIPU_API_KEY 环境变量")
-	}
-	baseURL := "https://open.bigmodel.cn/api/paas/v4/"
-	return &ClaudeProvider{
-		client: anthropic.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
-		model:  model,
-	}
-}
-
 // NewClaudeProvider 走 Anthropic 官方端点（https://api.anthropic.com）。
 // 不覆盖 baseURL，让 SDK 使用默认地址；凭证读取 ANTHROPIC_API_KEY。
 // model 需传真实 Claude 模型 id，例如 "claude-opus-4-8"。

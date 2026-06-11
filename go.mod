@@ -2,10 +2,7 @@ module github.com/yourname/go-tiny-claw
 
 go 1.25.0
 
-require (
-	github.com/anthropics/anthropic-sdk-go v1.30.0
-	github.com/openai/openai-go/v3 v3.30.0
-)
+require github.com/anthropics/anthropic-sdk-go v1.30.0
 
 require (
 	github.com/tidwall/gjson v1.18.0 // indirect
