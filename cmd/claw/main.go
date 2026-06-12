@@ -28,17 +28,14 @@ func main() {
 	registry.Register(tools.NewReadFileTool(workDir))
 	registry.Register(tools.NewWriteFileTool(workDir))
 	registry.Register(tools.NewBashTool(workDir))
-	registry.Register(tools.NewEditFileTool(workDir)) // 挂载 Edit 工具
+	registry.Register(tools.NewEditFileTool(workDir))
 
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	// 开启慢思考，促使大模型一次性规划出并行的工具调用
+	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
 
 	prompt := `
-	我当前目录下有一个 server.go 文件。
-	请帮我把里面 "TODO: 增加鉴权逻辑" 下面的那个 if 语句，整个替换为：
-	if user == nil {
-		fmt.Println("Forbidden!")
-		return
-	}
+	我当前目录下有 a.txt, b.txt, c.txt 三个文件。(如果没有请忽略找不到的报错)
+	为了节省时间，请你同时一次性利用工具读取这三个文件，并将它们的内容综合起来告诉我。
 	`
 
 	err := eng.Run(context.Background(), prompt)
