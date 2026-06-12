@@ -1,13 +1,14 @@
 package main
 
 import (
-	"context"
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/yourname/go-tiny-claw/internal/engine"
 	"github.com/yourname/go-tiny-claw/internal/provider"
+	"github.com/yourname/go-tiny-claw/internal/slackbot"
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
 
@@ -20,26 +21,25 @@ func main() {
 	}
 
 	workDir, _ := os.Getwd()
-
 	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
 
 	registry := tools.NewRegistry()
-
 	registry.Register(tools.NewReadFileTool(workDir))
 	registry.Register(tools.NewWriteFileTool(workDir))
 	registry.Register(tools.NewBashTool(workDir))
 	registry.Register(tools.NewEditFileTool(workDir))
 
-	// 开启慢思考，促使大模型一次性规划出并行的工具调用
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, true)
 
-	prompt := `
-	我当前目录下有 a.txt, b.txt, c.txt 三个文件。(如果没有请忽略找不到的报错)
-	为了节省时间，请你同时一次性利用工具读取这三个文件，并将它们的内容综合起来告诉我。
-	`
+	bot := slackbot.NewSlackBot(eng)
 
-	err := eng.Run(context.Background(), prompt)
+	http.HandleFunc("/webhook/event", bot.HandleEvent)
+
+	port := ":48080"
+	log.Printf("🚀 go-tiny-claw Slack 服务端已启动，正在监听 %s 端口\n", port)
+
+	err := http.ListenAndServe(port, nil)
 	if err != nil {
-		log.Fatalf("引擎运行崩溃: %v", err)
+		log.Fatalf("服务器启动失败: %v", err)
 	}
 }
