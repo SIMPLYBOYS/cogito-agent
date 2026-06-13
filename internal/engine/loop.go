@@ -22,6 +22,7 @@ type AgentEngine struct {
 	EnableThinking bool
 	PlanMode       bool
 	compactor      *ctxpkg.Compactor
+	recovery       *ctxpkg.RecoveryManager // ch14: 工具错误自愈（注入救援指南）
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
@@ -33,6 +34,7 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		// ch13: 阈值从 ch12 演示用的 3000 提到 20000（≈6000 中文字），更贴近正常使用；
 		// 生产环境仍建议按 model context window 自动计算或改用 token 级估算。
 		compactor: ctxpkg.NewCompactor(20000, 6),
+		recovery:  ctxpkg.NewRecoveryManager(),
 	}
 }
 
@@ -113,8 +115,15 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 				result := e.registry.Execute(ctx, call)
 
+				// ch14【核心拦截与注入】出错时由 RecoveryManager 诊断并注入"救援指南"，
+				// reporter 与 session.history 两处都用注入后的版本，保证人/模型/历史三者一致。
+				finalOutput := result.Output
+				if result.IsError {
+					finalOutput = e.recovery.AnalyzeAndInject(call.Name, result.Output)
+				}
+
 				if reporter != nil {
-					displayOutput := result.Output
+					displayOutput := finalOutput
 					if len(displayOutput) > 200 {
 						displayOutput = displayOutput[:200] + "... (已截断)"
 					}
@@ -123,7 +132,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 				observationMsgs[idx] = schema.Message{
 					Role:       schema.RoleUser,
-					Content:    result.Output,
+					Content:    finalOutput,
 					ToolCallID: call.ID,
 				}
 			}(i, toolCall)
