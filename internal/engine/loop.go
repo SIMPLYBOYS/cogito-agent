@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
@@ -13,48 +14,51 @@ import (
 )
 
 // ch11: 引擎对 workspace 无状态（workspace 跟着 Session 走）。
-// ch12: 新增 compactor —— 每次发 LLM 前做字符级压缩（OOM 防线）。
+// ch12: compactor —— 每次发 LLM 前做字符级压缩（OOM 防线）。
+// ch13: PlanMode —— 状态外部化（PLAN.md / TODO.md）开关，透传给 composer。
 type AgentEngine struct {
 	provider       provider.LLMProvider
 	registry       tools.Registry
 	EnableThinking bool
+	PlanMode       bool
 	compactor      *ctxpkg.Compactor
 }
 
-func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool) *AgentEngine {
+func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
 	return &AgentEngine{
 		provider:       p,
 		registry:       r,
 		EnableThinking: enableThinking,
-		// 阈值 3000 字符 / 保护区 6 条沿用书中的演示用低值，便于触发压缩观察；
-		// 生产环境应调高（或改用 token 级估算），以免误伤正常的工具输出。
-		compactor: ctxpkg.NewCompactor(3000, 6),
+		PlanMode:       planMode,
+		// ch13: 阈值从 ch12 演示用的 3000 提到 20000（≈6000 中文字），更贴近正常使用；
+		// 生产环境仍建议按 model context window 自动计算或改用 token 级估算。
+		compactor: ctxpkg.NewCompactor(20000, 6),
 	}
 }
 
 func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter Reporter) error {
-	log.Printf("[Engine] 唤醒会话 [%s]，锁定工作区: %s\n", session.ID, session.WorkDir)
+	log.Printf("[Engine] 唤醒会话 [%s]，工作区: %s\n", session.ID, session.WorkDir)
 
-	composer := ctxpkg.NewPromptComposer(session.WorkDir)
+	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
 	systemMsg := composer.Build()
 
 	for {
 		availableTools := e.registry.GetAvailableTools()
-
-		// ch12: 窗口放宽到 20 —— 消息条数交给滑动窗口，字符数量交给 compactor。
 		workingMemory := session.GetWorkingMemory(20)
 
 		var contextHistory []schema.Message
 		contextHistory = append(contextHistory, systemMsg)
 		contextHistory = append(contextHistory, workingMemory...)
 
-		// 【核心防线】发 LLM 前做字符级压缩。compactor 只动"发给 LLM 的副本"，
-		// 不损毁 session.history（长期记忆永远完整），下一轮重新取、重新压。
+		// 【核心防线】发 LLM 前做字符级压缩；只动发给 LLM 的副本，不损毁 session.history。
 		compactedContext := e.compactor.Compact(contextHistory)
 
+		// 本轮 thinking 内容暂存（不单独进 session，最后合并进 action 消息）
+		var currentTurnThinkingContent string
+
 		// Phase 1: Thinking
-		// 注意：手动两阶段思考（剥夺 tools）对 Claude 会退化成 <invoke> 文本而非结构化
-		// tool_use，故各入口默认 EnableThinking=false；若要思考应改用原生 adaptive thinking。
+		// 注意：手动两阶段思考（剥夺 tools）对 Claude 会退化成 <invoke> 文本，故各入口默认
+		// EnableThinking=false；ch13 的合并逻辑也确保即便开启也不会产生连续两条 assistant。
 		if e.EnableThinking {
 			if reporter != nil {
 				reporter.OnThinking(ctx)
@@ -65,7 +69,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				return fmt.Errorf("Thinking 阶段失败: %w", err)
 			}
 			if thinkResp.Content != "" {
-				session.Append(*thinkResp) // 完整版进长期记忆
+				currentTurnThinkingContent = thinkResp.Content
+				// 仅本轮临时拼接，让 Phase 2 看到刚才的思考；不进 session、不持久化
 				compactedContext = append(compactedContext, *thinkResp)
 			}
 		}
@@ -76,8 +81,14 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			return fmt.Errorf("Action 阶段失败: %w", err)
 		}
 
-		session.Append(*actionResp) // 完整版进长期记忆
-		compactedContext = append(compactedContext, *actionResp)
+		// ch13【核心修正】：把 thinking 与 action 合并成单一 assistant 消息进 session，
+		// 保证 history 严格 user/assistant 交替（避免连续两条 assistant 被严格模式拒绝）。
+		finalAssistantMsg := schema.Message{
+			Role:      schema.RoleAssistant,
+			Content:   strings.TrimSpace(currentTurnThinkingContent + "\n" + actionResp.Content),
+			ToolCalls: actionResp.ToolCalls,
+		}
+		session.Append(finalAssistantMsg)
 
 		if actionResp.Content != "" && reporter != nil {
 			reporter.OnMessage(ctx, actionResp.Content)
@@ -120,7 +131,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		wg.Wait()
 
-		// 观察结果只 append 到 session（完整长期记忆）；下一轮 GetWorkingMemory + Compact 处理。
+		// 工具结果作为 user 消息进 session，保证下一轮 role 必然 user→assistant 交替
 		session.Append(observationMsgs...)
 	}
 

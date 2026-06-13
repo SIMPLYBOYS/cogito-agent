@@ -41,7 +41,7 @@ func main() {
 	registry.Register(tools.NewReadFileTool(workDir))
 	registry.Register(tools.NewBashTool(workDir))
 
-	eng := engine.NewAgentEngine(llmProvider, registry, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, false, false)
 	reporter := engine.NewTerminalReporter()
 
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate("test_oom_protection_001", workDir)

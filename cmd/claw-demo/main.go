@@ -42,7 +42,7 @@ func main() {
 	// Session B 用"不准调用工具"规避（per-session 工具沙箱留待后续章节）。
 	registry.Register(tools.NewReadFileTool(frontDir))
 
-	eng := engine.NewAgentEngine(llmProvider, registry, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, false, false)
 	reporter := engine.NewTerminalReporter()
 
 	var wg sync.WaitGroup
