@@ -34,9 +34,10 @@ func main() {
 	// EnableThinking=false：手动两阶段"思考"(Phase 1 剥夺 tools) 会让 Claude 把工具调用
 	// 退化成 <invoke> 文本而非结构化 tool_use，导致循环空转。Claude 用单阶段直接带 tools
 	// 即可正常 ReAct；若要"思考"，应改用 claude.go 的原生 adaptive thinking，而非剥夺 tools。
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, false)
 
-	bot := slackbot.NewSlackBot(eng)
+	// workDir 同时用于：工具沙箱（上面注册 tools 时）与各频道 session 的 WorkDir
+	bot := slackbot.NewSlackBot(eng, workDir)
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 

@@ -12,38 +12,45 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
 
+// ch11: 引擎不再持有 WorkDir / composer —— workspace 跟着 Session 走，引擎对 workspace 无状态。
 type AgentEngine struct {
 	provider       provider.LLMProvider
 	registry       tools.Registry
-	WorkDir        string
 	EnableThinking bool
-	composer       *ctxpkg.PromptComposer // ch10: Context Engineering 子系统
 }
 
-func NewAgentEngine(p provider.LLMProvider, r tools.Registry, workDir string, enableThinking bool) *AgentEngine {
+func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool) *AgentEngine {
 	return &AgentEngine{
 		provider:       p,
 		registry:       r,
-		WorkDir:        workDir,
 		EnableThinking: enableThinking,
-		composer:       ctxpkg.NewPromptComposer(workDir),
 	}
 }
 
-func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Reporter) error {
-	log.Printf("[Engine] 引擎启动，锁定工作区: %s\n", e.WorkDir)
+// Run 服务于一个 Session：工作目录与对话历史都由 session 携带。
+// 调用方需先把用户输入 session.Append 进去，再调用 Run（Run 不再接收 userPrompt）。
+func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter Reporter) error {
+	log.Printf("[Engine] 唤醒会话 [%s]，锁定工作区: %s\n", session.ID, session.WorkDir)
 
-	// ch10: 动态组装 System Prompt（核心身份 + AGENTS.md + Skills），取代写死字符串
-	systemMsg := e.composer.Build()
-
-	contextHistory := []schema.Message{
-		systemMsg,
-		{Role: schema.RoleUser, Content: userPrompt},
-	}
+	// composer 每次 Run 用 session 的 workDir 重建：支持同一引擎服务多个不同 workspace 的 session，
+	// 同时保留"workspace 内容改了下次 Run 就生效"的热载特性。
+	composer := ctxpkg.NewPromptComposer(session.WorkDir)
+	systemMsg := composer.Build()
 
 	for {
 		availableTools := e.registry.GetAvailableTools()
 
+		// 短期工作记忆：滑动窗口只取最近 6 条；长期完整历史留在 session.history。
+		workingMemory := session.GetWorkingMemory(6)
+
+		var contextHistory []schema.Message
+		contextHistory = append(contextHistory, systemMsg)
+		contextHistory = append(contextHistory, workingMemory...)
+
+		// Phase 1: Thinking
+		// 注意：手动两阶段思考（剥夺 tools 让模型"先想"）对 Claude 会退化成 <invoke> 文本而非
+		// 结构化 tool_use，故各入口默认 EnableThinking=false。若要思考，应改用 claude.go 的原生
+		// adaptive thinking，而不是这个剥夺 tools 的 hack。
 		if e.EnableThinking {
 			if reporter != nil {
 				reporter.OnThinking(ctx)
@@ -54,22 +61,18 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 				return fmt.Errorf("Thinking 阶段失败: %w", err)
 			}
 			if thinkResp.Content != "" {
+				session.Append(*thinkResp) // 持久化到长期记忆
 				contextHistory = append(contextHistory, *thinkResp)
-				// 插入一条 user 消息，保持 user/assistant 严格交替（Anthropic API 的硬性要求）：
-				// 思考阶段产出的是 assistant 消息，紧接的行动阶段又会产出 assistant 消息，
-				// 中间若不隔一条 user 消息，真实 Claude API 会因连续 assistant 而返回 400。
-				contextHistory = append(contextHistory, schema.Message{
-					Role:    schema.RoleUser,
-					Content: "请根据上面的规划，开始使用可用的工具执行任务。",
-				})
 			}
 		}
 
+		// Phase 2: Action
 		actionResp, err := e.provider.Generate(ctx, contextHistory, availableTools)
 		if err != nil {
 			return fmt.Errorf("Action 阶段失败: %w", err)
 		}
 
+		session.Append(*actionResp) // 持久化到长期记忆
 		contextHistory = append(contextHistory, *actionResp)
 
 		if actionResp.Content != "" && reporter != nil {
@@ -113,10 +116,9 @@ func (e *AgentEngine) Run(ctx context.Context, userPrompt string, reporter Repor
 
 		wg.Wait()
 
-		// 按序追加回 Context（claude.go 会将连续 tool_result 合并进同一条 user 消息）
-		for _, obs := range observationMsgs {
-			contextHistory = append(contextHistory, obs)
-		}
+		// 观察结果只 append 到 session（长期记忆）；下一轮由 GetWorkingMemory 自动取回。
+		// 不再 append 到 contextHistory —— 短期窗口与长期记忆就此解耦。
+		session.Append(observationMsgs...)
 	}
 
 	return nil

@@ -9,8 +9,10 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
 	"github.com/yourname/go-tiny-claw/internal/engine"
 	"github.com/yourname/go-tiny-claw/internal/provider"
+	"github.com/yourname/go-tiny-claw/internal/schema"
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
 
@@ -36,7 +38,7 @@ func main() {
 	// EnableThinking=false：手动两阶段"思考"(Phase 1 剥夺 tools) 会让 Claude 把工具调用
 	// 退化成 <invoke> 文本而非结构化 tool_use，导致循环空转。Claude 用单阶段直接带 tools
 	// 即可正常 ReAct；若要"思考"，应改用 claude.go 的原生 adaptive thinking，而非剥夺 tools。
-	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	eng := engine.NewAgentEngine(llmProvider, registry, false)
 	reporter := engine.NewTerminalReporter()
 
 	// 默认任务来自 ch10；也支持通过命令行参数覆盖：
@@ -49,7 +51,11 @@ func main() {
 		prompt = os.Args[1]
 	}
 
-	if err := eng.Run(context.Background(), prompt, reporter); err != nil {
+	// ch11: 单 session 一次性运行。先把用户输入 Append 进 session，再 Run。
+	session := ctxpkg.GlobalSessionMgr.GetOrCreate("cli-session", workDir)
+	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
+
+	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		log.Fatalf("引擎运行崩溃: %v", err)
 	}
 }

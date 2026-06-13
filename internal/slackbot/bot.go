@@ -15,7 +15,9 @@ import (
 
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
 	"github.com/yourname/go-tiny-claw/internal/engine"
+	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
 type SlackBot struct {
@@ -23,9 +25,10 @@ type SlackBot struct {
 	signingSecret string
 	botUserID     string
 	engine        *engine.AgentEngine
+	workDir       string // 各频道 session 共用的工作目录（tools 也注册在此）
 }
 
-func NewSlackBot(eng *engine.AgentEngine) *SlackBot {
+func NewSlackBot(eng *engine.AgentEngine, workDir string) *SlackBot {
 	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	signingSecret := os.Getenv("SLACK_SIGNING_SECRET")
 
@@ -46,6 +49,7 @@ func NewSlackBot(eng *engine.AgentEngine) *SlackBot {
 		signingSecret: signingSecret,
 		botUserID:     authResp.UserID,
 		engine:        eng,
+		workDir:       workDir,
 	}
 }
 
@@ -120,8 +124,12 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 		channelID: channelID,
 	}
 
-	err := b.engine.Run(context.Background(), prompt, reporter)
-	if err != nil {
+	// 每个 Slack 频道/私聊 = 一个持久 Session：多轮对话记忆 + 跨频道隔离，
+	// 由 GlobalSessionMgr 按 channelID 管理。
+	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, b.workDir)
+	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
+
+	if err := b.engine.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 运行崩溃: %v", err))
 	}
 }
