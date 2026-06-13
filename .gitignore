@@ -26,6 +26,10 @@ go.work.sum
 .env.*
 !.env.example
 
+# Agent 沙箱：workspace 是独立 git repo（含 AGENTS.md / .claw/skills 及 agent 运行产物），
+# 由其自身版本控制，不纳入主仓库追踪
+/workspace/
+
 # Editor / IDE
 .idea/
 .vscode/

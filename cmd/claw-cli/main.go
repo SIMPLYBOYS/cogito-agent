@@ -1,19 +1,21 @@
+// cmd/claw-cli 是 ch10 的命令行入口：一次性执行一个任务，事件通过 TerminalReporter
+// 实时打到 stdout。与 cmd/claw（Slack 服务端）共用同一套 AgentEngine 与 Context
+// Engineering 子系统（PromptComposer + Skills + AGENTS.md），只是 Reporter 与入口不同。
 package main
 
 import (
+	"context"
 	"log"
-	"net/http"
 	"os"
 
 	"github.com/joho/godotenv"
 	"github.com/yourname/go-tiny-claw/internal/engine"
 	"github.com/yourname/go-tiny-claw/internal/provider"
-	"github.com/yourname/go-tiny-claw/internal/slackbot"
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
 
 func main() {
-	// 读取当前目录的 .env（文件不存在也不报错；不会覆盖已存在的环境变量）
+	// 读取 .env（不存在也不报错；不覆盖已有环境变量）
 	_ = godotenv.Load()
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
@@ -21,7 +23,7 @@ func main() {
 	}
 
 	workDir, _ := os.Getwd()
-	workDir += "/workspace" // ch10: 与 CLI 入口一致，agent 操作范围隔离到 ./workspace；composer 也从此读取 AGENTS.md / skills
+	workDir += "/workspace" // ch10: 将 agent 可操作范围隔离到 ./workspace 子目录
 
 	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
 
@@ -35,16 +37,19 @@ func main() {
 	// 退化成 <invoke> 文本而非结构化 tool_use，导致循环空转。Claude 用单阶段直接带 tools
 	// 即可正常 ReAct；若要"思考"，应改用 claude.go 的原生 adaptive thinking，而非剥夺 tools。
 	eng := engine.NewAgentEngine(llmProvider, registry, workDir, false)
+	reporter := engine.NewTerminalReporter()
 
-	bot := slackbot.NewSlackBot(eng)
+	// 默认任务来自 ch10；也支持通过命令行参数覆盖：
+	//   go run ./cmd/claw-cli "你的自定义指令"
+	prompt := `
+	我需要在当前目录下新建一个 ping.go，提供一个简单的 http ping 接口。
+	写完之后，帮我把代码用 git 提交一下。
+	`
+	if len(os.Args) > 1 {
+		prompt = os.Args[1]
+	}
 
-	http.HandleFunc("/webhook/event", bot.HandleEvent)
-
-	port := ":48080"
-	log.Printf("🚀 go-tiny-claw Slack 服务端已启动，正在监听 %s 端口\n", port)
-
-	err := http.ListenAndServe(port, nil)
-	if err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+	if err := eng.Run(context.Background(), prompt, reporter); err != nil {
+		log.Fatalf("引擎运行崩溃: %v", err)
 	}
 }
