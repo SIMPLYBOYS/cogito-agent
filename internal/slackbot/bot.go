@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -30,6 +31,11 @@ type SlackBot struct {
 	botUserID     string
 	factory       EngineFactory // ch22: 每会话现造引擎（替换原来的固定 engine）
 	workDir       string        // 各频道 session 共用的工作目录（tools 也注册在此）
+
+	// 弱点修补②：标记正在运行（含等待审批）的频道，避免同一 session 并发起第二个 Run
+	// 导致悬空 tool_use / 状态污染。
+	busy   map[string]bool
+	busyMu sync.Mutex
 }
 
 func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
@@ -54,6 +60,7 @@ func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
 		botUserID:     authResp.UserID,
 		factory:       factory,
 		workDir:       workDir,
+		busy:          make(map[string]bool),
 	}
 }
 
@@ -104,8 +111,13 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		case *slackevents.AppMentionEvent:
 			// 频道里 @机器人
 			prompt := strings.TrimSpace(strings.ReplaceAll(ev.Text, fmt.Sprintf("<@%s>", b.botUserID), ""))
-			// ch16: 先看是不是审批口令；命中则唤醒对应审批，不当作新任务
-			if tryResolveApproval(prompt) {
+			// 先看是不是审批口令（即便会话忙碌也要处理——这正是解开忙碌的方式）
+			if b.tryResolveApproval(ev.Channel, prompt) {
+				break
+			}
+			// 弱点修补②：会话忙碌时拒绝新任务，避免并发 Run 污染同一 session
+			if !b.tryAcquire(ev.Channel) {
+				b.SendMessage(ev.Channel, "⏳ 上一个任务仍在进行（或正在等待审批），请先处理审批或稍候再发。")
 				break
 			}
 			log.Printf("[Slack] 收到频道 %s 提及: %s\n", ev.Channel, prompt)
@@ -117,7 +129,12 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if ev.ChannelType == "im" {
-				if tryResolveApproval(strings.TrimSpace(ev.Text)) {
+				text := strings.TrimSpace(ev.Text)
+				if b.tryResolveApproval(ev.Channel, text) {
+					break
+				}
+				if !b.tryAcquire(ev.Channel) {
+					b.SendMessage(ev.Channel, "⏳ 上一个任务仍在进行（或正在等待审批），请先处理审批或稍候再发。")
 					break
 				}
 				log.Printf("[Slack] 收到私聊 %s 消息: %s\n", ev.Channel, ev.Text)
@@ -130,6 +147,8 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
+	defer b.release(channelID) // 弱点修补②：运行结束（含审批被拒/超时/崩溃）释放忙碌标记
+
 	reporter := &SlackReporter{
 		client:    b.client,
 		channelID: channelID,
@@ -154,17 +173,66 @@ func (b *SlackBot) SendMessage(channelID, text string) {
 	}
 }
 
-// tryResolveApproval 拦截 approve/reject 口令，命中则唤醒对应审批并返回 true。
-func tryResolveApproval(text string) bool {
-	if rest, ok := strings.CutPrefix(text, "approve "); ok {
-		GlobalApprovalMgr.ResolveApproval(strings.TrimSpace(rest), true, "人类管理员已批准操作")
+// tryResolveApproval 拦截 approve/reject 口令。命中即消费（返回 true，不会被当成新任务）。
+// 弱点修补①：支持裸 approve/reject —— 不带 ID 时按"发起请求的本频道"解析其待审批项，
+// 无需人类手打长长的 taskID。仍兼容 approve <taskID> 的精确形式。
+func (b *SlackBot) tryResolveApproval(channelID, text string) bool {
+	text = strings.TrimSpace(text)
+	lower := strings.ToLower(text)
+
+	var allowed bool
+	var reason string
+	switch {
+	case lower == "approve" || strings.HasPrefix(lower, "approve "):
+		allowed, reason = true, "人类管理员已批准操作"
+	case lower == "reject" || strings.HasPrefix(lower, "reject "):
+		allowed, reason = false, "人类管理员认为风险过高，已拒绝该操作"
+	default:
+		return false // 不是审批口令
+	}
+
+	// 取出可能携带的 taskID（裸口令则为空）
+	idPart := strings.TrimSpace(text[strings.IndexByte(text, ' ')+1:])
+	if !strings.ContainsRune(text, ' ') {
+		idPart = ""
+	}
+
+	if idPart != "" {
+		if !GlobalApprovalMgr.ResolveApproval(idPart, allowed, reason) {
+			b.SendMessage(channelID, fmt.Sprintf("⚠️ 未找到待审批任务 `%s`（可能已超时或已处理）。", idPart))
+		}
 		return true
 	}
-	if rest, ok := strings.CutPrefix(text, "reject "); ok {
-		GlobalApprovalMgr.ResolveApproval(strings.TrimSpace(rest), false, "人类管理员认为风险过高，已拒绝该操作")
-		return true
+
+	// 裸口令：解决本频道所有待审批
+	switch n := GlobalApprovalMgr.ResolveByChannel(channelID, allowed, reason); {
+	case n == 0:
+		b.SendMessage(channelID, "ℹ️ 当前没有待审批的操作。")
+	case n > 1:
+		verb := "批准"
+		if !allowed {
+			verb = "拒绝"
+		}
+		b.SendMessage(channelID, fmt.Sprintf("已对本频道 %d 个待审批操作执行%s。", n, verb))
 	}
-	return false
+	return true
+}
+
+// tryAcquire 标记频道为忙碌；若已忙碌返回 false（弱点修补②：防同一 session 并发 Run）。
+func (b *SlackBot) tryAcquire(channelID string) bool {
+	b.busyMu.Lock()
+	defer b.busyMu.Unlock()
+	if b.busy[channelID] {
+		return false
+	}
+	b.busy[channelID] = true
+	return true
+}
+
+func (b *SlackBot) release(channelID string) {
+	b.busyMu.Lock()
+	delete(b.busy, channelID)
+	b.busyMu.Unlock()
 }
 
 type SlackReporter struct {

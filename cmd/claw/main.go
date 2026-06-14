@@ -60,7 +60,7 @@ func main() {
 		if sess := engine.SessionFromContext(ctx); sess != nil {
 			channelID = sess.ID
 		}
-		allowed, reason := slackbot.GlobalApprovalMgr.WaitForApproval(call.ID, call.Name, args, func(text string) {
+		allowed, reason := slackbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, args, func(text string) {
 			if channelID != "" {
 				bot.SendMessage(channelID, text)
 			}
