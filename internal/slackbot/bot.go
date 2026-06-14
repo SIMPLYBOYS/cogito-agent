@@ -20,15 +20,19 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
+// EngineFactory 为每个会话动态组装一个引擎。ch22 用它让每个频道挂上"自己专属的 CostTracker"，
+// 各频道各记各的账（registry/middleware 无状态共享，tracker/session 按频道隔离）。
+type EngineFactory func(session *ctxpkg.Session) *engine.AgentEngine
+
 type SlackBot struct {
 	client        *slackapi.Client
 	signingSecret string
 	botUserID     string
-	engine        *engine.AgentEngine
-	workDir       string // 各频道 session 共用的工作目录（tools 也注册在此）
+	factory       EngineFactory // ch22: 每会话现造引擎（替换原来的固定 engine）
+	workDir       string        // 各频道 session 共用的工作目录（tools 也注册在此）
 }
 
-func NewSlackBot(eng *engine.AgentEngine, workDir string) *SlackBot {
+func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
 	botToken := os.Getenv("SLACK_BOT_TOKEN")
 	signingSecret := os.Getenv("SLACK_SIGNING_SECRET")
 
@@ -48,7 +52,7 @@ func NewSlackBot(eng *engine.AgentEngine, workDir string) *SlackBot {
 		client:        client,
 		signingSecret: signingSecret,
 		botUserID:     authResp.UserID,
-		engine:        eng,
+		factory:       factory,
 		workDir:       workDir,
 	}
 }
@@ -136,7 +140,9 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, b.workDir)
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	if err := b.engine.Run(context.Background(), session, reporter); err != nil {
+	// ch22: 每会话用 factory 现造一个挂了专属 CostTracker 的引擎，各频道各记各的账
+	eng := b.factory(session)
+	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 运行崩溃: %v", err))
 	}
 }

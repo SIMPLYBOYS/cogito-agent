@@ -7,7 +7,9 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
 	"github.com/yourname/go-tiny-claw/internal/engine"
+	"github.com/yourname/go-tiny-claw/internal/observability"
 	"github.com/yourname/go-tiny-claw/internal/provider"
 	"github.com/yourname/go-tiny-claw/internal/schema"
 	"github.com/yourname/go-tiny-claw/internal/slackbot"
@@ -25,7 +27,8 @@ func main() {
 	workDir, _ := os.Getwd()
 	workDir += "/workspace" // ch10: 与 CLI 入口一致，agent 操作范围隔离到 ./workspace；composer 也从此读取 AGENTS.md / skills
 
-	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
+	modelName := "claude-opus-4-8"
+	llmProvider := provider.NewClaudeProvider(modelName)
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))
@@ -33,14 +36,17 @@ func main() {
 	registry.Register(tools.NewBashTool(workDir))
 	registry.Register(tools.NewEditFileTool(workDir))
 
-	// EnableThinking=false：手动两阶段"思考"(Phase 1 剥夺 tools) 会让 Claude 把工具调用
-	// 退化成 <invoke> 文本而非结构化 tool_use，导致循环空转。Claude 用单阶段直接带 tools
-	// 即可正常 ReAct；若要"思考"，应改用 claude.go 的原生 adaptive thinking，而非剥夺 tools。
-	// Slack 是对话式入口，默认不开 Plan Mode（否则每条消息都会强制 PLAN.md/TODO.md 流程）
-	eng := engine.NewAgentEngine(llmProvider, registry, false, false)
+	// ch22: engine factory —— 每个会话现造一个挂了"该会话专属 CostTracker"的引擎，实现
+	// per-chat 成本记账（registry/middleware 无状态共享，tracker/session 按频道隔离）。
+	// EnableThinking=false（手动两阶段思考对 Claude 会退化成 <invoke> 文本）；
+	// Slack 对话式入口默认不开 Plan Mode（否则每条消息都强制 PLAN.md/TODO.md 流程）。
+	factory := func(sess *ctxpkg.Session) *engine.AgentEngine {
+		tracked := observability.NewCostTracker(llmProvider, modelName, sess)
+		return engine.NewAgentEngine(tracked, registry, false, false)
+	}
 
 	// workDir 同时用于：工具沙箱（上面注册 tools 时）与各频道 session 的 WorkDir
-	bot := slackbot.NewSlackBot(eng, workDir)
+	bot := slackbot.NewSlackBot(factory, workDir)
 
 	// ch16: 注册高危操作审批 middleware。命中黑名单（如 bash rm -r / sudo / 覆盖 .go）的工具调用
 	// 会被挂起，把审批请求推回触发它的 Slack 频道（session.ID == channelID），

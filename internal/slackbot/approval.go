@@ -74,10 +74,13 @@ func IsDangerousCommand(toolName string, args string) bool {
 	}
 	if toolName == "bash" {
 		dangerousPatterns := []string{
-			`rm\s+-r`,  // 递归删除
-			`sudo\s+`,  // 提权
-			`drop\s+`,  // SQL DROP
-			`>.*\.go`,  // 重定向覆盖 .go 文件（防 LLM 绝望时清空源码）
+			`rm\s+-r`,      // 递归删除
+			`sudo\s+`,      // 提权
+			`drop\s+`,      // SQL DROP
+			`>.*\.go`,      // 重定向覆盖 .go 文件（防 LLM 绝望时清空源码）
+			`nginx\s+-s`,   // ch22: 重启/停止 nginx（会中断线上服务）
+			`systemctl\s+`, // ch22: 系统服务管理（start/stop/restart）
+			`kill\s+`,      // ch22: 杀进程
 		}
 		for _, p := range dangerousPatterns {
 			if matched, _ := regexp.MatchString(p, args); matched {
