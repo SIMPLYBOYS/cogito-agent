@@ -43,6 +43,9 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter Reporter) error {
 	log.Printf("[Engine] 唤醒会话 [%s]，工作区: %s\n", session.ID, session.WorkDir)
 
+	// ch16: 把 session 注入 ctx，让工具 middleware 能取到触发它的会话（如审批要发回的 Slack 频道）
+	ctx = WithSession(ctx, session)
+
 	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
 	systemMsg := composer.Build()
 

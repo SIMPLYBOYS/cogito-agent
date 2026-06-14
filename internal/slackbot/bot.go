@@ -100,6 +100,10 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		case *slackevents.AppMentionEvent:
 			// 频道里 @机器人
 			prompt := strings.TrimSpace(strings.ReplaceAll(ev.Text, fmt.Sprintf("<@%s>", b.botUserID), ""))
+			// ch16: 先看是不是审批口令；命中则唤醒对应审批，不当作新任务
+			if tryResolveApproval(prompt) {
+				break
+			}
 			log.Printf("[Slack] 收到频道 %s 提及: %s\n", ev.Channel, prompt)
 			go b.handleAgentRun(ev.Channel, prompt)
 
@@ -109,6 +113,9 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			if ev.ChannelType == "im" {
+				if tryResolveApproval(strings.TrimSpace(ev.Text)) {
+					break
+				}
 				log.Printf("[Slack] 收到私聊 %s 消息: %s\n", ev.Channel, ev.Text)
 				go b.handleAgentRun(ev.Channel, ev.Text)
 			}
@@ -132,6 +139,26 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	if err := b.engine.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 运行崩溃: %v", err))
 	}
+}
+
+// SendMessage 向指定频道发送一条消息（供 ch16 审批 middleware 推送审批请求用）。
+func (b *SlackBot) SendMessage(channelID, text string) {
+	if _, _, err := b.client.PostMessage(channelID, slackapi.MsgOptionText(text, false)); err != nil {
+		log.Printf("[Slack] 消息发送失败: %v\n", err)
+	}
+}
+
+// tryResolveApproval 拦截 approve/reject 口令，命中则唤醒对应审批并返回 true。
+func tryResolveApproval(text string) bool {
+	if rest, ok := strings.CutPrefix(text, "approve "); ok {
+		GlobalApprovalMgr.ResolveApproval(strings.TrimSpace(rest), true, "人类管理员已批准操作")
+		return true
+	}
+	if rest, ok := strings.CutPrefix(text, "reject "); ok {
+		GlobalApprovalMgr.ResolveApproval(strings.TrimSpace(rest), false, "人类管理员认为风险过高，已拒绝该操作")
+		return true
+	}
+	return false
 }
 
 type SlackReporter struct {

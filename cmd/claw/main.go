@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/yourname/go-tiny-claw/internal/engine"
 	"github.com/yourname/go-tiny-claw/internal/provider"
+	"github.com/yourname/go-tiny-claw/internal/schema"
 	"github.com/yourname/go-tiny-claw/internal/slackbot"
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
@@ -39,6 +41,29 @@ func main() {
 
 	// workDir 同时用于：工具沙箱（上面注册 tools 时）与各频道 session 的 WorkDir
 	bot := slackbot.NewSlackBot(eng, workDir)
+
+	// ch16: 注册高危操作审批 middleware。命中黑名单（如 bash rm -r / sudo / 覆盖 .go）的工具调用
+	// 会被挂起，把审批请求推回触发它的 Slack 频道（session.ID == channelID），
+	// 等管理员回 "approve <taskID>" / "reject <taskID>" 才放行。
+	registry.Use(func(ctx context.Context, call schema.ToolCall) (bool, string) {
+		args := string(call.Arguments)
+		if !slackbot.IsDangerousCommand(call.Name, args) {
+			return true, ""
+		}
+		channelID := ""
+		if sess := engine.SessionFromContext(ctx); sess != nil {
+			channelID = sess.ID
+		}
+		allowed, reason := slackbot.GlobalApprovalMgr.WaitForApproval(call.ID, call.Name, args, func(text string) {
+			if channelID != "" {
+				bot.SendMessage(channelID, text)
+			}
+		})
+		if !allowed {
+			return false, reason
+		}
+		return true, ""
+	})
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 
