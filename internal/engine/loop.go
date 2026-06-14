@@ -167,3 +167,95 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 	return nil
 }
+
+// RunSub 是为 SubagentTool 拉起的一次性、受限的 ReAct 循环（ch17）：
+//   - 不依赖外部 Session，对话历史是局部变量，跑完即丢（上下文隔离的关键）；
+//   - 工具集仅为 caller 传入的 readOnlyRegistry（能力沙箱）；
+//   - 强制关闭慢思考，直接行动；有 maxSubTurns 硬上限防卡死；
+//   - 返回值 string 即"探索报告"，作为 spawn_subagent 工具的输出回给主 agent。
+//
+// 满足 tools.AgentRunner 接口；reporter 用 any 规避包依赖，内部断言回 Reporter。
+func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyRegistry tools.Registry, reporter any) (string, error) {
+	contextHistory := []schema.Message{
+		{
+			Role: schema.RoleSystem,
+			Content: `你是一个专门负责深度探索的探路者 (Explorer Subagent)。
+你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅日志，搜集足够的信息。
+
+【核心纪律】
+1. 你必须、且只能依靠内置工具（如 bash 的 find/grep，或 read_file）去寻找答案。绝对不允许凭空捏造或猜测！
+2. 如果你没有找到确切的答案，你必须继续使用工具深入搜索。
+3. 当且仅当你找到了确切的线索后，停止调用工具，直接输出一段纯文本作为你的终极汇报。主架构师会根据你的汇报来做下一步决策。`,
+		},
+		{Role: schema.RoleUser, Content: taskPrompt},
+	}
+
+	const maxSubTurns = 10
+	turnCount := 0
+
+	for {
+		turnCount++
+		if turnCount > maxSubTurns {
+			return "", fmt.Errorf("子智能体探索过于深入，超过 %d 轮被强制召回，请主 Agent 给它更明确的指令", maxSubTurns)
+		}
+
+		// 【驾驭底线】子智能体仅能使用传入的只读工具注册表（无 spawn_subagent → 无递归）
+		availableTools := readOnlyRegistry.GetAvailableTools()
+		compactedContext := e.compactor.Compact(contextHistory)
+
+		// 子任务要求急速响应，强制跳过慢思考，直接行动
+		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
+		if err != nil {
+			return "", fmt.Errorf("子智能体推理失败: %w", err)
+		}
+
+		contextHistory = append(contextHistory, *actionResp)
+
+		// 退出条件：不再调用工具 → 它已写好报告，直接把 Content 当返回值给主 agent
+		if len(actionResp.ToolCalls) == 0 {
+			return actionResp.Content, nil
+		}
+
+		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
+		var wg sync.WaitGroup
+
+		for i, toolCall := range actionResp.ToolCalls {
+			wg.Add(1)
+			go func(idx int, call schema.ToolCall) {
+				defer wg.Done()
+
+				var r Reporter
+				if reporter != nil {
+					r, _ = reporter.(Reporter)
+				}
+				if r != nil {
+					r.OnToolCall(ctx, fmt.Sprintf("[Subagent] %s", call.Name), string(call.Arguments))
+				}
+
+				result := readOnlyRegistry.Execute(ctx, call)
+
+				finalOutput := result.Output
+				if result.IsError {
+					finalOutput = e.recovery.AnalyzeAndInject(call.Name, result.Output)
+				}
+
+				if r != nil {
+					display := finalOutput
+					if len(display) > 200 {
+						display = display[:200] + "... (已截断)"
+					}
+					r.OnToolResult(ctx, fmt.Sprintf("[Subagent] %s", call.Name), display, result.IsError)
+				}
+
+				observationMsgs[idx] = schema.Message{
+					Role:       schema.RoleUser,
+					Content:    finalOutput,
+					ToolCallID: call.ID,
+				}
+			}(i, toolCall)
+		}
+
+		wg.Wait()
+		contextHistory = append(contextHistory, observationMsgs...)
+	}
+}
