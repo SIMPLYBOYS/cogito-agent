@@ -23,6 +23,7 @@ type AgentEngine struct {
 	PlanMode       bool
 	compactor      *ctxpkg.Compactor
 	recovery       *ctxpkg.RecoveryManager // ch14: 工具错误自愈（注入救援指南）
+	injector       *ReminderInjector       // ch15: 死循环探测与强提醒注入
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
@@ -35,6 +36,7 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		// 生产环境仍建议按 model context window 自动计算或改用 token 级估算。
 		compactor: ctxpkg.NewCompactor(20000, 6),
 		recovery:  ctxpkg.NewRecoveryManager(),
+		injector:  NewReminderInjector(),
 	}
 }
 
@@ -103,6 +105,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
 		var wg sync.WaitGroup
 
+		// ch15: 收集本轮第一个工具的调用与原始结果，供 ReminderInjector 做死循环指纹分析
+		var lastToolCall schema.ToolCall
+		var lastToolResult schema.ToolResult
+
 		for i, toolCall := range actionResp.ToolCalls {
 			wg.Add(1)
 
@@ -114,6 +120,11 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				}
 
 				result := e.registry.Execute(ctx, call)
+
+				if idx == 0 {
+					lastToolCall = call
+					lastToolResult = result
+				}
 
 				// ch14【核心拦截与注入】出错时由 RecoveryManager 诊断并注入"救援指南"，
 				// reporter 与 session.history 两处都用注入后的版本，保证人/模型/历史三者一致。
@@ -142,6 +153,13 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		// 工具结果作为 user 消息进 session，保证下一轮 role 必然 user→assistant 交替
 		session.Append(observationMsgs...)
+
+		// ch15【死循环探测】：本轮工具若与历史同参数连续失败达阈值，注入强提醒。
+		// 该提醒是普通 user 文本，会紧跟在 tool_results 之后——claude.go 会把它并入
+		// 同一条 user 消息（tool_result 块 + 文本块），避免连续两条 user 违反交替。
+		if reminderMsg := e.injector.CheckAndInject(lastToolCall, lastToolResult); reminderMsg != nil {
+			session.Append(*reminderMsg)
+		}
 	}
 
 	return nil
