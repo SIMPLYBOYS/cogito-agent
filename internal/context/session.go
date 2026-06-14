@@ -18,6 +18,11 @@ type Session struct {
 
 	history []schema.Message
 	mu      sync.RWMutex
+
+	// ch18: 该 Session 累计消耗的资源（由外部 CostTracker 通过 RecordUsage 累加）
+	TotalPromptTokens     int
+	TotalCompletionTokens int
+	TotalCostUSD          float64
 }
 
 func NewSession(id string, workDir string) *Session {
@@ -76,6 +81,15 @@ type SessionManager struct {
 // GlobalSessionMgr 是包级全局单例，方便各 IM adapter（Slack 等）共享同一 session 池。
 var GlobalSessionMgr = &SessionManager{
 	sessions: make(map[string]*Session),
+}
+
+// RecordUsage 供外部 CostTracker 调用，累加本 Session 的 Token 与费用账单。
+func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.TotalPromptTokens += prompt
+	s.TotalCompletionTokens += completion
+	s.TotalCostUSD += cost
 }
 
 func (sm *SessionManager) GetOrCreate(id string, workDir string) *Session {

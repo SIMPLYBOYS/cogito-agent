@@ -107,6 +107,14 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		}
 	}
 
+	// ch18: 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 计费
+	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
+		resultMsg.Usage = &schema.Usage{
+			PromptTokens:     int(resp.Usage.InputTokens),
+			CompletionTokens: int(resp.Usage.OutputTokens),
+		}
+	}
+
 	return resultMsg, nil
 }
 
