@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/yourname/go-tiny-claw/internal/observability"
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
@@ -61,6 +62,12 @@ func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
 }
 
 func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
+	// ch19【埋点 5】开启工具执行 Span（无论成败，defer 确保结束）
+	ctx, span := observability.StartSpan(ctx, "Tool.Execute")
+	span.AddAttribute("tool_name", call.Name)
+	span.AddAttribute("arguments", string(call.Arguments))
+	defer span.EndSpan()
+
 	tool, exists := r.tools[call.Name]
 	if !exists {
 		return schema.ToolResult{
@@ -75,6 +82,8 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		allowed, reason := mw(ctx, call)
 		if !allowed {
 			log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 拦截: %s\n", call.Name, reason)
+			span.AddAttribute("intercepted", true)
+			span.AddAttribute("reject_reason", reason)
 			return schema.ToolResult{
 				ToolCallID: call.ID,
 				Output:     fmt.Sprintf("执行被系统拦截。原因: %s", reason),
@@ -92,9 +101,19 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
+	// 只截前 100 字符放进 Trace，防止 trace 文件膨胀
+	span.AddAttribute("output_preview", truncate(output, 100))
+
 	return schema.ToolResult{
 		ToolCallID: call.ID,
 		Output:     output,
 		IsError:    false,
 	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) > max {
+		return s[:max] + "..."
+	}
+	return s
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
+	"github.com/yourname/go-tiny-claw/internal/observability"
 	"github.com/yourname/go-tiny-claw/internal/provider"
 	"github.com/yourname/go-tiny-claw/internal/schema"
 	"github.com/yourname/go-tiny-claw/internal/tools"
@@ -46,10 +47,26 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	// ch16: 把 session 注入 ctx，让工具 middleware 能取到触发它的会话（如审批要发回的 Slack 频道）
 	ctx = WithSession(ctx, session)
 
+	// ch19【埋点 1】Root Span：记录整个任务生命周期，退出时（无论成败）导出 trace 到 .claw/traces/
+	ctx, rootSpan := observability.StartSpan(ctx, "Agent.Run")
+	rootSpan.AddAttribute("SessionID", session.ID)
+	rootSpan.AddAttribute("WorkDir", session.WorkDir)
+	defer func() {
+		rootSpan.EndSpan()
+		_ = observability.ExportTraceToFile(rootSpan, session.WorkDir, session.ID)
+		log.Printf("📊 [Tracing] 本次任务的执行回放链路已保存至工作区的 .claw/traces 目录下\n")
+	}()
+
 	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
 	systemMsg := composer.Build()
 
+	turnCount := 0
 	for {
+		turnCount++
+		// ch19【埋点 2】Turn Span（defer 确保 break/return 也会结束并计入树）
+		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
+		defer turnSpan.EndSpan()
+
 		availableTools := e.registry.GetAvailableTools()
 		workingMemory := session.GetWorkingMemory(20)
 
@@ -60,6 +77,9 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// 【核心防线】发 LLM 前做字符级压缩；只动发给 LLM 的副本，不损毁 session.history。
 		compactedContext := e.compactor.Compact(contextHistory)
 
+		// ch19: 记录发给模型的实际上下文大小，有助于排查幻觉
+		turnSpan.AddAttribute("context_message_count", len(compactedContext))
+
 		// 本轮 thinking 内容暂存（不单独进 session，最后合并进 action 消息）
 		var currentTurnThinkingContent string
 
@@ -68,10 +88,13 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// EnableThinking=false；ch13 的合并逻辑也确保即便开启也不会产生连续两条 assistant。
 		if e.EnableThinking {
 			if reporter != nil {
-				reporter.OnThinking(ctx)
+				reporter.OnThinking(turnCtx)
 			}
 
-			thinkResp, err := e.provider.Generate(ctx, compactedContext, nil)
+			// ch19【埋点 3】记录 Thinking 调用
+			thinkCtx, thinkSpan := observability.StartSpan(turnCtx, "LLM.Thinking")
+			thinkResp, err := e.provider.Generate(thinkCtx, compactedContext, nil)
+			thinkSpan.EndSpan()
 			if err != nil {
 				return fmt.Errorf("Thinking 阶段失败: %w", err)
 			}
@@ -83,7 +106,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		}
 
 		// Phase 2: Action
-		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
+		// ch19【埋点 4】记录 Action 调用
+		actCtx, actSpan := observability.StartSpan(turnCtx, "LLM.Action")
+		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
+		actSpan.EndSpan()
 		if err != nil {
 			return fmt.Errorf("Action 阶段失败: %w", err)
 		}
@@ -122,7 +148,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 					reporter.OnToolCall(ctx, call.Name, string(call.Arguments))
 				}
 
-				result := e.registry.Execute(ctx, call)
+				// ch19: 传 turnCtx，使并发工具的 Tool.Execute span 平行挂在当前 Turn 节点下
+				result := e.registry.Execute(turnCtx, call)
 
 				if idx == 0 {
 					lastToolCall = call
