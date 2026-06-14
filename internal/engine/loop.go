@@ -35,7 +35,7 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		PlanMode:       planMode,
 		// ch13: 阈值从 ch12 演示用的 3000 提到 20000（≈6000 中文字），更贴近正常使用；
 		// 生产环境仍建议按 model context window 自动计算或改用 token 级估算。
-		compactor: ctxpkg.NewCompactor(20000, 6),
+		compactor: ctxpkg.NewCompactor(200000, 6),
 		recovery:  ctxpkg.NewRecoveryManager(),
 		injector:  NewReminderInjector(),
 	}
@@ -69,6 +69,17 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		availableTools := e.registry.GetAvailableTools()
 		workingMemory := session.GetWorkingMemory(20)
+
+		// ch21: 滑动窗口截断后，首条可能变成 Assistant（违反 Anthropic「首条须为 user」/严格交替）。
+		// 在头部强行插入一条占位 User 消息稳住协议。（与 GetWorkingMemory 的孤儿 tool_result
+		// 剥离互补：那个处理"首条是无主 tool_result"，这个处理"首条是 assistant"。）
+		if len(workingMemory) > 0 && workingMemory[0].Role != schema.RoleUser {
+			dummyUser := schema.Message{
+				Role:    schema.RoleUser,
+				Content: "[系统占位符] 这是为了保持上下文连贯性而注入的断点标记。请继续执行你刚才的任务。",
+			}
+			workingMemory = append([]schema.Message{dummyUser}, workingMemory...)
+		}
 
 		var contextHistory []schema.Message
 		contextHistory = append(contextHistory, systemMsg)
