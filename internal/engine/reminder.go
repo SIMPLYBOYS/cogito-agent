@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // ReminderInjector 是死循環探測器：對 (工具名 + 參數) 做指紋，統計同一指紋的連續失敗次數，

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 func mkCall(name, args string) schema.ToolCall {

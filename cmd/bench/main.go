@@ -9,7 +9,7 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
-	"github.com/yourname/go-tiny-claw/internal/eval"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/eval"
 )
 
 func main() {

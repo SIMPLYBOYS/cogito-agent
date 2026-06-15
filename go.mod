@@ -1,4 +1,4 @@
-module github.com/yourname/go-tiny-claw
+module github.com/SIMPLYBOYS/go-tiny-claw
 
 go 1.25.0
 

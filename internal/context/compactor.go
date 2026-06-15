@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // Compactor 是字符級的上下文壓縮防線：在每次發 LLM 前，對"要發出去的窗口"按

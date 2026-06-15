@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 type EditFileTool struct {

@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
-	"github.com/yourname/go-tiny-claw/internal/engine"
-	"github.com/yourname/go-tiny-claw/internal/provider"
-	"github.com/yourname/go-tiny-claw/internal/schema"
-	"github.com/yourname/go-tiny-claw/internal/tools"
+	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/provider"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
 )
 
 func main() {

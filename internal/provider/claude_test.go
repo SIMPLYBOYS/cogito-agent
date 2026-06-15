@@ -3,7 +3,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // 驗證 Anthropic 的 user/assistant 嚴格交替不變式：一個完整 ReAct 回合 + 併發多工具結果

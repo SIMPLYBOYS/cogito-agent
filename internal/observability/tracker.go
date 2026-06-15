@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
-	"github.com/yourname/go-tiny-claw/internal/provider"
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/provider"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // PricingModel 是各模型每百萬 Token 的美元單價（輸入/輸出）。

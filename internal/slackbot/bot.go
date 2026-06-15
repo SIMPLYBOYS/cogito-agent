@@ -16,9 +16,9 @@ import (
 
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
-	ctxpkg "github.com/yourname/go-tiny-claw/internal/context"
-	"github.com/yourname/go-tiny-claw/internal/engine"
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // EngineFactory 為每個會話動態組裝一個引擎。用它讓每個頻道掛上"自己專屬的 CostTracker"，

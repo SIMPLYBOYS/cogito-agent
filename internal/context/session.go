@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourname/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 // Session 把"對話歷史 + 工作目錄"提升為一級實體。history 私有 + RWMutex 保護，
