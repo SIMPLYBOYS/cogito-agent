@@ -1,6 +1,6 @@
-// cmd/bench 是 ch20 的自动化评测入口：把 ch05-ch19 累积的全部能力当黑盒，用
-// SetupScript→TaskPrompt→ValidateScript 三段式定义测试，以 bash exit code 判对错，
-// 跑完输出通过率 + 总花费。与 cmd/claw 等入口并存。
+// cmd/bench 是 ch20 的自動化評測入口：把 ch05-ch19 累積的全部能力當黑盒，用
+// SetupScript→TaskPrompt→ValidateScript 三段式定義測試，以 bash exit code 判對錯，
+// 跑完輸出通過率 + 總花費。與 cmd/claw 等入口並存。
 package main
 
 import (
@@ -15,29 +15,29 @@ import (
 func main() {
 	_ = godotenv.Load()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("请先在 .env 或环境变量中设置 ANTHROPIC_API_KEY 进行跑分测试")
+		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY 進行跑分測試")
 	}
 
 	testcases := []eval.TestCase{
 		{
 			ID:             "test_001_edit",
-			Name:           "测试模糊替换工具的准确性",
+			Name:           "測試模糊替換工具的準確性",
 			SetupScript:    `echo '{"name": "tiny-claw", "version": "v1.0.0"}' > config.json`,
-			TaskPrompt:     `当前目录下有一个 config.json。请你使用 edit_file 工具，将其中的 version 从 v1.0.0 改为 v2.0.0。不要做其他多余操作。`,
+			TaskPrompt:     `當前目錄下有一個 config.json。請你使用 edit_file 工具，將其中的 version 從 v1.0.0 改為 v2.0.0。不要做其他多餘操作。`,
 			ValidateScript: `grep '"version": "v2.0.0"' config.json`,
 		},
 		{
 			ID:   "test_002_code_gen",
-			Name: "测试代码阅读与创建新文件的综合能力",
-			// 用 printf 而非 echo：macOS 的 bash echo 默认不解释 \n，会写出字面量导致 math.go 损坏
+			Name: "測試代碼閱讀與創建新文件的綜合能力",
+			// 用 printf 而非 echo：macOS 的 bash echo 默認不解釋 \n，會寫出字面量導致 math.go 損壞
 			SetupScript:    `printf 'package math\n\nfunc Multiply(a, b int) int {\n\treturn a * b\n}\n' > math.go`,
-			TaskPrompt:     `当前目录下有一个 math.go。请你仔细阅读它，然后在同级目录下，帮我写一个规范的单元测试文件 math_test.go，用来测试 Multiply 函数。请务必包含正常的测试用例。`,
+			TaskPrompt:     `當前目錄下有一個 math.go。請你仔細閱讀它，然後在同級目錄下，幫我寫一個規範的單元測試文件 math_test.go，用來測試 Multiply 函數。請務必包含正常的測試用例。`,
 			ValidateScript: `go mod init bench && go test -v ./...`,
 		},
 	}
 
-	// 跑分是真实 API 调用、要花钱：默认选最便宜的 Claude 模型（对应书本"省点钱"的取舍）。
-	// 想测更强能力可换 claude-opus-4-8。
+	// 跑分是真實 API 調用、要花錢：默認選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
+	// 想測更強能力可換 claude-opus-4-8。
 	runner := eval.NewBenchmarkRunner("claude-haiku-4-5")
 	runner.RunSuite(context.Background(), testcases)
 }

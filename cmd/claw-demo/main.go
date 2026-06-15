@@ -1,6 +1,6 @@
-// cmd/claw-demo 是 ch11 的会话演示 harness：用两个并发 session 让 session 行为眼见为凭——
-// (1) 工作记忆滑动窗口会"遗忘"被挤出窗口的内容；(2) 跨 session 完全隔离。
-// 这不是实用入口（实用场景见 cmd/claw 的 Slack 多频道 session）。
+// cmd/claw-demo 是 ch11 的會話演示 harness：用兩個併發 session 讓 session 行為眼見為憑——
+// (1) 工作記憶滑動窗口會"遺忘"被擠出窗口的內容；(2) 跨 session 完全隔離。
+// 這不是實用入口（實用場景見 cmd/claw 的 Slack 多頻道 session）。
 package main
 
 import (
@@ -22,24 +22,24 @@ import (
 func main() {
 	_ = godotenv.Load()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("请先在 .env 或环境变量中设置 ANTHROPIC_API_KEY")
+		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
 	}
 
-	// 自包含：准备 Session A 的工作区与含密钥的 README，便于直接观察行为
+	// 自包含：準備 Session A 的工作區與含密鑰的 README，便於直接觀察行為
 	frontDir := "/tmp/project_front"
 	if err := os.MkdirAll(frontDir, 0755); err != nil {
-		log.Fatalf("创建演示目录失败: %v", err)
+		log.Fatalf("創建演示目錄失敗: %v", err)
 	}
-	readme := "# 项目说明\n\n部署密钥（仅本文件记录）：DEPLOY_KEY=sk-demo-9f3a-7c21\n"
+	readme := "# 項目說明\n\n部署密鑰（僅本文件記錄）：DEPLOY_KEY=sk-demo-9f3a-7c21\n"
 	if err := os.WriteFile(filepath.Join(frontDir, "README.md"), []byte(readme), 0644); err != nil {
-		log.Fatalf("写入演示 README 失败: %v", err)
+		log.Fatalf("寫入演示 README 失敗: %v", err)
 	}
 
 	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
 
 	registry := tools.NewRegistry()
-	// ch11 已知局限：tools 的 workDir 写死为 Session A 的目录，与 session.WorkDir 尚未对齐；
-	// Session B 用"不准调用工具"规避（per-session 工具沙箱留待后续章节）。
+	// ch11 已知侷限：tools 的 workDir 寫死為 Session A 的目錄，與 session.WorkDir 尚未對齊；
+	// Session B 用"不準調用工具"規避（per-session 工具沙箱留待後續章節）。
 	registry.Register(tools.NewReadFileTool(frontDir))
 
 	eng := engine.NewAgentEngine(llmProvider, registry, false, false)
@@ -47,37 +47,37 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// ===== 场景 1：Session A —— 滑动窗口遗忘 =====
+	// ===== 場景 1：Session A —— 滑動窗口遺忘 =====
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		sessionA := ctxpkg.GlobalSessionMgr.GetOrCreate("chat_front_001", frontDir)
 
-		log.Println("\n>>> 🙋 [Session A / Turn 1]: 帮我看看 README.md 里记录了什么密钥？")
-		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "帮我看看 README.md 里记录了什么密钥？"})
+		log.Println("\n>>> 🙋 [Session A / Turn 1]: 幫我看看 README.md 裡記錄了什麼密鑰？")
+		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "幫我看看 README.md 裡記錄了什麼密鑰？"})
 		_ = eng.Run(context.Background(), sessionA, reporter)
 
-		// 人为注水 6 对闲聊，把 Turn 1 的密钥挤出 6 条滑动窗口
+		// 人為注水 6 對閒聊，把 Turn 1 的密鑰擠出 6 條滑動窗口
 		for i := 0; i < 6; i++ {
-			sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "这只是一句闲聊占位符。"})
-			sessionA.Append(schema.Message{Role: schema.RoleAssistant, Content: "好的，收到闲聊。"})
+			sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "這只是一句閒聊佔位符。"})
+			sessionA.Append(schema.Message{Role: schema.RoleAssistant, Content: "好的，收到閒聊。"})
 		}
 
-		log.Println("\n>>> 🙋 [Session A / Turn 2]: 刚才第一轮查到的密钥是什么？（不准调用工具）")
-		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "请直接告诉我，刚才第一轮你查到的那个密钥是什么？不准调用工具！"})
+		log.Println("\n>>> 🙋 [Session A / Turn 2]: 剛才第一輪查到的密鑰是什麼？（不準調用工具）")
+		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "請直接告訴我，剛才第一輪你查到的那個密鑰是什麼？不準調用工具！"})
 		_ = eng.Run(context.Background(), sessionA, reporter)
 	}()
 
-	// ===== 场景 2：Session B —— 跨会话隔离 =====
+	// ===== 場景 2：Session B —— 跨會話隔離 =====
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		time.Sleep(1 * time.Second) // 让 Session A 先跑，避免终端输出交错
+		time.Sleep(1 * time.Second) // 讓 Session A 先跑，避免終端輸出交錯
 
 		sessionB := ctxpkg.GlobalSessionMgr.GetOrCreate("chat_back_002", "/tmp/project_back")
 
-		log.Println("\n>>> 🙋 [Session B]: 别人查到了一个密钥，你这里能看到吗？（不准调用工具）")
-		sessionB.Append(schema.Message{Role: schema.RoleUser, Content: "别人查到了一个密钥，你这里能看到吗？不准调用工具！"})
+		log.Println("\n>>> 🙋 [Session B]: 別人查到了一個密鑰，你這裡能看到嗎？（不準調用工具）")
+		sessionB.Append(schema.Message{Role: schema.RoleUser, Content: "別人查到了一個密鑰，你這裡能看到嗎？不準調用工具！"})
 		_ = eng.Run(context.Background(), sessionB, reporter)
 	}()
 

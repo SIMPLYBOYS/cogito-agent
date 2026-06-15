@@ -16,13 +16,13 @@ type ClaudeProvider struct {
 	model  string
 }
 
-// NewClaudeProvider 走 Anthropic 官方端点（https://api.anthropic.com）。
-// 不覆盖 baseURL，让 SDK 使用默认地址；凭证读取 ANTHROPIC_API_KEY。
-// model 需传真实 Claude 模型 id，例如 "claude-opus-4-8"。
+// NewClaudeProvider 走 Anthropic 官方端點（https://api.anthropic.com）。
+// 不覆蓋 baseURL，讓 SDK 使用默認地址；憑證讀取 ANTHROPIC_API_KEY。
+// model 需傳真實 Claude 模型 id，例如 "claude-opus-4-8"。
 func NewClaudeProvider(model string) *ClaudeProvider {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		panic("请设置 ANTHROPIC_API_KEY 环境变量")
+		panic("請設置 ANTHROPIC_API_KEY 環境變量")
 	}
 	return &ClaudeProvider{
 		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
@@ -35,8 +35,8 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 
 	var anthropicTools []anthropic.ToolUnionParam
 	for _, toolDef := range availableTools {
-		// ToolInputSchemaParam 是结构体，需要通过 Properties 字段填充
-		// InputSchema 里的 "properties" 值取出来赋给它
+		// ToolInputSchemaParam 是結構體，需要通過 Properties 字段填充
+		// InputSchema 裡的 "properties" 值取出來賦給它
 		var properties map[string]any
 		var required []string
 
@@ -48,7 +48,7 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 			case []string:
 				required = r
 			case []interface{}:
-				// schema 来自 JSON 反序列化时，required 会是 []interface{}
+				// schema 來自 JSON 反序列化時，required 會是 []interface{}
 				for _, v := range r {
 					if s, ok := v.(string); ok {
 						required = append(required, s)
@@ -86,7 +86,7 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 
 	resp, err := p.client.Messages.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("Claude/Zhipu API 请求失败: %w", err)
+		return nil, fmt.Errorf("Claude/Zhipu API 請求失敗: %w", err)
 	}
 
 	resultMsg := &schema.Message{
@@ -107,7 +107,7 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		}
 	}
 
-	// ch18: 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 计费
+	// ch18: 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 計費
 	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
 		resultMsg.Usage = &schema.Usage{
 			PromptTokens:     int(resp.Usage.InputTokens),
@@ -118,11 +118,11 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	return resultMsg, nil
 }
 
-// buildAnthropicMessages 把统一的 schema.Message 历史转换为 Anthropic 的 MessageParam 序列，
-// 并抽出 system prompt。核心职责是维持 Anthropic 要求的 user/assistant 严格交替不变式：
-//   - 同一 assistant 回合触发的多个 tool_result 合并进同一条 user 消息；
-//   - 紧跟 tool_result 之后的普通 user 文本（如 ch15 死循环提醒）并入同一条 user 消息（文本块），
-//     避免「tool_result user + 文本 user」连续两条 user 被 Anthropic 拒绝。
+// buildAnthropicMessages 把統一的 schema.Message 歷史轉換為 Anthropic 的 MessageParam 序列，
+// 並抽出 system prompt。核心職責是維持 Anthropic 要求的 user/assistant 嚴格交替不變式：
+//   - 同一 assistant 回合觸發的多個 tool_result 合併進同一條 user 消息；
+//   - 緊跟 tool_result 之後的普通 user 文本（如 ch15 死循環提醒）併入同一條 user 消息（文本塊），
+//     避免「tool_result user + 文本 user」連續兩條 user 被 Anthropic 拒絕。
 func buildAnthropicMessages(msgs []schema.Message) ([]anthropic.MessageParam, string) {
 	var anthropicMsgs []anthropic.MessageParam
 	var systemPrompt string
@@ -173,7 +173,7 @@ func buildAnthropicMessages(msgs []schema.Message) ([]anthropic.MessageParam, st
 			}
 		}
 	}
-	// 循环结束后把残留的工具结果 flush 掉（最后一条消息正好是 tool_result 的情况）
+	// 循環結束後把殘留的工具結果 flush 掉（最後一條消息正好是 tool_result 的情況）
 	flushToolResults()
 
 	return anthropicMsgs, systemPrompt

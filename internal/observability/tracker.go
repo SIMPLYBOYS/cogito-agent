@@ -10,8 +10,8 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
-// PricingModel 是各模型每百万 Token 的美元单价（输入/输出）。
-// 数据来自 Anthropic 官方定价；切换模型时在此登记即可。
+// PricingModel 是各模型每百萬 Token 的美元單價（輸入/輸出）。
+// 數據來自 Anthropic 官方定價；切換模型時在此登記即可。
 var PricingModel = map[string]struct {
 	InputPrice  float64
 	OutputPrice float64
@@ -23,8 +23,8 @@ var PricingModel = map[string]struct {
 	"claude-haiku-4-5":  {InputPrice: 1.0, OutputPrice: 5.0},
 }
 
-// CostTracker 用 decorator 模式包裹一个 LLMProvider：它本身也实现 LLMProvider 接口，
-// 在转调真实 provider 前后计时、抽取 Token 消耗、计算费用并累加进 Session。引擎对此毫不知情。
+// CostTracker 用 decorator 模式包裹一個 LLMProvider：它本身也實現 LLMProvider 接口，
+// 在轉調真實 provider 前後計時、抽取 Token 消耗、計算費用並累加進 Session。引擎對此毫不知情。
 type CostTracker struct {
 	nextProvider provider.LLMProvider
 	modelName    string
@@ -47,7 +47,7 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 	latency := time.Since(startTime)
 
 	if err != nil {
-		log.Printf("[Tracker] ❌ API 调用失败，耗时: %v\n", latency)
+		log.Printf("[Tracker] ❌ API 調用失敗，耗時: %v\n", latency)
 		return respMsg, err
 	}
 
@@ -60,15 +60,15 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 			cost = (float64(promptTokens)*price.InputPrice + float64(completionTokens)*price.OutputPrice) / 1000000.0
 		}
 
-		log.Printf("[Tracker] 📊 API 调用完成 | 耗时: %v | 输入: %d tk | 输出: %d tk | 花费: $%.6f\n",
+		log.Printf("[Tracker] 📊 API 調用完成 | 耗時: %v | 輸入: %d tk | 輸出: %d tk | 花費: $%.6f\n",
 			latency, promptTokens, completionTokens, cost)
 
 		if t.session != nil {
 			t.session.RecordUsage(promptTokens, completionTokens, cost)
-			log.Printf("[Tracker] 💰 当前会话 (%s) 累计花费: $%.6f\n", t.session.ID, t.session.TotalCostUSD)
+			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.TotalCostUSD)
 		}
 	} else {
-		log.Printf("[Tracker] ⚠️ API 调用完成，但未返回 Usage 数据 | 耗时: %v\n", latency)
+		log.Printf("[Tracker] ⚠️ API 調用完成，但未返回 Usage 數據 | 耗時: %v\n", latency)
 	}
 
 	return respMsg, nil

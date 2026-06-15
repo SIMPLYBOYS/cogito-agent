@@ -5,47 +5,47 @@ import (
 	"strings"
 )
 
-// RecoveryManager 在工具执行失败时，按工具名 + 错误特征匹配，给原始报错拼接一段
-// 可执行的"救援指南"，把冰冷的错误字符串升级为"下一步该怎么做"的指示。纯规则、无状态。
+// RecoveryManager 在工具執行失敗時，按工具名 + 錯誤特徵匹配，給原始報錯拼接一段
+// 可執行的"救援指南"，把冰冷的錯誤字符串升級為"下一步該怎麼做"的指示。純規則、無狀態。
 type RecoveryManager struct{}
 
 func NewRecoveryManager() *RecoveryManager {
 	return &RecoveryManager{}
 }
 
-// AnalyzeAndInject 接收原始报错，匹配已知特征模式，返回增强后的报错信息。
-// 命中则在末尾追加 [系统救援指南]；未命中则原样返回。
+// AnalyzeAndInject 接收原始報錯，匹配已知特徵模式，返回增強後的報錯信息。
+// 命中則在末尾追加 [系統救援指南]；未命中則原樣返回。
 func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) string {
 	var hint string
 
-	// rawError 原样匹配我们自己工具里写的中文错误；lowerError 匹配 Go/OS 抛出的英文 POSIX 错误。
+	// rawError 原樣匹配我們自己工具裡寫的中文錯誤；lowerError 匹配 Go/OS 拋出的英文 POSIX 錯誤。
 	lowerError := strings.ToLower(rawError)
 
 	switch toolName {
 	case "edit_file":
-		// 匹配 ch07 fuzzyReplace 手写的固定报错
-		if strings.Contains(rawError, "在文件中未找到 old_text") || strings.Contains(rawError, "找不到该代码片段") {
-			hint = "你提供的 old_text 与文件当前内容不一致，或者缺少必要的缩进。请先使用 `read_file` 工具重新读取该文件，获取最新、准确的内容后，再重新发起编辑。"
-		} else if strings.Contains(rawError, "匹配到了多处") || strings.Contains(rawError, "提供更多上下文") {
-			hint = "你的 old_text 不够具体，命中了多个相同代码块。请在 old_text 中增加上下相邻的几行代码，以确保替换的唯一性。"
+		// 匹配 ch07 fuzzyReplace 手寫的固定報錯
+		if strings.Contains(rawError, "在文件中未找到 old_text") || strings.Contains(rawError, "找不到該代碼片段") {
+			hint = "你提供的 old_text 與文件當前內容不一致，或者缺少必要的縮進。請先使用 `read_file` 工具重新讀取該文件，獲取最新、準確的內容後，再重新發起編輯。"
+		} else if strings.Contains(rawError, "匹配到了多處") || strings.Contains(rawError, "提供更多上下文") {
+			hint = "你的 old_text 不夠具體，命中了多個相同代碼塊。請在 old_text 中增加上下相鄰的幾行代碼，以確保替換的唯一性。"
 		}
 
 	case "read_file", "write_file":
-		// 匹配 Go os 包抛出的 POSIX 标准错误
+		// 匹配 Go os 包拋出的 POSIX 標準錯誤
 		if strings.Contains(lowerError, "no such file or directory") {
-			hint = "路径似乎不正确。请不要凭空猜测，先使用 `bash` 执行 `ls -la` 或 `find . -name` 命令查找正确的目录结构和文件名。"
+			hint = "路徑似乎不正確。請不要憑空猜測，先使用 `bash` 執行 `ls -la` 或 `find . -name` 命令查找正確的目錄結構和文件名。"
 		} else if strings.Contains(lowerError, "permission denied") {
-			hint = "你没有权限操作该文件。请检查工作区限制，或者思考是否需要修改其他文件。"
+			hint = "你沒有權限操作該文件。請檢查工作區限制，或者思考是否需要修改其他文件。"
 		}
 
 	case "bash":
 		if strings.Contains(lowerError, "command not found") {
-			hint = "系统中未安装该命令。请先思考：是否有替代命令？或者你需要先编写脚本进行安装？"
-		} else if strings.Contains(rawError, "超时") || strings.Contains(rawError, "DeadlineExceeded") {
-			// 匹配 ch06 bash 工具手写的 30s context.WithTimeout 报错
-			hint = "该命令执行被超时强杀。如果它是一个常驻服务（如 server 或 watch），请将其转入后台执行（例如使用 `nohup ... &`），不要阻塞主线程。"
+			hint = "系統中未安裝該命令。請先思考：是否有替代命令？或者你需要先編寫腳本進行安裝？"
+		} else if strings.Contains(rawError, "超時") || strings.Contains(rawError, "DeadlineExceeded") {
+			// 匹配 ch06 bash 工具手寫的 30s context.WithTimeout 報錯
+			hint = "該命令執行被超時強殺。如果它是一個常駐服務（如 server 或 watch），請將其轉入後臺執行（例如使用 `nohup ... &`），不要阻塞主線程。"
 		} else if strings.Contains(lowerError, "syntax error") {
-			hint = "Bash 语法错误。请检查引号转义或特殊字符，确保命令在终端中可直接运行。"
+			hint = "Bash 語法錯誤。請檢查引號轉義或特殊字符，確保命令在終端中可直接運行。"
 		}
 	}
 
@@ -53,5 +53,5 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 		return rawError
 	}
 
-	return fmt.Sprintf("%s\n\n[系统救援指南]: %s", rawError, hint)
+	return fmt.Sprintf("%s\n\n[系統救援指南]: %s", rawError, hint)
 }

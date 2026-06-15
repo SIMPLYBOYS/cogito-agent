@@ -30,8 +30,8 @@ func (s *SkillLoader) LoadAll() string {
 	}
 
 	var skillsBuilder strings.Builder
-	skillsBuilder.WriteString("\n### 可用专业技能 (Agent Skills)\n")
-	skillsBuilder.WriteString("以下是你拥有的标准化外挂技能，请在符合 description 描述的场景下严格遵循其正文指令：\n\n")
+	skillsBuilder.WriteString("\n### 可用專業技能 (Agent Skills)\n")
+	skillsBuilder.WriteString("以下是你擁有的標準化外掛技能，請在符合 description 描述的場景下嚴格遵循其正文指令：\n\n")
 
 	err := filepath.WalkDir(skillBaseDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -42,9 +42,9 @@ func (s *SkillLoader) LoadAll() string {
 			if err == nil {
 				skill := parseSkillMD(string(content))
 
-				skillsBuilder.WriteString(fmt.Sprintf("#### 技能名称: %s\n", skill.Name))
-				skillsBuilder.WriteString(fmt.Sprintf("**触发条件**: %s\n\n", skill.Description))
-				skillsBuilder.WriteString("**执行指南**:\n")
+				skillsBuilder.WriteString(fmt.Sprintf("#### 技能名稱: %s\n", skill.Name))
+				skillsBuilder.WriteString(fmt.Sprintf("**觸發條件**: %s\n\n", skill.Description))
+				skillsBuilder.WriteString("**執行指南**:\n")
 				skillsBuilder.WriteString(skill.Body)
 				skillsBuilder.WriteString("\n\n---\n")
 			}

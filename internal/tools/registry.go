@@ -17,20 +17,20 @@ type BaseTool interface {
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 }
 
-// MiddlewareFunc 定义了工具中间件的签名：接收当前 ToolCall，返回是否允许执行
-// 以及被拦截时的原因。tools 包只暴露这个 hook 点，完全不感知具体业务（如 IM 平台审批）。
+// MiddlewareFunc 定義了工具中間件的簽名：接收當前 ToolCall，返回是否允許執行
+// 以及被攔截時的原因。tools 包只暴露這個 hook 點，完全不感知具體業務（如 IM 平臺審批）。
 type MiddlewareFunc func(ctx context.Context, call schema.ToolCall) (allowed bool, rejectReason string)
 
 type Registry interface {
 	Register(tool BaseTool)
-	Use(mw MiddlewareFunc) // ch16: 全局 middleware 挂载点
+	Use(mw MiddlewareFunc) // ch16: 全局 middleware 掛載點
 	GetAvailableTools() []schema.ToolDefinition
 	Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
 }
 
 type registryImpl struct {
 	tools       map[string]BaseTool
-	middlewares []MiddlewareFunc // ch16: 中间件链，Execute 前依次执行
+	middlewares []MiddlewareFunc // ch16: 中間件鏈，Execute 前依次執行
 }
 
 func NewRegistry() Registry {
@@ -47,10 +47,10 @@ func (r *registryImpl) Use(mw MiddlewareFunc) {
 func (r *registryImpl) Register(tool BaseTool) {
 	name := tool.Name()
 	if _, exists := r.tools[name]; exists {
-		log.Printf("[Warning] 工具 '%s' 已经被注册，将被覆盖。\n", name)
+		log.Printf("[Warning] 工具 '%s' 已經被註冊，將被覆蓋。\n", name)
 	}
 	r.tools[name] = tool
-	log.Printf("[Registry] 成功挂载工具: %s\n", name)
+	log.Printf("[Registry] 成功掛載工具: %s\n", name)
 }
 
 func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
@@ -62,7 +62,7 @@ func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
 }
 
 func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
-	// ch19【埋点 5】开启工具执行 Span（无论成败，defer 确保结束）
+	// ch19【埋點 5】開啟工具執行 Span（無論成敗，defer 確保結束）
 	ctx, span := observability.StartSpan(ctx, "Tool.Execute")
 	span.AddAttribute("tool_name", call.Name)
 	span.AddAttribute("arguments", string(call.Arguments))
@@ -72,22 +72,22 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 	if !exists {
 		return schema.ToolResult{
 			ToolCallID: call.ID,
-			Output:     fmt.Sprintf("Error: 系统中不存在名为 '%s' 的工具。", call.Name),
+			Output:     fmt.Sprintf("Error: 系統中不存在名為 '%s' 的工具。", call.Name),
 			IsError:    true,
 		}
 	}
 
-	// ch16【核心防御】执行底层逻辑前，依次运行所有 middleware；任一拒绝则短路。
+	// ch16【核心防禦】執行底層邏輯前，依次運行所有 middleware；任一拒絕則短路。
 	for _, mw := range r.middlewares {
 		allowed, reason := mw(ctx, call)
 		if !allowed {
-			log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 拦截: %s\n", call.Name, reason)
+			log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 攔截: %s\n", call.Name, reason)
 			span.AddAttribute("intercepted", true)
 			span.AddAttribute("reject_reason", reason)
 			return schema.ToolResult{
 				ToolCallID: call.ID,
-				Output:     fmt.Sprintf("执行被系统拦截。原因: %s", reason),
-				IsError:    true, // 必须返回 Error，强制大模型阅读拒绝理由
+				Output:     fmt.Sprintf("執行被系統攔截。原因: %s", reason),
+				IsError:    true, // 必須返回 Error，強制大模型閱讀拒絕理由
 			}
 		}
 	}
@@ -101,7 +101,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	// 只截前 100 字符放进 Trace，防止 trace 文件膨胀
+	// 只截前 100 字符放進 Trace，防止 trace 文件膨脹
 	span.AddAttribute("output_preview", truncate(output, 100))
 
 	return schema.ToolResult{

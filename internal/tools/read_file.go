@@ -26,13 +26,13 @@ func (t *ReadFileTool) Name() string {
 func (t *ReadFileTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "读取指定路径的文件内容。请提供相对工作区的路径。",
+		Description: "讀取指定路徑的文件內容。請提供相對工作區的路徑。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "要读取的文件路径，如 cmd/claw/main.go",
+					"description": "要讀取的文件路徑，如 cmd/claw/main.go",
 				},
 			},
 			"required": []string{"path"},
@@ -47,25 +47,25 @@ type readFileArgs struct {
 func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var input readFileArgs
 	if err := json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("参数解析失败: %w", err)
+		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
 	fullPath := filepath.Join(t.workDir, input.Path)
 
 	file, err := os.Open(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("打开文件失败: %w", err)
+		return "", fmt.Errorf("打開文件失敗: %w", err)
 	}
 	defer file.Close()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		return "", fmt.Errorf("读取文件内容失败: %w", err)
+		return "", fmt.Errorf("讀取文件內容失敗: %w", err)
 	}
 
 	const maxLen = 8000
 	if len(content) > maxLen {
-		truncatedMsg := fmt.Sprintf("%s\n\n...[由于内容过长，已被系统截断至前 %d 字节]...", string(content[:maxLen]), maxLen)
+		truncatedMsg := fmt.Sprintf("%s\n\n...[由於內容過長，已被系統截斷至前 %d 字節]...", string(content[:maxLen]), maxLen)
 		return truncatedMsg, nil
 	}
 

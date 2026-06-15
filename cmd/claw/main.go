@@ -17,15 +17,15 @@ import (
 )
 
 func main() {
-	// 读取当前目录的 .env（文件不存在也不报错；不会覆盖已存在的环境变量）
+	// 讀取當前目錄的 .env（文件不存在也不報錯；不會覆蓋已存在的環境變量）
 	_ = godotenv.Load()
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("请先在 .env 或环境变量中设置 ANTHROPIC_API_KEY")
+		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
 	}
 
 	workDir, _ := os.Getwd()
-	workDir += "/workspace" // ch10: 与 CLI 入口一致，agent 操作范围隔离到 ./workspace；composer 也从此读取 AGENTS.md / skills
+	workDir += "/workspace" // ch10: 與 CLI 入口一致，agent 操作範圍隔離到 ./workspace；composer 也從此讀取 AGENTS.md / skills
 
 	modelName := "claude-opus-4-8"
 	llmProvider := provider.NewClaudeProvider(modelName)
@@ -36,21 +36,21 @@ func main() {
 	registry.Register(tools.NewBashTool(workDir))
 	registry.Register(tools.NewEditFileTool(workDir))
 
-	// ch22: engine factory —— 每个会话现造一个挂了"该会话专属 CostTracker"的引擎，实现
-	// per-chat 成本记账（registry/middleware 无状态共享，tracker/session 按频道隔离）。
-	// EnableThinking=false（手动两阶段思考对 Claude 会退化成 <invoke> 文本）；
-	// Slack 对话式入口默认不开 Plan Mode（否则每条消息都强制 PLAN.md/TODO.md 流程）。
+	// ch22: engine factory —— 每個會話現造一個掛了"該會話專屬 CostTracker"的引擎，實現
+	// per-chat 成本記賬（registry/middleware 無狀態共享，tracker/session 按頻道隔離）。
+	// EnableThinking=false（手動兩階段思考對 Claude 會退化成 <invoke> 文本）；
+	// Slack 對話式入口默認不開 Plan Mode（否則每條消息都強制 PLAN.md/TODO.md 流程）。
 	factory := func(sess *ctxpkg.Session) *engine.AgentEngine {
 		tracked := observability.NewCostTracker(llmProvider, modelName, sess)
 		return engine.NewAgentEngine(tracked, registry, false, false)
 	}
 
-	// workDir 同时用于：工具沙箱（上面注册 tools 时）与各频道 session 的 WorkDir
+	// workDir 同時用於：工具沙箱（上面註冊 tools 時）與各頻道 session 的 WorkDir
 	bot := slackbot.NewSlackBot(factory, workDir)
 
-	// ch16: 注册高危操作审批 middleware。命中黑名单（如 bash rm -r / sudo / 覆盖 .go）的工具调用
-	// 会被挂起，把审批请求推回触发它的 Slack 频道（session.ID == channelID），
-	// 等管理员回 "approve <taskID>" / "reject <taskID>" 才放行。
+	// ch16: 註冊高危操作審批 middleware。命中黑名單（如 bash rm -r / sudo / 覆蓋 .go）的工具調用
+	// 會被掛起，把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），
+	// 等管理員回 "approve <taskID>" / "reject <taskID>" 才放行。
 	registry.Use(func(ctx context.Context, call schema.ToolCall) (bool, string) {
 		args := string(call.Arguments)
 		if !slackbot.IsDangerousCommand(call.Name, args) {
@@ -74,10 +74,10 @@ func main() {
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 
 	port := ":48080"
-	log.Printf("🚀 go-tiny-claw Slack 服务端已启动，正在监听 %s 端口\n", port)
+	log.Printf("🚀 go-tiny-claw Slack 服務端已啟動，正在監聽 %s 端口\n", port)
 
 	err := http.ListenAndServe(port, nil)
 	if err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		log.Fatalf("服務器啟動失敗: %v", err)
 	}
 }

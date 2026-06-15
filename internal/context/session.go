@@ -7,9 +7,9 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
-// Session 把"对话历史 + 工作目录"提升为一级实体。history 私有 + RWMutex 保护，
-// 避免外部直接持有 slice 引用造成 data race。同一个 AgentEngine 可服务多个不同
-// WorkDir 的 Session（workspace 跟着 session 走，不跟着 engine 走）。
+// Session 把"對話歷史 + 工作目錄"提升為一級實體。history 私有 + RWMutex 保護，
+// 避免外部直接持有 slice 引用造成 data race。同一個 AgentEngine 可服務多個不同
+// WorkDir 的 Session（workspace 跟著 session 走，不跟著 engine 走）。
 type Session struct {
 	ID        string
 	WorkDir   string
@@ -19,7 +19,7 @@ type Session struct {
 	history []schema.Message
 	mu      sync.RWMutex
 
-	// ch18: 该 Session 累计消耗的资源（由外部 CostTracker 通过 RecordUsage 累加）
+	// ch18: 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
 	TotalPromptTokens     int
 	TotalCompletionTokens int
 	TotalCostUSD          float64
@@ -35,7 +35,7 @@ func NewSession(id string, workDir string) *Session {
 	}
 }
 
-// Append 是长期记忆的写入口（thinking / action / observation 都落这里）。
+// Append 是長期記憶的寫入口（thinking / action / observation 都落這裡）。
 func (s *Session) Append(msgs ...schema.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -43,10 +43,10 @@ func (s *Session) Append(msgs ...schema.Message) {
 	s.UpdatedAt = time.Now()
 }
 
-// GetWorkingMemory 返回短期工作记忆：末尾 limit 条的滑动窗口。
-// 关键防御：若窗口首条是 ToolResult（RoleUser + ToolCallID），说明它对应的
-// assistant tool_use 已被截断在窗口外——把"无主的 tool_result"发给 LLM API 会报错，
-// 因此从头部一路剥掉孤儿，直到窗口首条是合法的 turn 起点。
+// GetWorkingMemory 返回短期工作記憶：末尾 limit 條的滑動窗口。
+// 關鍵防禦：若窗口首條是 ToolResult（RoleUser + ToolCallID），說明它對應的
+// assistant tool_use 已被截斷在窗口外——把"無主的 tool_result"發給 LLM API 會報錯，
+// 因此從頭部一路剝掉孤兒，直到窗口首條是合法的 turn 起點。
 func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -72,18 +72,18 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	return res
 }
 
-// SessionManager 并发安全地按 ID（如 Slack channelID）管理 session 池。
+// SessionManager 併發安全地按 ID（如 Slack channelID）管理 session 池。
 type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 }
 
-// GlobalSessionMgr 是包级全局单例，方便各 IM adapter（Slack 等）共享同一 session 池。
+// GlobalSessionMgr 是包級全局單例，方便各 IM adapter（Slack 等）共享同一 session 池。
 var GlobalSessionMgr = &SessionManager{
 	sessions: make(map[string]*Session),
 }
 
-// RecordUsage 供外部 CostTracker 调用，累加本 Session 的 Token 与费用账单。
+// RecordUsage 供外部 CostTracker 調用，累加本 Session 的 Token 與費用賬單。
 func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

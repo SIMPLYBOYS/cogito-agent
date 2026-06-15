@@ -9,8 +9,8 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
-// ReminderInjector 是死循环探测器：对 (工具名 + 参数) 做指纹，统计同一指纹的连续失败次数，
-// 达到阈值就注入一条强力"跳出循环、换策略"的提醒，避免模型盯着同一个错误盲目重试烧 API。
+// ReminderInjector 是死循環探測器：對 (工具名 + 參數) 做指紋，統計同一指紋的連續失敗次數，
+// 達到閾值就注入一條強力"跳出循環、換策略"的提醒，避免模型盯著同一個錯誤盲目重試燒 API。
 type ReminderInjector struct {
 	consecutiveFailures map[string]int
 }
@@ -28,8 +28,8 @@ func generateFingerprint(toolName string, args []byte) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// CheckAndInject 根据本轮最后一个工具的执行结果更新失败计数。
-// 任意一次成功即清零；同一指纹连续失败 ≥3 次则返回一条强提醒消息（否则返回 nil）。
+// CheckAndInject 根據本輪最後一個工具的執行結果更新失敗計數。
+// 任意一次成功即清零；同一指紋連續失敗 ≥3 次則返回一條強提醒消息（否則返回 nil）。
 func (r *ReminderInjector) CheckAndInject(lastToolCall schema.ToolCall, lastResult schema.ToolResult) *schema.Message {
 	fingerprint := generateFingerprint(lastToolCall.Name, lastToolCall.Arguments)
 
@@ -41,18 +41,18 @@ func (r *ReminderInjector) CheckAndInject(lastToolCall schema.ToolCall, lastResu
 	r.consecutiveFailures[fingerprint]++
 	failCount := r.consecutiveFailures[fingerprint]
 
-	log.Printf("[Reminder] 监控到工具 %s 执行失败，该参数特征连续失败次数: %d\n", lastToolCall.Name, failCount)
+	log.Printf("[Reminder] 監控到工具 %s 執行失敗，該參數特徵連續失敗次數: %d\n", lastToolCall.Name, failCount)
 
 	if failCount >= 3 {
-		log.Println("[Reminder] ⚠️ 触发死循环干预！注入强力修正指令。")
+		log.Println("[Reminder] ⚠️ 觸發死循環干預！注入強力修正指令。")
 
 		nudgeMsg := fmt.Sprintf(`[SYSTEM REMINDER 警告]
-你似乎陷入了死循环。你刚刚连续 %d 次使用相同的参数调用了 '%s' 工具，并且都失败了。
-请立即停止这种无效的重试！你的注意力被当前的报错过度吸引了。
+你似乎陷入了死循環。你剛剛連續 %d 次使用相同的參數調用了 '%s' 工具，並且都失敗了。
+請立即停止這種無效的重試！你的注意力被當前的報錯過度吸引了。
 你需要：
-1. 停止猜测参数。跳出当前的局部思维。
-2. 彻底改变你的策略。
-3. 如果你确实无法通过系统工具解决当前问题，请直接结束任务并向用户说明你需要什么人工帮助，而不是继续盲目消耗 API 资源尝试。`, failCount, lastToolCall.Name)
+1. 停止猜測參數。跳出當前的局部思維。
+2. 徹底改變你的策略。
+3. 如果你確實無法通過系統工具解決當前問題，請直接結束任務並向用戶說明你需要什麼人工幫助，而不是繼續盲目消耗 API 資源嘗試。`, failCount, lastToolCall.Name)
 
 		return &schema.Message{
 			Role:    schema.RoleUser,

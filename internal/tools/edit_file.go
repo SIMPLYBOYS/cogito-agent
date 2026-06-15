@@ -26,21 +26,21 @@ func (t *EditFileTool) Name() string {
 func (t *EditFileTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "对现有文件进行局部的字符串替换。这比重写整个文件更安全、更快速。请提供足够的 old_text 上下文以确保匹配的唯一性。",
+		Description: "對現有文件進行局部的字符串替換。這比重寫整個文件更安全、更快速。請提供足夠的 old_text 上下文以確保匹配的唯一性。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "要修改的文件路径",
+					"description": "要修改的文件路徑",
 				},
 				"old_text": map[string]interface{}{
 					"type":        "string",
-					"description": "文件中原有的文本。必须包含足够的上下文，以确保在文件中的唯一性。",
+					"description": "文件中原有的文本。必須包含足夠的上下文，以確保在文件中的唯一性。",
 				},
 				"new_text": map[string]interface{}{
 					"type":        "string",
-					"description": "要替换成的新文本",
+					"description": "要替換成的新文本",
 				},
 			},
 			"required": []string{"path", "old_text", "new_text"},
@@ -57,14 +57,14 @@ type editFileArgs struct {
 func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var input editFileArgs
 	if err := json.Unmarshal(args, &input); err != nil {
-		return "", fmt.Errorf("参数解析失败: %w", err)
+		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
 	fullPath := filepath.Join(t.workDir, input.Path)
 
 	contentBytes, err := os.ReadFile(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("读取文件失败，请确认路径是否正确: %w", err)
+		return "", fmt.Errorf("讀取文件失敗，請確認路徑是否正確: %w", err)
 	}
 	originalContent := string(contentBytes)
 
@@ -74,23 +74,23 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 
 	if err := os.WriteFile(fullPath, []byte(newContent), 0644); err != nil {
-		return "", fmt.Errorf("写回文件失败: %w", err)
+		return "", fmt.Errorf("寫回文件失敗: %w", err)
 	}
 
 	return fmt.Sprintf("✅ 成功修改文件: %s", input.Path), nil
 }
 
 func fuzzyReplace(originalContent, oldText, newText string) (string, error) {
-	// L1: 精确匹配
+	// L1: 精確匹配
 	count := strings.Count(originalContent, oldText)
 	if count == 1 {
 		return strings.Replace(originalContent, oldText, newText, 1), nil
 	}
 	if count > 1 {
-		return "", fmt.Errorf("old_text 匹配到了 %d 处，请提供更多的上下文代码以确保唯一性", count)
+		return "", fmt.Errorf("old_text 匹配到了 %d 處，請提供更多的上下文代碼以確保唯一性", count)
 	}
 
-	// L2: 换行符归一化
+	// L2: 換行符歸一化
 	normalizedContent := strings.ReplaceAll(originalContent, "\r\n", "\n")
 	normalizedOld := strings.ReplaceAll(oldText, "\r\n", "\n")
 
@@ -108,7 +108,7 @@ func fuzzyReplace(originalContent, oldText, newText string) (string, error) {
 		}
 	}
 
-	// L4: 逐行去缩进匹配
+	// L4: 逐行去縮進匹配
 	return lineByLineReplace(normalizedContent, normalizedOld, newText)
 }
 
@@ -117,7 +117,7 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	oldLines := strings.Split(strings.TrimSpace(oldText), "\n")
 
 	if len(oldLines) == 0 || len(contentLines) < len(oldLines) {
-		return "", fmt.Errorf("找不到该代码片段")
+		return "", fmt.Errorf("找不到該代碼片段")
 	}
 
 	for i := range oldLines {
@@ -145,10 +145,10 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	}
 
 	if matchCount == 0 {
-		return "", fmt.Errorf("在文件中未找到 old_text，请检查内容和缩进")
+		return "", fmt.Errorf("在文件中未找到 old_text，請檢查內容和縮進")
 	}
 	if matchCount > 1 {
-		return "", fmt.Errorf("模糊匹配到了 %d 处代码，请提供更多上下文以定位", matchCount)
+		return "", fmt.Errorf("模糊匹配到了 %d 處代碼，請提供更多上下文以定位", matchCount)
 	}
 
 	var newContentLines []string

@@ -14,17 +14,17 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/tools"
 )
 
-// ch11: 引擎对 workspace 无状态（workspace 跟着 Session 走）。
-// ch12: compactor —— 每次发 LLM 前做字符级压缩（OOM 防线）。
-// ch13: PlanMode —— 状态外部化（PLAN.md / TODO.md）开关，透传给 composer。
+// ch11: 引擎對 workspace 無狀態（workspace 跟著 Session 走）。
+// ch12: compactor —— 每次發 LLM 前做字符級壓縮（OOM 防線）。
+// ch13: PlanMode —— 狀態外部化（PLAN.md / TODO.md）開關，透傳給 composer。
 type AgentEngine struct {
 	provider       provider.LLMProvider
 	registry       tools.Registry
 	EnableThinking bool
 	PlanMode       bool
 	compactor      *ctxpkg.Compactor
-	recovery       *ctxpkg.RecoveryManager // ch14: 工具错误自愈（注入救援指南）
-	injector       *ReminderInjector       // ch15: 死循环探测与强提醒注入
+	recovery       *ctxpkg.RecoveryManager // ch14: 工具錯誤自愈（注入救援指南）
+	injector       *ReminderInjector       // ch15: 死循環探測與強提醒注入
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
@@ -33,8 +33,8 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		registry:       r,
 		EnableThinking: enableThinking,
 		PlanMode:       planMode,
-		// ch13: 阈值从 ch12 演示用的 3000 提到 20000（≈6000 中文字），更贴近正常使用；
-		// 生产环境仍建议按 model context window 自动计算或改用 token 级估算。
+		// ch13: 閾值從 ch12 演示用的 3000 提到 20000（≈6000 中文字），更貼近正常使用；
+		// 生產環境仍建議按 model context window 自動計算或改用 token 級估算。
 		compactor: ctxpkg.NewCompactor(200000, 6),
 		recovery:  ctxpkg.NewRecoveryManager(),
 		injector:  NewReminderInjector(),
@@ -42,19 +42,19 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 }
 
 func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter Reporter) error {
-	log.Printf("[Engine] 唤醒会话 [%s]，工作区: %s\n", session.ID, session.WorkDir)
+	log.Printf("[Engine] 喚醒會話 [%s]，工作區: %s\n", session.ID, session.WorkDir)
 
-	// ch16: 把 session 注入 ctx，让工具 middleware 能取到触发它的会话（如审批要发回的 Slack 频道）
+	// ch16: 把 session 注入 ctx，讓工具 middleware 能取到觸發它的會話（如審批要發回的 Slack 頻道）
 	ctx = WithSession(ctx, session)
 
-	// ch19【埋点 1】Root Span：记录整个任务生命周期，退出时（无论成败）导出 trace 到 .claw/traces/
+	// ch19【埋點 1】Root Span：記錄整個任務生命週期，退出時（無論成敗）導出 trace 到 .claw/traces/
 	ctx, rootSpan := observability.StartSpan(ctx, "Agent.Run")
 	rootSpan.AddAttribute("SessionID", session.ID)
 	rootSpan.AddAttribute("WorkDir", session.WorkDir)
 	defer func() {
 		rootSpan.EndSpan()
 		_ = observability.ExportTraceToFile(rootSpan, session.WorkDir, session.ID)
-		log.Printf("📊 [Tracing] 本次任务的执行回放链路已保存至工作区的 .claw/traces 目录下\n")
+		log.Printf("📊 [Tracing] 本次任務的執行回放鏈路已保存至工作區的 .claw/traces 目錄下\n")
 	}()
 
 	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
@@ -63,20 +63,20 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	turnCount := 0
 	for {
 		turnCount++
-		// ch19【埋点 2】Turn Span（defer 确保 break/return 也会结束并计入树）
+		// ch19【埋點 2】Turn Span（defer 確保 break/return 也會結束並計入樹）
 		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
 		defer turnSpan.EndSpan()
 
 		availableTools := e.registry.GetAvailableTools()
 		workingMemory := session.GetWorkingMemory(20)
 
-		// ch21: 滑动窗口截断后，首条可能变成 Assistant（违反 Anthropic「首条须为 user」/严格交替）。
-		// 在头部强行插入一条占位 User 消息稳住协议。（与 GetWorkingMemory 的孤儿 tool_result
-		// 剥离互补：那个处理"首条是无主 tool_result"，这个处理"首条是 assistant"。）
+		// ch21: 滑動窗口截斷後，首條可能變成 Assistant（違反 Anthropic「首條須為 user」/嚴格交替）。
+		// 在頭部強行插入一條佔位 User 消息穩住協議。（與 GetWorkingMemory 的孤兒 tool_result
+		// 剝離互補：那個處理"首條是無主 tool_result"，這個處理"首條是 assistant"。）
 		if len(workingMemory) > 0 && workingMemory[0].Role != schema.RoleUser {
 			dummyUser := schema.Message{
 				Role:    schema.RoleUser,
-				Content: "[系统占位符] 这是为了保持上下文连贯性而注入的断点标记。请继续执行你刚才的任务。",
+				Content: "[系統佔位符] 這是為了保持上下文連貫性而注入的斷點標記。請繼續執行你剛才的任務。",
 			}
 			workingMemory = append([]schema.Message{dummyUser}, workingMemory...)
 		}
@@ -85,48 +85,48 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		contextHistory = append(contextHistory, systemMsg)
 		contextHistory = append(contextHistory, workingMemory...)
 
-		// 【核心防线】发 LLM 前做字符级压缩；只动发给 LLM 的副本，不损毁 session.history。
+		// 【核心防線】發 LLM 前做字符級壓縮；只動發給 LLM 的副本，不損毀 session.history。
 		compactedContext := e.compactor.Compact(contextHistory)
 
-		// ch19: 记录发给模型的实际上下文大小，有助于排查幻觉
+		// ch19: 記錄發給模型的實際上下文大小，有助於排查幻覺
 		turnSpan.AddAttribute("context_message_count", len(compactedContext))
 
-		// 本轮 thinking 内容暂存（不单独进 session，最后合并进 action 消息）
+		// 本輪 thinking 內容暫存（不單獨進 session，最後合併進 action 消息）
 		var currentTurnThinkingContent string
 
 		// Phase 1: Thinking
-		// 注意：手动两阶段思考（剥夺 tools）对 Claude 会退化成 <invoke> 文本，故各入口默认
-		// EnableThinking=false；ch13 的合并逻辑也确保即便开启也不会产生连续两条 assistant。
+		// 注意：手動兩階段思考（剝奪 tools）對 Claude 會退化成 <invoke> 文本，故各入口默認
+		// EnableThinking=false；ch13 的合併邏輯也確保即便開啟也不會產生連續兩條 assistant。
 		if e.EnableThinking {
 			if reporter != nil {
 				reporter.OnThinking(turnCtx)
 			}
 
-			// ch19【埋点 3】记录 Thinking 调用
+			// ch19【埋點 3】記錄 Thinking 調用
 			thinkCtx, thinkSpan := observability.StartSpan(turnCtx, "LLM.Thinking")
 			thinkResp, err := e.provider.Generate(thinkCtx, compactedContext, nil)
 			thinkSpan.EndSpan()
 			if err != nil {
-				return fmt.Errorf("Thinking 阶段失败: %w", err)
+				return fmt.Errorf("Thinking 階段失敗: %w", err)
 			}
 			if thinkResp.Content != "" {
 				currentTurnThinkingContent = thinkResp.Content
-				// 仅本轮临时拼接，让 Phase 2 看到刚才的思考；不进 session、不持久化
+				// 僅本輪臨時拼接，讓 Phase 2 看到剛才的思考；不進 session、不持久化
 				compactedContext = append(compactedContext, *thinkResp)
 			}
 		}
 
 		// Phase 2: Action
-		// ch19【埋点 4】记录 Action 调用
+		// ch19【埋點 4】記錄 Action 調用
 		actCtx, actSpan := observability.StartSpan(turnCtx, "LLM.Action")
 		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
 		actSpan.EndSpan()
 		if err != nil {
-			return fmt.Errorf("Action 阶段失败: %w", err)
+			return fmt.Errorf("Action 階段失敗: %w", err)
 		}
 
-		// ch13【核心修正】：把 thinking 与 action 合并成单一 assistant 消息进 session，
-		// 保证 history 严格 user/assistant 交替（避免连续两条 assistant 被严格模式拒绝）。
+		// ch13【核心修正】：把 thinking 與 action 合併成單一 assistant 消息進 session，
+		// 保證 history 嚴格 user/assistant 交替（避免連續兩條 assistant 被嚴格模式拒絕）。
 		finalAssistantMsg := schema.Message{
 			Role:      schema.RoleAssistant,
 			Content:   strings.TrimSpace(currentTurnThinkingContent + "\n" + actionResp.Content),
@@ -145,7 +145,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
 		var wg sync.WaitGroup
 
-		// ch15: 收集本轮第一个工具的调用与原始结果，供 ReminderInjector 做死循环指纹分析
+		// ch15: 收集本輪第一個工具的調用與原始結果，供 ReminderInjector 做死循環指紋分析
 		var lastToolCall schema.ToolCall
 		var lastToolResult schema.ToolResult
 
@@ -159,7 +159,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 					reporter.OnToolCall(ctx, call.Name, string(call.Arguments))
 				}
 
-				// ch19: 传 turnCtx，使并发工具的 Tool.Execute span 平行挂在当前 Turn 节点下
+				// ch19: 傳 turnCtx，使併發工具的 Tool.Execute span 平行掛在當前 Turn 節點下
 				result := e.registry.Execute(turnCtx, call)
 
 				if idx == 0 {
@@ -167,8 +167,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 					lastToolResult = result
 				}
 
-				// ch14【核心拦截与注入】出错时由 RecoveryManager 诊断并注入"救援指南"，
-				// reporter 与 session.history 两处都用注入后的版本，保证人/模型/历史三者一致。
+				// ch14【核心攔截與注入】出錯時由 RecoveryManager 診斷並注入"救援指南"，
+				// reporter 與 session.history 兩處都用注入後的版本，保證人/模型/歷史三者一致。
 				finalOutput := result.Output
 				if result.IsError {
 					finalOutput = e.recovery.AnalyzeAndInject(call.Name, result.Output)
@@ -177,7 +177,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				if reporter != nil {
 					displayOutput := finalOutput
 					if len(displayOutput) > 200 {
-						displayOutput = displayOutput[:200] + "... (已截断)"
+						displayOutput = displayOutput[:200] + "... (已截斷)"
 					}
 					reporter.OnToolResult(ctx, call.Name, displayOutput, result.IsError)
 				}
@@ -192,12 +192,12 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		wg.Wait()
 
-		// 工具结果作为 user 消息进 session，保证下一轮 role 必然 user→assistant 交替
+		// 工具結果作為 user 消息進 session，保證下一輪 role 必然 user→assistant 交替
 		session.Append(observationMsgs...)
 
-		// ch15【死循环探测】：本轮工具若与历史同参数连续失败达阈值，注入强提醒。
-		// 该提醒是普通 user 文本，会紧跟在 tool_results 之后——claude.go 会把它并入
-		// 同一条 user 消息（tool_result 块 + 文本块），避免连续两条 user 违反交替。
+		// ch15【死循環探測】：本輪工具若與歷史同參數連續失敗達閾值，注入強提醒。
+		// 該提醒是普通 user 文本，會緊跟在 tool_results 之後——claude.go 會把它併入
+		// 同一條 user 消息（tool_result 塊 + 文本塊），避免連續兩條 user 違反交替。
 		if reminderMsg := e.injector.CheckAndInject(lastToolCall, lastToolResult); reminderMsg != nil {
 			session.Append(*reminderMsg)
 		}
@@ -206,24 +206,24 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	return nil
 }
 
-// RunSub 是为 SubagentTool 拉起的一次性、受限的 ReAct 循环（ch17）：
-//   - 不依赖外部 Session，对话历史是局部变量，跑完即丢（上下文隔离的关键）；
-//   - 工具集仅为 caller 传入的 readOnlyRegistry（能力沙箱）；
-//   - 强制关闭慢思考，直接行动；有 maxSubTurns 硬上限防卡死；
-//   - 返回值 string 即"探索报告"，作为 spawn_subagent 工具的输出回给主 agent。
+// RunSub 是為 SubagentTool 拉起的一次性、受限的 ReAct 循環（ch17）：
+//   - 不依賴外部 Session，對話歷史是局部變量，跑完即丟（上下文隔離的關鍵）；
+//   - 工具集僅為 caller 傳入的 readOnlyRegistry（能力沙箱）；
+//   - 強制關閉慢思考，直接行動；有 maxSubTurns 硬上限防卡死；
+//   - 返回值 string 即"探索報告"，作為 spawn_subagent 工具的輸出回給主 agent。
 //
-// 满足 tools.AgentRunner 接口；reporter 用 any 规避包依赖，内部断言回 Reporter。
+// 滿足 tools.AgentRunner 接口；reporter 用 any 規避包依賴，內部斷言回 Reporter。
 func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyRegistry tools.Registry, reporter any) (string, error) {
 	contextHistory := []schema.Message{
 		{
 			Role: schema.RoleSystem,
-			Content: `你是一个专门负责深度探索的探路者 (Explorer Subagent)。
-你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅日志，搜集足够的信息。
+			Content: `你是一個專門負責深度探索的探路者 (Explorer Subagent)。
+你的任務是根據主架構師的指令，在當前工作區內仔細閱讀代碼、查閱日誌，蒐集足夠的信息。
 
-【核心纪律】
-1. 你必须、且只能依靠内置工具（如 bash 的 find/grep，或 read_file）去寻找答案。绝对不允许凭空捏造或猜测！
-2. 如果你没有找到确切的答案，你必须继续使用工具深入搜索。
-3. 当且仅当你找到了确切的线索后，停止调用工具，直接输出一段纯文本作为你的终极汇报。主架构师会根据你的汇报来做下一步决策。`,
+【核心紀律】
+1. 你必須、且只能依靠內置工具（如 bash 的 find/grep，或 read_file）去尋找答案。絕對不允許憑空捏造或猜測！
+2. 如果你沒有找到確切的答案，你必須繼續使用工具深入搜索。
+3. 當且僅當你找到了確切的線索後，停止調用工具，直接輸出一段純文本作為你的終極彙報。主架構師會根據你的彙報來做下一步決策。`,
 		},
 		{Role: schema.RoleUser, Content: taskPrompt},
 	}
@@ -234,22 +234,22 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyReg
 	for {
 		turnCount++
 		if turnCount > maxSubTurns {
-			return "", fmt.Errorf("子智能体探索过于深入，超过 %d 轮被强制召回，请主 Agent 给它更明确的指令", maxSubTurns)
+			return "", fmt.Errorf("子智能體探索過於深入，超過 %d 輪被強制召回，請主 Agent 給它更明確的指令", maxSubTurns)
 		}
 
-		// 【驾驭底线】子智能体仅能使用传入的只读工具注册表（无 spawn_subagent → 无递归）
+		// 【駕馭底線】子智能體僅能使用傳入的只讀工具註冊表（無 spawn_subagent → 無遞歸）
 		availableTools := readOnlyRegistry.GetAvailableTools()
 		compactedContext := e.compactor.Compact(contextHistory)
 
-		// 子任务要求急速响应，强制跳过慢思考，直接行动
+		// 子任務要求急速響應，強制跳過慢思考，直接行動
 		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
 		if err != nil {
-			return "", fmt.Errorf("子智能体推理失败: %w", err)
+			return "", fmt.Errorf("子智能體推理失敗: %w", err)
 		}
 
 		contextHistory = append(contextHistory, *actionResp)
 
-		// 退出条件：不再调用工具 → 它已写好报告，直接把 Content 当返回值给主 agent
+		// 退出條件：不再調用工具 → 它已寫好報告，直接把 Content 當返回值給主 agent
 		if len(actionResp.ToolCalls) == 0 {
 			return actionResp.Content, nil
 		}
@@ -280,7 +280,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyReg
 				if r != nil {
 					display := finalOutput
 					if len(display) > 200 {
-						display = display[:200] + "... (已截断)"
+						display = display[:200] + "... (已截斷)"
 					}
 					r.OnToolResult(ctx, fmt.Sprintf("[Subagent] %s", call.Name), display, result.IsError)
 				}

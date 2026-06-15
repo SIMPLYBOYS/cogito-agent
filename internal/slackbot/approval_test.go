@@ -15,14 +15,14 @@ func TestIsDangerousCommand(t *testing.T) {
 		{"bash", `{"command":"rm -rf /tmp/x"}`, true},
 		{"bash", `{"command":"sudo apt install foo"}`, true},
 		{"bash", `{"command":"drop table users"}`, true},
-		{"bash", `{"command":"echo '' > main.go"}`, true}, // >.*\.go 覆盖源码
+		{"bash", `{"command":"echo '' > main.go"}`, true}, // >.*\.go 覆蓋源碼
 		{"bash", `{"command":"ls -la"}`, false},
 		{"bash", `{"command":"go build ./..."}`, false},
-		{"bash", `{"command":"nginx -s reload"}`, true},        // ch22: 重启服务
-		{"bash", `{"command":"systemctl restart nginx"}`, true}, // ch22: 系统服务
-		{"bash", `{"command":"kill -9 1234"}`, true},            // ch22: 杀进程
-		{"read_file", `{"path":"/etc/passwd"}`, false},          // 只读工具永远放行
-		{"write_file", `{"path":"main.go"}`, false},             // ch16 已知局限：白名单内但暂无检查
+		{"bash", `{"command":"nginx -s reload"}`, true},         // ch22: 重啟服務
+		{"bash", `{"command":"systemctl restart nginx"}`, true}, // ch22: 系統服務
+		{"bash", `{"command":"kill -9 1234"}`, true},            // ch22: 殺進程
+		{"read_file", `{"path":"/etc/passwd"}`, false},          // 只讀工具永遠放行
+		{"write_file", `{"path":"main.go"}`, false},             // ch16 已知侷限：白名單內但暫無檢查
 		{"edit_file", `{"path":"main.go"}`, false},
 	}
 	for _, c := range cases {
@@ -36,7 +36,7 @@ func newTestMgr(timeout time.Duration) *ApprovalManager {
 	return &ApprovalManager{pendingTasks: make(map[string]*pendingTask), Timeout: timeout}
 }
 
-// 按 taskID 精确唤醒（兼容形式 approve <id>）。
+// 按 taskID 精確喚醒（兼容形式 approve <id>）。
 func TestApprovalManager_RoundTrip(t *testing.T) {
 	m := newTestMgr(time.Minute)
 
@@ -52,19 +52,19 @@ func TestApprovalManager_RoundTrip(t *testing.T) {
 
 	<-ready
 	if !m.ResolveApproval("task1", true, "ok") {
-		t.Fatal("ResolveApproval 应命中等待中的任务")
+		t.Fatal("ResolveApproval 應命中等待中的任務")
 	}
 	<-done
 
 	if !allowed || reason != "ok" {
-		t.Errorf("审批结果不对: allowed=%v reason=%q", allowed, reason)
+		t.Errorf("審批結果不對: allowed=%v reason=%q", allowed, reason)
 	}
 	if m.ResolveApproval("does-not-exist", true, "") {
-		t.Error("不存在的 taskID 不应被命中")
+		t.Error("不存在的 taskID 不應被命中")
 	}
 }
 
-// 弱点修补①：裸 approve 按频道解析，且不误伤其他频道。
+// 弱點修補①：裸 approve 按頻道解析，且不誤傷其他頻道。
 func TestApprovalManager_ResolveByChannel(t *testing.T) {
 	m := newTestMgr(time.Minute)
 
@@ -79,18 +79,18 @@ func TestApprovalManager_ResolveByChannel(t *testing.T) {
 
 	<-ready
 	if n := m.ResolveByChannel("chX", true, "ok"); n != 1 {
-		t.Fatalf("应解决本频道 1 个待审批，got %d", n)
+		t.Fatalf("應解決本頻道 1 個待審批，got %d", n)
 	}
 	<-done
 	if !allowed {
-		t.Error("应被批准")
+		t.Error("應被批准")
 	}
 	if n := m.ResolveByChannel("chOther", true, ""); n != 0 {
-		t.Errorf("其他频道无 pending，应返回 0，got %d", n)
+		t.Errorf("其他頻道無 pending，應返回 0，got %d", n)
 	}
 }
 
-// 弱点修补③：无人响应时超时自动拒绝并清理，不泄漏 goroutine。
+// 弱點修補③：無人響應時超時自動拒絕並清理，不洩漏 goroutine。
 func TestApprovalManager_Timeout(t *testing.T) {
 	m := newTestMgr(50 * time.Millisecond)
 
@@ -99,15 +99,15 @@ func TestApprovalManager_Timeout(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if allowed {
-		t.Error("超时应自动拒绝")
+		t.Error("超時應自動拒絕")
 	}
-	if !strings.Contains(reason, "超时") {
-		t.Errorf("拒绝原因应含'超时': %q", reason)
+	if !strings.Contains(reason, "超時") {
+		t.Errorf("拒絕原因應含'超時': %q", reason)
 	}
 	if elapsed < 40*time.Millisecond {
-		t.Errorf("应大致等待 timeout 时长，实际 %v", elapsed)
+		t.Errorf("應大致等待 timeout 時長，實際 %v", elapsed)
 	}
 	if m.ResolveApproval("t1", true, "") {
-		t.Error("超时后该 task 应已从 pending 清理")
+		t.Error("超時後該 task 應已從 pending 清理")
 	}
 }
