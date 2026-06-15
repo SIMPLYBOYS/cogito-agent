@@ -14,6 +14,12 @@ import (
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
 )
 
+// 主循環硬性防線的默認值：兩者都是框架層強制（不依賴模型自覺），<=0 表示關閉該防線。
+const (
+	defaultMaxTurns   = 40  // 單次 Run 的最大回合數
+	defaultMaxCostUSD = 1.0 // 單次 Run 的成本熔斷上限（USD）
+)
+
 // 引擎對 workspace 無狀態（workspace 跟著 Session 走）。
 // compactor —— 每次發 LLM 前做字符級壓縮（OOM 防線）。
 // PlanMode —— 狀態外部化（PLAN.md / TODO.md）開關，透傳給 composer。
@@ -22,6 +28,8 @@ type AgentEngine struct {
 	registry       tools.Registry
 	EnableThinking bool
 	PlanMode       bool
+	MaxTurns       int     // 主循環硬性回合上限（防失控重試燒 API）；<=0 不限制
+	MaxCostUSD     float64 // 單次 Run 的成本熔斷上限（USD）；<=0 不限制
 	compactor      *ctxpkg.Compactor
 	recovery       *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
 	injector       *ReminderInjector       // 死循環探測與強提醒注入
@@ -33,6 +41,8 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		registry:       r,
 		EnableThinking: enableThinking,
 		PlanMode:       planMode,
+		MaxTurns:       defaultMaxTurns,
+		MaxCostUSD:     defaultMaxCostUSD,
 		// 閾值從演示用的 3000 提到 20000（≈6000 中文字），更貼近正常使用；
 		// 生產環境仍建議按 model context window 自動計算或改用 token 級估算。
 		compactor: ctxpkg.NewCompactor(200000, 6),
@@ -63,6 +73,29 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	turnCount := 0
 	for {
 		turnCount++
+
+		// 【硬防線①】回合數熔斷：主循環不再無上限 for{}，超過上限由框架強制中止，
+		// 不指望模型自己停下。對齊 RunSub 的 maxSubTurns 思路。
+		if e.MaxTurns > 0 && turnCount > e.MaxTurns {
+			msg := fmt.Sprintf("⚠️ 任務已達最大回合數上限（%d 輪）仍未完成，為避免失控重試已強制中止。請拆解任務或補充更明確的指令後重試。", e.MaxTurns)
+			if reporter != nil {
+				reporter.OnMessage(ctx, msg)
+			}
+			return fmt.Errorf("達到最大回合數上限 %d，強制終止", e.MaxTurns)
+		}
+
+		// 【硬防線③】成本熔斷：依 CostTracker 累加到 session 的花費，超預算即斷路。
+		// 把 CostTracker 從「只記帳」升級為「斷路器」，控制盲目重試的金錢失控。
+		if e.MaxCostUSD > 0 {
+			if spent := session.CostUSD(); spent > e.MaxCostUSD {
+				msg := fmt.Sprintf("⚠️ 本次任務累計花費已達 $%.4f，超過單任務預算上限 $%.2f，為控制成本已強制中止。", spent, e.MaxCostUSD)
+				if reporter != nil {
+					reporter.OnMessage(ctx, msg)
+				}
+				return fmt.Errorf("達到成本上限 $%.2f（已花費 $%.4f），強制終止", e.MaxCostUSD, spent)
+			}
+		}
+
 		// 【埋點 2】Turn Span（defer 確保 break/return 也會結束並計入樹）
 		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
 		defer turnSpan.EndSpan()
@@ -145,9 +178,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
 		var wg sync.WaitGroup
 
-		// 收集本輪第一個工具的調用與原始結果，供 ReminderInjector 做死循環指紋分析
-		var lastToolCall schema.ToolCall
-		var lastToolResult schema.ToolResult
+		// 收集本輪【所有】工具的調用與原始結果（按 idx 各寫各的槽，無 data race），
+		// 供 ReminderInjector 做死循環分析——並行調用的每一個都要納入，不再只看第一個。
+		turnCalls := make([]schema.ToolCall, len(actionResp.ToolCalls))
+		turnResults := make([]schema.ToolResult, len(actionResp.ToolCalls))
 
 		for i, toolCall := range actionResp.ToolCalls {
 			wg.Add(1)
@@ -162,10 +196,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				// 傳 turnCtx，使併發工具的 Tool.Execute span 平行掛在當前 Turn 節點下
 				result := e.registry.Execute(turnCtx, call)
 
-				if idx == 0 {
-					lastToolCall = call
-					lastToolResult = result
-				}
+				turnCalls[idx] = call
+				turnResults[idx] = result
 
 				// 【核心攔截與注入】出錯時由 RecoveryManager 診斷並注入"救援指南"，
 				// reporter 與 session.history 兩處都用注入後的版本，保證人/模型/歷史三者一致。
@@ -198,7 +230,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// 【死循環探測】：本輪工具若與歷史同參數連續失敗達閾值，注入強提醒。
 		// 該提醒是普通 user 文本，會緊跟在 tool_results 之後——claude.go 會把它併入
 		// 同一條 user 消息（tool_result 塊 + 文本塊），避免連續兩條 user 違反交替。
-		if reminderMsg := e.injector.CheckAndInject(lastToolCall, lastToolResult); reminderMsg != nil {
+		if reminderMsg := e.injector.CheckTurn(turnCalls, turnResults); reminderMsg != nil {
 			session.Append(*reminderMsg)
 		}
 	}

@@ -92,6 +92,14 @@ func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
 	s.TotalCostUSD += cost
 }
 
+// CostUSD 在鎖保護下快照當前累計花費，供引擎做成本熔斷判斷時併發安全地讀取
+// （避免與 RecordUsage 的寫入直接競爭裸欄位 TotalCostUSD）。
+func (s *Session) CostUSD() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TotalCostUSD
+}
+
 func (sm *SessionManager) GetOrCreate(id string, workDir string) *Session {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
