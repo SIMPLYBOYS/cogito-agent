@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
 
 type ClaudeProvider struct {

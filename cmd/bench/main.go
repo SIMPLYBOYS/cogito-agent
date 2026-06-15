@@ -8,8 +8,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/eval"
+	"github.com/joho/godotenv"
 )
 
 func main() {

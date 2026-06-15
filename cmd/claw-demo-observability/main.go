@@ -8,13 +8,13 @@ import (
 	"log"
 	"os"
 
-	"github.com/joho/godotenv"
 	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/provider"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
+	"github.com/joho/godotenv"
 )
 
 func main() {

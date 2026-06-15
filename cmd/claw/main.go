@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/joho/godotenv"
 	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
@@ -14,6 +13,7 @@ import (
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/slackbot"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
+	"github.com/joho/godotenv"
 )
 
 func main() {
