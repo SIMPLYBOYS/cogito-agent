@@ -10,7 +10,7 @@ import (
 
 type PromptComposer struct {
 	workDir     string
-	planMode    bool // ch13: Plan Mode 開關（狀態外部化強制規範）
+	planMode    bool // Plan Mode 開關（狀態外部化強制規範）
 	skillLoader *SkillLoader
 }
 
@@ -39,7 +39,7 @@ func (c *PromptComposer) Build() schema.Message {
 `)
 
 	if c.planMode {
-		// ch13: 狀態外部化強制規範——不信任內存，強制把計劃/進度寫到 PLAN.md / TODO.md，
+		// 狀態外部化強制規範——不信任內存，強制把計劃/進度寫到 PLAN.md / TODO.md，
 		// 支持斷點續傳（重啟或視窗滑掉後，靠 TODO.md 的 `- [ ]` 續跑）。
 		promptBuilder.WriteString(`
 # 長程任務與狀態外部化強制規範 (Plan Mode: ON)

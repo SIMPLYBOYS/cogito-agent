@@ -1,4 +1,4 @@
-// cmd/claw-demo-oom 是 ch12 的上下文壓縮（OOM 防線）演示：用一個會讀入巨型文件的
+// cmd/claw-demo-oom 是上下文壓縮（OOM 防線）演示：用一個會讀入巨型文件的
 // 三步任務，觸發 engine 內置的 Compactor，讓"字符級壓縮"行為眼見為憑。
 // 自包含：啟動時在 /tmp/claw_oom_demo 下生成一個巨大的 mock_log.txt。
 package main

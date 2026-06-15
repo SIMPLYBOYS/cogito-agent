@@ -107,7 +107,7 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		}
 	}
 
-	// ch18: 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 計費
+	// 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 計費
 	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
 		resultMsg.Usage = &schema.Usage{
 			PromptTokens:     int(resp.Usage.InputTokens),
@@ -121,7 +121,7 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 // buildAnthropicMessages 把統一的 schema.Message 歷史轉換為 Anthropic 的 MessageParam 序列，
 // 並抽出 system prompt。核心職責是維持 Anthropic 要求的 user/assistant 嚴格交替不變式：
 //   - 同一 assistant 回合觸發的多個 tool_result 合併進同一條 user 消息；
-//   - 緊跟 tool_result 之後的普通 user 文本（如 ch15 死循環提醒）併入同一條 user 消息（文本塊），
+//   - 緊跟 tool_result 之後的普通 user 文本（如死循環提醒）併入同一條 user 消息（文本塊），
 //     避免「tool_result user + 文本 user」連續兩條 user 被 Anthropic 拒絕。
 func buildAnthropicMessages(msgs []schema.Message) ([]anthropic.MessageParam, string) {
 	var anthropicMsgs []anthropic.MessageParam

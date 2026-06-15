@@ -1,6 +1,6 @@
 // Package slackbot 把 AgentEngine 接入 Slack：
 // 通過 Events API 接收消息（webhook），並以 SlackReporter 將執行進度實時回推到會話。
-// 對應教材 ch09 的 internal/feishu/bot.go，將飛書替換為 Slack。
+// 對應教材 internal/feishu/bot.go，將飛書替換為 Slack。
 package slackbot
 
 import (
@@ -21,7 +21,7 @@ import (
 	"github.com/yourname/go-tiny-claw/internal/schema"
 )
 
-// EngineFactory 為每個會話動態組裝一個引擎。ch22 用它讓每個頻道掛上"自己專屬的 CostTracker"，
+// EngineFactory 為每個會話動態組裝一個引擎。用它讓每個頻道掛上"自己專屬的 CostTracker"，
 // 各頻道各記各的賬（registry/middleware 無狀態共享，tracker/session 按頻道隔離）。
 type EngineFactory func(session *ctxpkg.Session) *engine.AgentEngine
 
@@ -29,7 +29,7 @@ type SlackBot struct {
 	client        *slackapi.Client
 	signingSecret string
 	botUserID     string
-	factory       EngineFactory // ch22: 每會話現造引擎（替換原來的固定 engine）
+	factory       EngineFactory // 每會話現造引擎（替換原來的固定 engine）
 	workDir       string        // 各頻道 session 共用的工作目錄（tools 也註冊在此）
 
 	// 弱點修補②：標記正在運行（含等待審批）的頻道，避免同一 session 併發起第二個 Run
@@ -159,14 +159,14 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, b.workDir)
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	// ch22: 每會話用 factory 現造一個掛了專屬 CostTracker 的引擎，各頻道各記各的賬
+	// 每會話用 factory 現造一個掛了專屬 CostTracker 的引擎，各頻道各記各的賬
 	eng := b.factory(session)
 	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
 	}
 }
 
-// SendMessage 向指定頻道發送一條消息（供 ch16 審批 middleware 推送審批請求用）。
+// SendMessage 向指定頻道發送一條消息（供審批 middleware 推送審批請求用）。
 func (b *SlackBot) SendMessage(channelID, text string) {
 	if _, _, err := b.client.PostMessage(channelID, slackapi.MsgOptionText(text, false)); err != nil {
 		log.Printf("[Slack] 消息發送失敗: %v\n", err)

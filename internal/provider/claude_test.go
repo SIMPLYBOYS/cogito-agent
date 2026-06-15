@@ -7,7 +7,7 @@ import (
 )
 
 // 驗證 Anthropic 的 user/assistant 嚴格交替不變式：一個完整 ReAct 回合 + 併發多工具結果
-// + ch15 死循環提醒（普通 user 文本緊跟 tool_result）。這些歷史結構若映射不當會觸發 400。
+// + 死循環提醒（普通 user 文本緊跟 tool_result）。這些歷史結構若映射不當會觸發 400。
 func TestBuildAnthropicMessages_StrictAlternation(t *testing.T) {
 	msgs := []schema.Message{
 		{Role: schema.RoleSystem, Content: "you are claw"},
@@ -18,7 +18,7 @@ func TestBuildAnthropicMessages_StrictAlternation(t *testing.T) {
 		}},
 		{Role: schema.RoleUser, Content: "resultA", ToolCallID: "t1"}, // 併發工具結果 1
 		{Role: schema.RoleUser, Content: "resultB", ToolCallID: "t2"}, // 併發工具結果 2
-		{Role: schema.RoleUser, Content: "[SYSTEM REMINDER] stop"},    // ch15 提醒：普通 user 文本
+		{Role: schema.RoleUser, Content: "[SYSTEM REMINDER] stop"},    // 提醒：普通 user 文本
 	}
 
 	out, system := buildAnthropicMessages(msgs)
@@ -60,7 +60,7 @@ func TestBuildAnthropicMessages_StrictAlternation(t *testing.T) {
 		t.Errorf("最後一條 user 應有 2 個 tool_result 塊，實際 %d", toolResults)
 	}
 	if texts != 1 {
-		t.Errorf("最後一條 user 應有 1 個 text 塊（ch15 提醒併入），實際 %d", texts)
+		t.Errorf("最後一條 user 應有 1 個 text 塊（提醒併入），實際 %d", texts)
 	}
 }
 

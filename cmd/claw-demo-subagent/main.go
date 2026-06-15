@@ -1,4 +1,4 @@
-// cmd/claw-demo-subagent 是 ch17 的 SubAgent（agent-as-tool）演示：主 agent 把"深度探索"
+// cmd/claw-demo-subagent 是 SubAgent（agent-as-tool）演示：主 agent 把"深度探索"
 // 委派給一個受限的子 agent，子 agent 在隔離上下文裡搜索，只回傳一段精煉報告——主 agent 的
 // 會話不被搜索過程的噪音汙染。自包含：啟動時在 /tmp/claw_subagent_demo 下鋪設尋寶 fixture。
 package main

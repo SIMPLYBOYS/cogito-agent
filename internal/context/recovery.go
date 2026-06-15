@@ -23,7 +23,7 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 
 	switch toolName {
 	case "edit_file":
-		// 匹配 ch07 fuzzyReplace 手寫的固定報錯
+		// 匹配 fuzzyReplace 手寫的固定報錯
 		if strings.Contains(rawError, "在文件中未找到 old_text") || strings.Contains(rawError, "找不到該代碼片段") {
 			hint = "你提供的 old_text 與文件當前內容不一致，或者缺少必要的縮進。請先使用 `read_file` 工具重新讀取該文件，獲取最新、準確的內容後，再重新發起編輯。"
 		} else if strings.Contains(rawError, "匹配到了多處") || strings.Contains(rawError, "提供更多上下文") {
@@ -42,7 +42,7 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 		if strings.Contains(lowerError, "command not found") {
 			hint = "系統中未安裝該命令。請先思考：是否有替代命令？或者你需要先編寫腳本進行安裝？"
 		} else if strings.Contains(rawError, "超時") || strings.Contains(rawError, "DeadlineExceeded") {
-			// 匹配 ch06 bash 工具手寫的 30s context.WithTimeout 報錯
+			// 匹配 bash 工具手寫的 30s context.WithTimeout 報錯
 			hint = "該命令執行被超時強殺。如果它是一個常駐服務（如 server 或 watch），請將其轉入後臺執行（例如使用 `nohup ... &`），不要阻塞主線程。"
 		} else if strings.Contains(lowerError, "syntax error") {
 			hint = "Bash 語法錯誤。請檢查引號轉義或特殊字符，確保命令在終端中可直接運行。"

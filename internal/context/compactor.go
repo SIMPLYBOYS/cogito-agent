@@ -10,7 +10,7 @@ import (
 // Compactor 是字符級的上下文壓縮防線：在每次發 LLM 前，對"要發出去的窗口"按
 // 角色 × 位置 × 長度 三維規則壓縮。它只動發給 LLM 的副本，不損毀 session.history。
 //
-// 與 ch11 滑動窗口的分工：窗口（GetWorkingMemory）防"歷史太長"（消息條數），
+// 與滑動窗口的分工：窗口（GetWorkingMemory）防"歷史太長"（消息條數），
 // Compactor 防"單條消息太大"（字符數，OOM 元兇通常是早期讀進來的大文件/巨型日誌）。
 type Compactor struct {
 	MaxChars       int // 壓縮觸發閾值（總字符數）

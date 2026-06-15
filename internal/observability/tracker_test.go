@@ -27,7 +27,7 @@ func approxEq(a, b float64) bool {
 	return d < 1e-9
 }
 
-// 驗證 ch22 engine factory 的核心保證：每個會話各記各的賬，互不汙染。
+// 驗證 engine factory 的核心保證：每個會話各記各的賬，互不汙染。
 func TestCostTracker_PerSessionAccounting(t *testing.T) {
 	ctx := context.Background()
 	stub := &stubProvider{prompt: 1000, completion: 2000}

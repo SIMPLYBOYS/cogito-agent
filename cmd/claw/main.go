@@ -25,7 +25,7 @@ func main() {
 	}
 
 	workDir, _ := os.Getwd()
-	workDir += "/workspace" // ch10: 與 CLI 入口一致，agent 操作範圍隔離到 ./workspace；composer 也從此讀取 AGENTS.md / skills
+	workDir += "/workspace" // 與 CLI 入口一致，agent 操作範圍隔離到 ./workspace；composer 也從此讀取 AGENTS.md / skills
 
 	modelName := "claude-opus-4-8"
 	llmProvider := provider.NewClaudeProvider(modelName)
@@ -36,7 +36,7 @@ func main() {
 	registry.Register(tools.NewBashTool(workDir))
 	registry.Register(tools.NewEditFileTool(workDir))
 
-	// ch22: engine factory —— 每個會話現造一個掛了"該會話專屬 CostTracker"的引擎，實現
+	// engine factory —— 每個會話現造一個掛了"該會話專屬 CostTracker"的引擎，實現
 	// per-chat 成本記賬（registry/middleware 無狀態共享，tracker/session 按頻道隔離）。
 	// EnableThinking=false（手動兩階段思考對 Claude 會退化成 <invoke> 文本）；
 	// Slack 對話式入口默認不開 Plan Mode（否則每條消息都強制 PLAN.md/TODO.md 流程）。
@@ -48,7 +48,7 @@ func main() {
 	// workDir 同時用於：工具沙箱（上面註冊 tools 時）與各頻道 session 的 WorkDir
 	bot := slackbot.NewSlackBot(factory, workDir)
 
-	// ch16: 註冊高危操作審批 middleware。命中黑名單（如 bash rm -r / sudo / 覆蓋 .go）的工具調用
+	// 註冊高危操作審批 middleware。命中黑名單（如 bash rm -r / sudo / 覆蓋 .go）的工具調用
 	// 會被掛起，把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），
 	// 等管理員回 "approve <taskID>" / "reject <taskID>" 才放行。
 	registry.Use(func(ctx context.Context, call schema.ToolCall) (bool, string) {

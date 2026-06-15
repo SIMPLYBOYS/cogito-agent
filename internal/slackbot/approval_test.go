@@ -18,11 +18,11 @@ func TestIsDangerousCommand(t *testing.T) {
 		{"bash", `{"command":"echo '' > main.go"}`, true}, // >.*\.go 覆蓋源碼
 		{"bash", `{"command":"ls -la"}`, false},
 		{"bash", `{"command":"go build ./..."}`, false},
-		{"bash", `{"command":"nginx -s reload"}`, true},         // ch22: 重啟服務
-		{"bash", `{"command":"systemctl restart nginx"}`, true}, // ch22: 系統服務
-		{"bash", `{"command":"kill -9 1234"}`, true},            // ch22: 殺進程
+		{"bash", `{"command":"nginx -s reload"}`, true},         // 重啟服務
+		{"bash", `{"command":"systemctl restart nginx"}`, true}, // 系統服務
+		{"bash", `{"command":"kill -9 1234"}`, true},            // 殺進程
 		{"read_file", `{"path":"/etc/passwd"}`, false},          // 只讀工具永遠放行
-		{"write_file", `{"path":"main.go"}`, false},             // ch16 已知侷限：白名單內但暫無檢查
+		{"write_file", `{"path":"main.go"}`, false},             // 已知侷限：白名單內但暫無檢查
 		{"edit_file", `{"path":"main.go"}`, false},
 	}
 	for _, c := range cases {

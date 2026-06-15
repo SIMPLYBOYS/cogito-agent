@@ -19,7 +19,7 @@ type Session struct {
 	history []schema.Message
 	mu      sync.RWMutex
 
-	// ch18: 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
+	// 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
 	TotalPromptTokens     int
 	TotalCompletionTokens int
 	TotalCostUSD          float64

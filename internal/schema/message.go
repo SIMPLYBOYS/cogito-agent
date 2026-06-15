@@ -21,7 +21,7 @@ type Message struct {
 	Content    string     `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
-	// ch18: 若這是 Assistant 回覆，存放本次調用的 Token 消耗（請求時不發送）
+	// 若這是 Assistant 回覆，存放本次調用的 Token 消耗（請求時不發送）
 	Usage *Usage `json:"usage,omitempty"`
 }
 

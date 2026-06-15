@@ -23,14 +23,14 @@ type MiddlewareFunc func(ctx context.Context, call schema.ToolCall) (allowed boo
 
 type Registry interface {
 	Register(tool BaseTool)
-	Use(mw MiddlewareFunc) // ch16: 全局 middleware 掛載點
+	Use(mw MiddlewareFunc) // 全局 middleware 掛載點
 	GetAvailableTools() []schema.ToolDefinition
 	Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
 }
 
 type registryImpl struct {
 	tools       map[string]BaseTool
-	middlewares []MiddlewareFunc // ch16: 中間件鏈，Execute 前依次執行
+	middlewares []MiddlewareFunc // 中間件鏈，Execute 前依次執行
 }
 
 func NewRegistry() Registry {
@@ -62,7 +62,7 @@ func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
 }
 
 func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
-	// ch19【埋點 5】開啟工具執行 Span（無論成敗，defer 確保結束）
+	// 【埋點 5】開啟工具執行 Span（無論成敗，defer 確保結束）
 	ctx, span := observability.StartSpan(ctx, "Tool.Execute")
 	span.AddAttribute("tool_name", call.Name)
 	span.AddAttribute("arguments", string(call.Arguments))
@@ -77,7 +77,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	// ch16【核心防禦】執行底層邏輯前，依次運行所有 middleware；任一拒絕則短路。
+	// 【核心防禦】執行底層邏輯前，依次運行所有 middleware；任一拒絕則短路。
 	for _, mw := range r.middlewares {
 		allowed, reason := mw(ctx, call)
 		if !allowed {

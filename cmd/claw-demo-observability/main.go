@@ -1,4 +1,4 @@
-// cmd/claw-demo-observability 是 ch18 的可觀測性/成本追蹤演示：用 decorator 模式把
+// cmd/claw-demo-observability 是可觀測性/成本追蹤演示：用 decorator 模式把
 // CostTracker 套在真實 LLMProvider 外面，引擎毫不知情地照常調用，而每次調用的 Token 與
 // 費用被透明地計量、累加進 Session，跑完打印一張"財務報表"。
 package main

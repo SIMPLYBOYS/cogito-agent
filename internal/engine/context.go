@@ -12,7 +12,7 @@ type sessionCtxKeyType struct{}
 var sessionCtxKey sessionCtxKeyType
 
 // WithSession 把當前會話放入 ctx，使下游（如 tools middleware）能取到觸發該工具調用的會話。
-// ch16 用它讓審批 middleware 拿到 session.ID（Slack 下即 channelID），把審批請求發回對應頻道。
+// 用它讓審批 middleware 拿到 session.ID（Slack 下即 channelID），把審批請求發回對應頻道。
 func WithSession(ctx context.Context, s *ctxpkg.Session) context.Context {
 	return context.WithValue(ctx, sessionCtxKey, s)
 }

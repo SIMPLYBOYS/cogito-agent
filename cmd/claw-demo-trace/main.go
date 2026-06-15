@@ -1,4 +1,4 @@
-// cmd/claw-demo-trace 是 ch19 的鏈路追蹤演示：觸發一個"一輪內並行調用兩個不同工具"的任務，
+// cmd/claw-demo-trace 是鏈路追蹤演示：觸發一個"一輪內並行調用兩個不同工具"的任務，
 // 引擎在 .claw/traces/ 下產出一棵 Span 樹（Agent.Run → Turn-1 → 並行的兩個 Tool.Execute）。
 // tracing 是引擎級的（在 engine.Run 內），所以其實任何入口都會產出 trace，這裡只是給個能觀察
 // 併發樹形結構的場景。

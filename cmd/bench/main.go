@@ -1,4 +1,4 @@
-// cmd/bench 是 ch20 的自動化評測入口：把 ch05-ch19 累積的全部能力當黑盒，用
+// cmd/bench 是自動化評測入口：把累積的全部能力當黑盒，用
 // SetupScript→TaskPrompt→ValidateScript 三段式定義測試，以 bash exit code 判對錯，
 // 跑完輸出通過率 + 總花費。與 cmd/claw 等入口並存。
 package main

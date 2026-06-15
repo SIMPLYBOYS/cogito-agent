@@ -106,7 +106,7 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 }
 
 // IsDangerousCommand 判斷工具調用是否命中高危黑名單。
-// 注意（ch16 已知侷限）：write_file / edit_file 在白名單內但暫無檢查邏輯，是預留擴展點。
+// 注意（已知侷限）：write_file / edit_file 在白名單內但暫無檢查邏輯，是預留擴展點。
 func IsDangerousCommand(toolName string, args string) bool {
 	if toolName != "bash" && toolName != "write_file" && toolName != "edit_file" {
 		return false
@@ -117,9 +117,9 @@ func IsDangerousCommand(toolName string, args string) bool {
 			`sudo\s+`,      // 提權
 			`drop\s+`,      // SQL DROP
 			`>.*\.go`,      // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
-			`nginx\s+-s`,   // ch22: 重啟/停止 nginx（會中斷線上服務）
-			`systemctl\s+`, // ch22: 系統服務管理（start/stop/restart）
-			`kill\s+`,      // ch22: 殺進程
+			`nginx\s+-s`,   // 重啟/停止 nginx（會中斷線上服務）
+			`systemctl\s+`, // 系統服務管理（start/stop/restart）
+			`kill\s+`,      // 殺進程
 		}
 		for _, p := range dangerousPatterns {
 			if matched, _ := regexp.MatchString(p, args); matched {

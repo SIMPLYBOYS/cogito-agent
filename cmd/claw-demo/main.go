@@ -1,4 +1,4 @@
-// cmd/claw-demo 是 ch11 的會話演示 harness：用兩個併發 session 讓 session 行為眼見為憑——
+// cmd/claw-demo 是會話演示 harness：用兩個併發 session 讓 session 行為眼見為憑——
 // (1) 工作記憶滑動窗口會"遺忘"被擠出窗口的內容；(2) 跨 session 完全隔離。
 // 這不是實用入口（實用場景見 cmd/claw 的 Slack 多頻道 session）。
 package main
@@ -38,7 +38,7 @@ func main() {
 	llmProvider := provider.NewClaudeProvider("claude-opus-4-8")
 
 	registry := tools.NewRegistry()
-	// ch11 已知侷限：tools 的 workDir 寫死為 Session A 的目錄，與 session.WorkDir 尚未對齊；
+	// 已知侷限：tools 的 workDir 寫死為 Session A 的目錄，與 session.WorkDir 尚未對齊；
 	// Session B 用"不準調用工具"規避（per-session 工具沙箱留待後續章節）。
 	registry.Register(tools.NewReadFileTool(frontDir))
 
