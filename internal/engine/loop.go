@@ -70,6 +70,11 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
 	systemMsg := composer.Build()
 
+	// per-task 成本熔斷的基準：快照本次 Run 進入時 session 的累計花費。成本檢查只比較
+	// 「本次任務的增量」(現值 − 基準)，避免拿頻道累計花費去誤殺後續任務（session 長存、
+	// 跨多則訊息只增不減；用累計值會讓頻道用久後每則新任務在第 1 回合就被永久鎖死）。
+	startCostUSD := session.CostUSD()
+
 	turnCount := 0
 	for {
 		turnCount++
@@ -84,15 +89,15 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			return fmt.Errorf("達到最大回合數上限 %d，強制終止", e.MaxTurns)
 		}
 
-		// 【硬防線③】成本熔斷：依 CostTracker 累加到 session 的花費，超預算即斷路。
-		// 把 CostTracker 從「只記帳」升級為「斷路器」，控制盲目重試的金錢失控。
+		// 【硬防線③】per-task 成本熔斷：只看本次任務的增量 (現值 − 進入時基準)，超預算即斷路。
+		// 把 CostTracker 從「只記帳」升級為「斷路器」，控制單一任務盲目重試的金錢失控。
 		if e.MaxCostUSD > 0 {
-			if spent := session.CostUSD(); spent > e.MaxCostUSD {
-				msg := fmt.Sprintf("⚠️ 本次任務累計花費已達 $%.4f，超過單任務預算上限 $%.2f，為控制成本已強制中止。", spent, e.MaxCostUSD)
+			if spent := session.CostUSD() - startCostUSD; spent > e.MaxCostUSD {
+				msg := fmt.Sprintf("⚠️ 本次任務已花費 $%.4f，超過單任務預算上限 $%.2f，為控制成本已強制中止。", spent, e.MaxCostUSD)
 				if reporter != nil {
 					reporter.OnMessage(ctx, msg)
 				}
-				return fmt.Errorf("達到成本上限 $%.2f（已花費 $%.4f），強制終止", e.MaxCostUSD, spent)
+				return fmt.Errorf("達到單任務成本上限 $%.2f（本次已花費 $%.4f），強制終止", e.MaxCostUSD, spent)
 			}
 		}
 

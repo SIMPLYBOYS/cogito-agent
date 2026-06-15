@@ -90,3 +90,28 @@ func TestRun_CostCircuitBreaker(t *testing.T) {
 		t.Errorf("應在累計 1.2>1.0 時於第 5 輪斷路，Generate 次數應=4，實際=%d", fp.calls)
 	}
 }
+
+// per-task 化的關鍵保證：session 已有「前幾則任務」累計的花費（遠超上限）時，新任務只看
+// 自己的增量，不應被歷史累計值誤殺。判別性測試——累計語意會在第 1 回合(calls=0)立即斷路，
+// per-task 語意則照常跑到本次增量超標(calls=4)。
+func TestRun_CostBreakerIsPerTask(t *testing.T) {
+	sess := ctxpkg.NewSession("pertask", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+	sess.RecordUsage(0, 0, 5.0) // 模擬此頻道先前已累計 $5（>單任務上限 $1）
+
+	fp := &fakeProvider{costPer: 0.3, sess: sess}
+	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
+	eng.MaxTurns = 100
+	eng.MaxCostUSD = 1.0
+
+	err := eng.Run(context.Background(), sess, nil)
+	if err == nil {
+		t.Fatal("本次任務增量超預算時仍應中止")
+	}
+	if !strings.Contains(err.Error(), "成本上限") {
+		t.Errorf("錯誤訊息應指明成本熔斷: %v", err)
+	}
+	if fp.calls != 4 {
+		t.Errorf("per-task 應只算本次增量、跑滿 4 輪才斷路；若被歷史累計 $5 誤殺會=0。實際=%d", fp.calls)
+	}
+}
