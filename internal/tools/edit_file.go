@@ -151,10 +151,52 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 		return "", fmt.Errorf("模糊匹配到了 %d 處代碼，請提供更多上下文以定位", matchCount)
 	}
 
+	// 提取匹配塊首行的「基礎縮進前綴」，把 newText 重新對齊到該縮進層級，避免深層巢狀塊
+	// 被替換成模型給的淺縮進、格式走樣。
+	baseIndent := leadingWhitespace(contentLines[matchStartIndex])
+
 	var newContentLines []string
 	newContentLines = append(newContentLines, contentLines[:matchStartIndex]...)
-	newContentLines = append(newContentLines, newText)
+	newContentLines = append(newContentLines, reindent(newText, baseIndent))
 	newContentLines = append(newContentLines, contentLines[matchEndIndex:]...)
 
 	return strings.Join(newContentLines, "\n"), nil
+}
+
+// leadingWhitespace 返回一行開頭的空白前綴（空格/Tab）。
+func leadingWhitespace(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+}
+
+// reindent 把 newText 重新對齊到 baseIndent：先把整段 dedent 到 flush-left（扣掉所有非空行
+// 的最小共同縮進，保留行間相對結構），再給每個非空行補上 baseIndent。空白行歸零、不留尾隨
+// 空白。如此 newText 不論模型給 0/4/8 空格縮進，最終都正確貼合目標塊的縮進層級。
+func reindent(newText, baseIndent string) string {
+	lines := strings.Split(newText, "\n")
+
+	// 1. 求所有非空行的最小共同前導空白寬度
+	minIndent := -1
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue // 空白行不參與 dedent 計算
+		}
+		indent := len(leadingWhitespace(l))
+		if minIndent == -1 || indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent < 0 {
+		minIndent = 0 // 全部是空白行
+	}
+
+	// 2. 逐行 dedent 掉 minIndent 後補 baseIndent
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			lines[i] = "" // 空白行歸零，避免遺留原縮進
+			continue
+		}
+		lines[i] = baseIndent + l[minIndent:]
+	}
+
+	return strings.Join(lines, "\n")
 }
