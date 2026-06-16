@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
@@ -113,5 +115,94 @@ func TestRun_CostBreakerIsPerTask(t *testing.T) {
 	}
 	if fp.calls != 4 {
 		t.Errorf("per-task 應只算本次增量、跑滿 4 輪才斷路；若被歷史累計 $5 誤殺會=0。實際=%d", fp.calls)
+	}
+}
+
+// concProbe 記錄「同時在 Execute 中」的工具峰值，用來驗證併發上限。
+type concProbe struct {
+	mu       sync.Mutex
+	cur, max int
+}
+
+func (p *concProbe) Name() string                      { return "probe" }
+func (p *concProbe) Definition() schema.ToolDefinition { return schema.ToolDefinition{Name: "probe"} }
+func (p *concProbe) Execute(context.Context, json.RawMessage) (string, error) {
+	p.mu.Lock()
+	p.cur++
+	if p.cur > p.max {
+		p.max = p.cur
+	}
+	p.mu.Unlock()
+	time.Sleep(20 * time.Millisecond) // 製造重疊窗口，讓併發真的發生
+	p.mu.Lock()
+	p.cur--
+	p.mu.Unlock()
+	return "ok", nil
+}
+func (p *concProbe) peak() int { p.mu.Lock(); defer p.mu.Unlock(); return p.max }
+
+// batchProvider 在第 1 輪一次性吐出 n 個工具請求，第 2 輪結束。
+type batchProvider struct {
+	mu    sync.Mutex
+	n     int
+	calls int
+}
+
+func (p *batchProvider) Generate(context.Context, []schema.Message, []schema.ToolDefinition) (*schema.Message, error) {
+	p.mu.Lock()
+	p.calls++
+	first := p.calls == 1
+	p.mu.Unlock()
+	if first {
+		tcs := make([]schema.ToolCall, p.n)
+		for i := range tcs {
+			tcs[i] = schema.ToolCall{ID: fmt.Sprintf("t%d", i), Name: "probe", Arguments: []byte("{}")}
+		}
+		return &schema.Message{Role: schema.RoleAssistant, ToolCalls: tcs}, nil
+	}
+	return &schema.Message{Role: schema.RoleAssistant, Content: "done"}, nil
+}
+
+// 一次吐出 12 個工具、上限 3：同時在跑的峰值必須 ≤3，且確實達到併發（≥2）。
+func TestRun_ToolConcurrencyIsCapped(t *testing.T) {
+	probe := &concProbe{}
+	reg := tools.NewRegistry()
+	reg.Register(probe)
+
+	eng := NewAgentEngine(&batchProvider{n: 12}, reg, false, false)
+	eng.MaxConcurrentTools = 3
+	eng.MaxCostUSD = 0
+
+	sess := ctxpkg.NewSession("conc", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("不應報錯: %v", err)
+	}
+	if pk := probe.peak(); pk > 3 {
+		t.Errorf("同時併發峰值應 ≤3，實際 %d", pk)
+	} else if pk < 2 {
+		t.Errorf("12 個工具、上限 3，峰值應確實達到併發(≥2)，實際 %d（疑似被序列化）", pk)
+	}
+}
+
+// MaxConcurrentTools=0 → 不限流（信號量為 no-op，不可死鎖）：8 個應大量同時併發。
+func TestRun_ToolConcurrencyUnlimitedWhenZero(t *testing.T) {
+	probe := &concProbe{}
+	reg := tools.NewRegistry()
+	reg.Register(probe)
+
+	eng := NewAgentEngine(&batchProvider{n: 8}, reg, false, false)
+	eng.MaxConcurrentTools = 0
+	eng.MaxCostUSD = 0
+
+	sess := ctxpkg.NewSession("conc0", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("不應報錯（不限流不應死鎖）: %v", err)
+	}
+	if pk := probe.peak(); pk <= 3 {
+		t.Errorf("不限流時 8 個應大量同時併發，峰值應 >3，實際 %d", pk)
 	}
 }

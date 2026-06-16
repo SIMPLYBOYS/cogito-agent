@@ -16,8 +16,9 @@ import (
 
 // 主循環硬性防線的默認值：兩者都是框架層強制（不依賴模型自覺），<=0 表示關閉該防線。
 const (
-	defaultMaxTurns   = 40  // 單次 Run 的最大回合數
-	defaultMaxCostUSD = 1.0 // 單次 Run 的成本熔斷上限（USD）
+	defaultMaxTurns           = 40  // 單次 Run 的最大回合數
+	defaultMaxCostUSD         = 1.0 // 單次 Run 的成本熔斷上限（USD）
+	defaultMaxConcurrentTools = 5   // 單輪內工具的最大同時併發數
 )
 
 // 引擎對 workspace 無狀態（workspace 跟著 Session 走）。
@@ -30,19 +31,24 @@ type AgentEngine struct {
 	PlanMode       bool
 	MaxTurns       int     // 主循環硬性回合上限（防失控重試燒 API）；<=0 不限制
 	MaxCostUSD     float64 // 單次 Run 的成本熔斷上限（USD）；<=0 不限制
-	compactor      *ctxpkg.Compactor
-	recovery       *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
-	injector       *ReminderInjector       // 死循環探測與強提醒注入
+	// 單輪內工具的最大同時併發數（信號量）；<=0 不限制。防模型一次吐大量工具請求時瞬間打爆
+	// 下游（如網路工具撞 Rate Limit）。採 per-turn 而非 registry 全局，以避開 spawn_subagent
+	// 的重入死鎖（持令牌的工具其內部 RunSub 又搶同一令牌）。
+	MaxConcurrentTools int
+	compactor          *ctxpkg.Compactor
+	recovery           *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
+	injector           *ReminderInjector       // 死循環探測與強提醒注入
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
 	return &AgentEngine{
-		provider:       p,
-		registry:       r,
-		EnableThinking: enableThinking,
-		PlanMode:       planMode,
-		MaxTurns:       defaultMaxTurns,
-		MaxCostUSD:     defaultMaxCostUSD,
+		provider:           p,
+		registry:           r,
+		EnableThinking:     enableThinking,
+		PlanMode:           planMode,
+		MaxTurns:           defaultMaxTurns,
+		MaxCostUSD:         defaultMaxCostUSD,
+		MaxConcurrentTools: defaultMaxConcurrentTools,
 		// 閾值從演示用的 3000 提到 20000（≈6000 中文字），更貼近正常使用；
 		// 生產環境仍建議按 model context window 自動計算或改用 token 級估算。
 		compactor: ctxpkg.NewCompactor(200000, 6),
@@ -188,11 +194,16 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		turnCalls := make([]schema.ToolCall, len(actionResp.ToolCalls))
 		turnResults := make([]schema.ToolResult, len(actionResp.ToolCalls))
 
+		// 【併發限流】緩衝 channel 當計數信號量：限制本輪同時在跑的工具數，不影響 WaitGroup 聚合。
+		toolSem := newToolSemaphore(e.MaxConcurrentTools)
+
 		for i, toolCall := range actionResp.ToolCalls {
 			wg.Add(1)
 
 			go func(idx int, call schema.ToolCall) {
 				defer wg.Done()
+				toolSem.acquire()       // 取令牌：已達上限就阻塞等待
+				defer toolSem.release() // 跑完歸還
 
 				if reporter != nil {
 					reporter.OnToolCall(ctx, call.Name, string(call.Arguments))
@@ -294,10 +305,16 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyReg
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
 		var wg sync.WaitGroup
 
+		// 子智能體的工具 fan-out 同樣限流（獨立於主循環的信號量——這正是 per-turn 設計
+		// 避開重入死鎖的關鍵：主 turn 與 subagent turn 各持各的令牌池）。
+		toolSem := newToolSemaphore(e.MaxConcurrentTools)
+
 		for i, toolCall := range actionResp.ToolCalls {
 			wg.Add(1)
 			go func(idx int, call schema.ToolCall) {
 				defer wg.Done()
+				toolSem.acquire()
+				defer toolSem.release()
 
 				var r Reporter
 				if reporter != nil {
@@ -332,5 +349,31 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyReg
 
 		wg.Wait()
 		contextHistory = append(contextHistory, observationMsgs...)
+	}
+}
+
+// toolSemaphore 是基於緩衝 channel 的計數信號量，用來限制工具的同時併發數。
+// 容量 <=0 時 ch 為 nil，acquire/release 皆為 no-op（不限流）。值型別即可安全傳遞：
+// channel 是引用型別，複製結構體仍共享同一個底層 channel。
+type toolSemaphore struct {
+	ch chan struct{}
+}
+
+func newToolSemaphore(max int) toolSemaphore {
+	if max <= 0 {
+		return toolSemaphore{}
+	}
+	return toolSemaphore{ch: make(chan struct{}, max)}
+}
+
+func (s toolSemaphore) acquire() {
+	if s.ch != nil {
+		s.ch <- struct{}{}
+	}
+}
+
+func (s toolSemaphore) release() {
+	if s.ch != nil {
+		<-s.ch
 	}
 }
