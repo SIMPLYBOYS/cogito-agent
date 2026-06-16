@@ -35,9 +35,13 @@ type AgentEngine struct {
 	// 下游（如網路工具撞 Rate Limit）。採 per-turn 而非 registry 全局，以避開 spawn_subagent
 	// 的重入死鎖（持令牌的工具其內部 RunSub 又搶同一令牌）。
 	MaxConcurrentTools int
-	compactor          *ctxpkg.Compactor
-	recovery           *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
-	injector           *ReminderInjector       // 死循環探測與強提醒注入
+	// 共享資產目錄（AGENTS.md / .claw/skills 的來源）。空則回退 session.WorkDir。
+	// 用於把「共享配置/技能」與「per-channel 工作產物目錄」解耦：Slack 多頻道時工具 rooted
+	// 在各頻道子目錄，但技能與 AGENTS.md 從根 workspace 共享讀取。
+	AssetsDir string
+	compactor *ctxpkg.Compactor
+	recovery  *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
+	injector  *ReminderInjector       // 死循環探測與強提醒注入
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
@@ -73,7 +77,13 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		log.Printf("📊 [Tracing] 本次任務的執行回放鏈路已保存至工作區的 .claw/traces 目錄下\n")
 	}()
 
-	composer := ctxpkg.NewPromptComposer(session.WorkDir, e.PlanMode)
+	// 資產（AGENTS.md / 技能）從 AssetsDir 讀；未設定則回退到工具的工作目錄（CLI/demo 等
+	// 單一目錄場景行為不變）。
+	assetsDir := e.AssetsDir
+	if assetsDir == "" {
+		assetsDir = session.WorkDir
+	}
+	composer := ctxpkg.NewPromptComposer(assetsDir, e.PlanMode)
 	systemMsg := composer.Build()
 
 	// per-task 成本熔斷的基準：快照本次 Run 進入時 session 的累計花費。成本檢查只比較

@@ -68,7 +68,11 @@ func main() {
 		})
 
 		tracked := observability.NewCostTracker(llmProvider, modelName, sess)
-		return engine.NewAgentEngine(tracked, registry, false, false)
+		eng := engine.NewAgentEngine(tracked, registry, false, false)
+		// 技能（.claw/skills）與 AGENTS.md 從【共享根目錄】讀，與 per-channel 工作產物分離：
+		// 工具 rooted 在 sess.WorkDir（各頻道子目錄），但配置/技能是全 bot 共用資產。
+		eng.AssetsDir = rootDir
+		return eng
 	}
 
 	bot = slackbot.NewSlackBot(factory, rootDir)

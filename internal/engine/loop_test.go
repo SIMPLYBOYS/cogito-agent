@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -204,5 +206,64 @@ func TestRun_ToolConcurrencyUnlimitedWhenZero(t *testing.T) {
 	}
 	if pk := probe.peak(); pk <= 3 {
 		t.Errorf("不限流時 8 個應大量同時併發，峰值應 >3，實際 %d", pk)
+	}
+}
+
+// captureProvider 抓下發給模型的 system prompt，並以「無工具調用」讓 Run 在第 1 輪即結束。
+type captureProvider struct {
+	system string
+}
+
+func (p *captureProvider) Generate(_ context.Context, msgs []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
+	for _, m := range msgs {
+		if m.Role == schema.RoleSystem {
+			p.system = m.Content
+		}
+	}
+	return &schema.Message{Role: schema.RoleAssistant, Content: "done"}, nil
+}
+
+// AssetsDir 有設：composer 應從 AssetsDir 讀 AGENTS.md，而非 session.WorkDir。
+func TestRun_ComposerReadsAssetsDirWhenSet(t *testing.T) {
+	assets := t.TempDir()
+	work := t.TempDir() // 與 assets 不同、且為空
+	if err := os.WriteFile(filepath.Join(assets, "AGENTS.md"), []byte("PROJECT_MARKER_XYZ"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp := &captureProvider{}
+	eng := NewAgentEngine(cp, newTestRegistry(), false, false)
+	eng.AssetsDir = assets
+	eng.MaxCostUSD = 0
+
+	sess := ctxpkg.NewSession("assets", work)
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("不應報錯: %v", err)
+	}
+	if !strings.Contains(cp.system, "PROJECT_MARKER_XYZ") {
+		t.Error("composer 應從 AssetsDir 讀到 AGENTS.md（共享資產與 per-channel 工作目錄分離）")
+	}
+}
+
+// AssetsDir 未設：回退到 session.WorkDir（CLI/demo 單一目錄行為不變）。
+func TestRun_ComposerFallsBackToWorkDir(t *testing.T) {
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "AGENTS.md"), []byte("WORKDIR_MARKER_ABC"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp := &captureProvider{}
+	eng := NewAgentEngine(cp, newTestRegistry(), false, false)
+	// 不設 AssetsDir
+	eng.MaxCostUSD = 0
+
+	sess := ctxpkg.NewSession("fallback", work)
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("不應報錯: %v", err)
+	}
+	if !strings.Contains(cp.system, "WORKDIR_MARKER_ABC") {
+		t.Error("AssetsDir 未設時應回退到 session.WorkDir 讀 AGENTS.md")
 	}
 }
