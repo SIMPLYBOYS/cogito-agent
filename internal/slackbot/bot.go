@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -30,10 +31,11 @@ type SlackBot struct {
 	signingSecret string
 	botUserID     string
 	factory       EngineFactory // 每會話現造引擎（替換原來的固定 engine）
-	workDir       string        // 各頻道 session 共用的工作目錄（tools 也註冊在此）
+	workDir       string        // 工作區【根】目錄；各頻道隔離到其下子目錄（見 channelWorkDir）
 
-	// 弱點修補②：標記正在運行（含等待審批）的頻道，避免同一 session 併發起第二個 Run
-	// 導致懸空 tool_use / 狀態汙染。
+	// per-WorkDir 鎖：key 為頻道的工作目錄。確保同一目錄同一時刻只有一個 Agent 任務在跑
+	// （改檔），杜絕多頻道/多指令在同一目錄並發 bash / write_file 的物理檔案競態。
+	// 不同目錄（不同頻道）可並行。
 	busy   map[string]bool
 	busyMu sync.Mutex
 }
@@ -116,7 +118,7 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			// 弱點修補②：會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session
-			if !b.tryAcquire(ev.Channel) {
+			if !b.tryAcquire(b.channelWorkDir(ev.Channel)) {
 				b.SendMessage(ev.Channel, "⏳ 上一個任務仍在進行（或正在等待審批），請先處理審批或稍候再發。")
 				break
 			}
@@ -133,7 +135,7 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 				if b.tryResolveApproval(ev.Channel, text) {
 					break
 				}
-				if !b.tryAcquire(ev.Channel) {
+				if !b.tryAcquire(b.channelWorkDir(ev.Channel)) {
 					b.SendMessage(ev.Channel, "⏳ 上一個任務仍在進行（或正在等待審批），請先處理審批或稍候再發。")
 					break
 				}
@@ -147,23 +149,55 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
-	defer b.release(channelID) // 弱點修補②：運行結束（含審批被拒/超時/崩潰）釋放忙碌標記
+	workDir := b.channelWorkDir(channelID)
+	defer b.release(workDir) // per-WorkDir 鎖：運行結束（含審批被拒/超時/崩潰）釋放
 
 	reporter := &SlackReporter{
 		client:    b.client,
 		channelID: channelID,
 	}
 
-	// 每個 Slack 頻道/私聊 = 一個持久 Session：多輪對話記憶 + 跨頻道隔離，
-	// 由 GlobalSessionMgr 按 channelID 管理。
-	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, b.workDir)
+	// per-channel 磁碟隔離：每個頻道在工作區根目錄下擁有自己的子目錄，互不覆寫。
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		reporter.sendMsg(fmt.Sprintf("❌ 無法建立工作目錄: %v", err))
+		return
+	}
+
+	// 每個 Slack 頻道/私聊 = 一個持久 Session：多輪對話記憶 + 跨頻道隔離（含磁碟），
+	// 由 GlobalSessionMgr 按 channelID 管理，WorkDir 為該頻道專屬目錄。
+	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, workDir)
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	// 每會話用 factory 現造一個掛了專屬 CostTracker 的引擎，各頻道各記各的賬
+	// 每會話用 factory 現造一個掛了專屬 CostTracker、且工具 rooted 在本頻道 WorkDir 的引擎
 	eng := b.factory(session)
 	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
 	}
+}
+
+// channelWorkDir 把每個頻道隔離到工作區根目錄下自己的子目錄，使不同頻道的檔案操作天然
+// 互不干擾；同頻道再靠 per-WorkDir 鎖序列化。channelID 經 sanitizeSegment 清理，杜絕
+// 路徑穿越（如 "../.."）。
+func (b *SlackBot) channelWorkDir(channelID string) string {
+	return filepath.Join(b.workDir, "channels", sanitizeSegment(channelID))
+}
+
+// sanitizeSegment 把字符串清理成單一安全的路徑片段：非 [A-Za-z0-9_-] 一律換成 '_'，
+// 確保結果不含 '/'、'.'，不可能逃出父目錄。
+func sanitizeSegment(s string) string {
+	var sb strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			sb.WriteRune(r)
+		default:
+			sb.WriteByte('_')
+		}
+	}
+	if sb.Len() == 0 {
+		return "default"
+	}
+	return sb.String()
 }
 
 // SendMessage 向指定頻道發送一條消息（供審批 middleware 推送審批請求用）。
@@ -218,20 +252,21 @@ func (b *SlackBot) tryResolveApproval(channelID, text string) bool {
 	return true
 }
 
-// tryAcquire 標記頻道為忙碌；若已忙碌返回 false（弱點修補②：防同一 session 併發 Run）。
-func (b *SlackBot) tryAcquire(channelID string) bool {
+// tryAcquire 以 workDir 為 key 標記忙碌；已忙碌返回 false。per-WorkDir 鎖：同一目錄同一
+// 時刻只允許一個 Agent 任務在跑（改檔），不同目錄（不同頻道）互不阻塞、可並行。
+func (b *SlackBot) tryAcquire(workDir string) bool {
 	b.busyMu.Lock()
 	defer b.busyMu.Unlock()
-	if b.busy[channelID] {
+	if b.busy[workDir] {
 		return false
 	}
-	b.busy[channelID] = true
+	b.busy[workDir] = true
 	return true
 }
 
-func (b *SlackBot) release(channelID string) {
+func (b *SlackBot) release(workDir string) {
 	b.busyMu.Lock()
-	delete(b.busy, channelID)
+	delete(b.busy, workDir)
 	b.busyMu.Unlock()
 }
 
