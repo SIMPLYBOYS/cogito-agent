@@ -27,14 +27,37 @@ type TestCase struct {
 	MaxTurns       int    // 允許的最大輪數（目前未接入）
 }
 
-// TestResult 存放單次跑分結果。
+// TestResult 存放單次跑分結果。除了「結果/總成本/總耗時」，還收集兩個【過程】指標來區分
+// 「一發入魂」與「重試多次才過」——它們與 Passed 正交，量測架構（Prompt/工具設計）的順滑度。
 type TestResult struct {
-	TestCaseID   string
-	Passed       bool
-	TotalCostUSD float64
-	DurationMs   int64
-	ErrorMsg     string
+	TestCaseID     string
+	Passed         bool
+	TotalCostUSD   float64
+	DurationMs     int64
+	TurnCount      int // 完成任務用了幾輪 ReAct（駕馭順滑度：一發入魂 vs 掙扎多輪）
+	ToolErrorCount int // 中途工具報錯次數（試錯成本：摔了幾跤）
+	ErrorMsg       string
 }
+
+// benchReporter 是跑分專用的計數 Reporter：靜默收集「回合數」與「工具報錯次數」，不刷屏。
+type benchReporter struct {
+	turns      int
+	toolErrors int
+}
+
+func (r *benchReporter) OnTurn(ctx context.Context, turn int) {
+	if turn > r.turns {
+		r.turns = turn
+	}
+}
+func (r *benchReporter) OnToolResult(ctx context.Context, toolName, result string, isError bool) {
+	if isError {
+		r.toolErrors++
+	}
+}
+func (r *benchReporter) OnThinking(ctx context.Context)                        {}
+func (r *benchReporter) OnToolCall(ctx context.Context, toolName, args string) {}
+func (r *benchReporter) OnMessage(ctx context.Context, content string)         {}
 
 type BenchmarkRunner struct {
 	modelName string
@@ -62,7 +85,8 @@ func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) {
 
 		if res.Passed {
 			passedCount++
-			log.Printf(">>> ✅ 用例 [%s] 測試通過! | 耗時: %dms | 花費: $%.6f\n", tc.ID, res.DurationMs, res.TotalCostUSD)
+			log.Printf(">>> ✅ 用例 [%s] 測試通過! | 回合: %d | 試錯(工具報錯): %d | 耗時: %dms | 花費: $%.6f\n",
+				tc.ID, res.TurnCount, res.ToolErrorCount, res.DurationMs, res.TotalCostUSD)
 		} else {
 			log.Printf(">>> ❌ 用例 [%s] 測試失敗! | 錯誤: %s\n", tc.ID, res.ErrorMsg)
 		}
@@ -105,10 +129,19 @@ func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestRe
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, false)
 
-	// 4. 讓 Agent 幹活；reporter 傳 nil 屏蔽刷屏（依賴各處 if reporter != nil 守衛）
+	// 4. 讓 Agent 幹活；用計數 Reporter 靜默收集回合數與工具報錯次數（過程指標）
+	rep := &benchReporter{}
 	session.Append(schema.Message{Role: schema.RoleUser, Content: tc.TaskPrompt})
-	if err := eng.Run(ctx, session, nil); err != nil {
-		return TestResult{TestCaseID: tc.ID, Passed: false, ErrorMsg: fmt.Sprintf("Agent 崩潰: %v", err)}
+	if err := eng.Run(ctx, session, rep); err != nil {
+		return TestResult{
+			TestCaseID:     tc.ID,
+			Passed:         false,
+			TotalCostUSD:   session.TotalCostUSD,
+			DurationMs:     time.Since(startTime).Milliseconds(),
+			TurnCount:      rep.turns,
+			ToolErrorCount: rep.toolErrors,
+			ErrorMsg:       fmt.Sprintf("Agent 崩潰: %v", err),
+		}
 	}
 
 	// 5. 【核心斷言】用 ValidateScript 的 bash exit code 驗收成果
@@ -120,18 +153,22 @@ func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestRe
 
 	if err != nil {
 		return TestResult{
-			TestCaseID:   tc.ID,
-			Passed:       false,
-			TotalCostUSD: session.TotalCostUSD,
-			DurationMs:   duration,
-			ErrorMsg:     fmt.Sprintf("驗證腳本執行失敗: %s", string(out)),
+			TestCaseID:     tc.ID,
+			Passed:         false,
+			TotalCostUSD:   session.TotalCostUSD,
+			DurationMs:     duration,
+			TurnCount:      rep.turns,
+			ToolErrorCount: rep.toolErrors,
+			ErrorMsg:       fmt.Sprintf("驗證腳本執行失敗: %s", string(out)),
 		}
 	}
 
 	return TestResult{
-		TestCaseID:   tc.ID,
-		Passed:       true,
-		TotalCostUSD: session.TotalCostUSD,
-		DurationMs:   duration,
+		TestCaseID:     tc.ID,
+		Passed:         true,
+		TotalCostUSD:   session.TotalCostUSD,
+		DurationMs:     duration,
+		TurnCount:      rep.turns,
+		ToolErrorCount: rep.toolErrors,
 	}
 }

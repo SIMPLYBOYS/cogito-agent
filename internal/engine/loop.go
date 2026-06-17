@@ -114,6 +114,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			}
 		}
 
+		if reporter != nil {
+			reporter.OnTurn(ctx, turnCount) // 供跑分量測順滑度（實際執行的回合數）
+		}
+
 		// 【埋點 2】Turn Span（defer 確保 break/return 也會結束並計入樹）
 		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
 		defer turnSpan.EndSpan()

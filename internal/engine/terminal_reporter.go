@@ -38,6 +38,10 @@ func (r *TerminalReporter) OnToolResult(ctx context.Context, toolName string, re
 	}
 }
 
+func (r *TerminalReporter) OnTurn(ctx context.Context, turn int) {
+	fmt.Printf("\n========== Turn %d ==========\n", turn)
+}
+
 func (r *TerminalReporter) OnMessage(ctx context.Context, content string) {
 	if content == "" {
 		return

@@ -304,4 +304,7 @@ func (r *SlackReporter) OnMessage(ctx context.Context, content string) {
 	r.sendMsg(content)
 }
 
+// OnTurn 不回推到 Slack（回合計數對使用者是噪音，僅供跑分/觀測語意）。
+func (r *SlackReporter) OnTurn(ctx context.Context, turn int) {}
+
 var _ engine.Reporter = (*SlackReporter)(nil)
