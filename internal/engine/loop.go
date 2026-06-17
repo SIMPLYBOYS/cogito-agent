@@ -71,11 +71,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	ctx, rootSpan := observability.StartSpan(ctx, "Agent.Run")
 	rootSpan.AddAttribute("SessionID", session.ID)
 	rootSpan.AddAttribute("WorkDir", session.WorkDir)
-	defer func() {
-		rootSpan.EndSpan()
-		_ = observability.ExportTraceToFile(rootSpan, session.WorkDir, session.ID)
-		log.Printf("📊 [Tracing] 本次任務的執行回放鏈路已保存至工作區的 .claw/traces 目錄下\n")
-	}()
+	// span 經 OTel SDK 自動匯出（OTLP → Jaeger / Langfuse 等，由 InitTracing 配置；未配置則 no-op）。
+	defer rootSpan.EndSpan()
 
 	// 資產（AGENTS.md / 技能）從 AssetsDir 讀；未設定則回退到工具的工作目錄（CLI/demo 等
 	// 單一目錄場景行為不變）。
@@ -174,6 +171,12 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// 【埋點 4】記錄 Action 調用
 		actCtx, actSpan := observability.StartSpan(turnCtx, "LLM.Action")
 		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
+		if actionResp != nil && actionResp.Usage != nil {
+			// gen_ai 語意約定：讓 Langfuse 等後端把此 span 識別為一次 LLM 生成並計 token/成本。
+			actSpan.AddAttribute("gen_ai.operation.name", "chat")
+			actSpan.AddAttribute("gen_ai.usage.input_tokens", actionResp.Usage.PromptTokens)
+			actSpan.AddAttribute("gen_ai.usage.output_tokens", actionResp.Usage.CompletionTokens)
+		}
 		actSpan.EndSpan()
 		if err != nil {
 			return fmt.Errorf("Action 階段失敗: %w", err)

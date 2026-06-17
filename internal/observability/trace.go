@@ -2,72 +2,56 @@ package observability
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"sync"
-	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-// traceKey 是 Context 中存放當前 Span 的專屬 Key。
-type traceKey struct{}
+const tracerName = "github.com/SIMPLYBOYS/go-tiny-claw"
 
-// Span 代表鏈路追蹤中的一個時間跨度與操作節點（樹形，通過 context 級聯父子關係）。
+// Span 是對 OTel trace.Span 的薄包裝：保留專案既有的 StartSpan/EndSpan/AddAttribute API，
+// 底層改由 OTel SDK 負責 TraceID/SpanID 分配、context 父子傳播、批次與匯出
+// （OTLP → Jaeger / Langfuse / 任何相容後端）。未配置後端時全域 tracer 為 no-op，span 變零成本空操作。
 type Span struct {
-	Name       string                 `json:"name"`
-	StartTime  time.Time              `json:"start_time"`
-	EndTime    time.Time              `json:"end_time"`
-	DurationMs int64                  `json:"duration_ms"`
-	Attributes map[string]interface{} `json:"attributes,omitempty"` // 元數據（如 Token、執行的命令）
-	Children   []*Span                `json:"children,omitempty"`   // 子跨度
-
-	mu sync.Mutex // 保護 Children 的併發寫入
+	otel oteltrace.Span
 }
 
-// StartSpan 開啟一個新跨度：若 ctx 中已有父 Span 則掛為其子節點，並把自己作為新的當前 Span 放回衍生 ctx。
+// StartSpan 開啟一個新跨度，並把它放回衍生 ctx（OTel 以 context 傳播父子關係，與舊實現一致）。
 func StartSpan(ctx context.Context, name string) (context.Context, *Span) {
-	span := &Span{
-		Name:       name,
-		StartTime:  time.Now(),
-		Attributes: make(map[string]interface{}),
-	}
-
-	if parent, ok := ctx.Value(traceKey{}).(*Span); ok {
-		parent.mu.Lock()
-		parent.Children = append(parent.Children, span)
-		parent.mu.Unlock()
-	}
-
-	newCtx := context.WithValue(ctx, traceKey{}, span)
-	return newCtx, span
+	ctx, s := otel.Tracer(tracerName).Start(ctx, name)
+	return ctx, &Span{otel: s}
 }
 
-// EndSpan 結束跨度並計算耗時。
+// EndSpan 結束跨度（耗時由 OTel 依 start/end 自動計算）。
 func (s *Span) EndSpan() {
-	s.EndTime = time.Now()
-	s.DurationMs = s.EndTime.Sub(s.StartTime).Milliseconds()
-}
-
-// AddAttribute 為當前 Span 記錄一條元數據。
-func (s *Span) AddAttribute(key string, value interface{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Attributes[key] = value
-}
-
-// ExportTraceToFile 把整棵 Span 樹序列化為 .claw/traces 下的 JSON 文件（便於回放排查）。
-func ExportTraceToFile(rootSpan *Span, workDir string, sessionID string) error {
-	traceDir := filepath.Join(workDir, ".claw", "traces")
-	os.MkdirAll(traceDir, 0755)
-
-	// 用 UnixNano 避免同一秒內多次運行文件碰撞
-	filename := filepath.Join(traceDir, fmt.Sprintf("trace_%s_%d.json", sessionID, time.Now().UnixNano()))
-
-	data, err := json.MarshalIndent(rootSpan, "", "  ")
-	if err != nil {
-		return err
+	if s != nil && s.otel != nil {
+		s.otel.End()
 	}
+}
 
-	return os.WriteFile(filename, data, 0644)
+// AddAttribute 為當前 Span 記錄一條元數據（映射為 OTel attribute）。
+func (s *Span) AddAttribute(key string, value interface{}) {
+	if s == nil || s.otel == nil {
+		return
+	}
+	s.otel.SetAttributes(toAttr(key, value))
+}
+
+func toAttr(key string, value interface{}) attribute.KeyValue {
+	switch v := value.(type) {
+	case string:
+		return attribute.String(key, v)
+	case bool:
+		return attribute.Bool(key, v)
+	case int:
+		return attribute.Int(key, v)
+	case int64:
+		return attribute.Int64(key, v)
+	case float64:
+		return attribute.Float64(key, v)
+	default:
+		return attribute.String(key, fmt.Sprintf("%v", v))
+	}
 }

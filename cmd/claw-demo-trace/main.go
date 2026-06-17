@@ -1,13 +1,15 @@
 // cmd/claw-demo-trace 是鏈路追蹤演示：觸發一個"一輪內並行調用兩個不同工具"的任務，
-// 引擎在 .claw/traces/ 下產出一棵 Span 樹（Agent.Run → Turn-1 → 並行的兩個 Tool.Execute）。
-// tracing 是引擎級的（在 engine.Run 內），所以其實任何入口都會產出 trace，這裡只是給個能觀察
-// 併發樹形結構的場景。
+// 引擎產出一棵 OTel Span 樹（Agent.Run → Turn-1 → 並行的兩個 Tool.Execute）。
+// tracing 已改為 OTel SDK：設定 OTEL_EXPORTER_OTLP_ENDPOINT 後，span 會上報到 Jaeger/Langfuse
+// 等後端，可在瀏覽器看到並發工具時間重疊的甘特圖；未設定則為 no-op（不輸出檔案）。
 package main
 
 import (
 	"context"
 	"log"
 	"os"
+
+	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
 
 	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
@@ -22,6 +24,13 @@ func main() {
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
 	}
+
+	// 設了 OTEL_EXPORTER_OTLP_ENDPOINT 才會上報；否則為 no-op。
+	shutdownTracing, err := observability.InitTracing(context.Background(), "go-tiny-claw-demo-trace")
+	if err != nil {
+		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
 
 	workDir := "/tmp/claw_trace_demo"
 	if err := os.MkdirAll(workDir, 0755); err != nil {
@@ -54,5 +63,6 @@ func main() {
 		log.Fatalf("引擎崩潰: %v", err)
 	}
 
-	log.Printf("\n>>> trace 文件已寫入: %s/.claw/traces/  （cat 出來可看到 Span 樹）\n", workDir)
+	log.Println("\n>>> trace 已產出。設定 OTEL_EXPORTER_OTLP_ENDPOINT 指向 Jaeger/Langfuse，" +
+		"即可在瀏覽器看到 Agent.Run → Turn-1 → 並行兩個 Tool.Execute 的甘特圖（時間重疊）。")
 }

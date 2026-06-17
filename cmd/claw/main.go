@@ -25,6 +25,14 @@ func main() {
 		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
 	}
 
+	// 初始化 OTel 鏈路追蹤：設了 OTEL_EXPORTER_OTLP_ENDPOINT 即上報（Jaeger/Langfuse/Collector），
+	// 未設則 no-op。defer Shutdown 在優雅退出時 flush。
+	shutdownTracing, err := observability.InitTracing(context.Background(), "go-tiny-claw")
+	if err != nil {
+		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+
 	rootDir, _ := os.Getwd()
 	rootDir += "/workspace" // 工作區根目錄；各頻道隔離到其下 channels/<id> 子目錄（見 bot.channelWorkDir）
 
@@ -105,8 +113,7 @@ func main() {
 	port := ":48080"
 	log.Printf("🚀 go-tiny-claw Slack 服務端已啟動，正在監聽 %s 端口\n", port)
 
-	err := http.ListenAndServe(port, nil)
-	if err != nil {
+	if err := http.ListenAndServe(port, nil); err != nil {
 		log.Fatalf("服務器啟動失敗: %v", err)
 	}
 }

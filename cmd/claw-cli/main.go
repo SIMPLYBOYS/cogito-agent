@@ -1,6 +1,6 @@
 // cmd/claw-cli 是升級後的生產級命令行入口：把前面累積的全部能力組裝成一個通用 CLI。
-// 事件經 TerminalReporter 實時打到 stdout；provider 外掛 CostTracker 自動記賬（trace 由
-// engine.Run 內部導出到 <dir>/.claw/traces/）；結束打印花費 + token 報表。
+// 事件經 TerminalReporter 實時打到 stdout；provider 外掛 CostTracker 自動記賬；trace 經 OTel
+// 產生（設 OTEL_EXPORTER_OTLP_ENDPOINT 才上報，否則 no-op）；結束打印花費 + token 報表。
 //
 // 用法：
 //
