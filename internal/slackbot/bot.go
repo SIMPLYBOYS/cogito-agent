@@ -23,8 +23,9 @@ import (
 )
 
 // EngineFactory 為每個會話動態組裝一個引擎。用它讓每個頻道掛上"自己專屬的 CostTracker"，
-// 各頻道各記各的賬（registry/middleware 無狀態共享，tracker/session 按頻道隔離）。
-type EngineFactory func(session *ctxpkg.Session) *engine.AgentEngine
+// 各頻道各記各的賬。傳入 reporter 讓 factory 能把它接到 SubagentTool，使子智能體的逐步進度
+// 也回推到本頻道。
+type EngineFactory func(session *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine
 
 type SlackBot struct {
 	client        *slackapi.Client
@@ -168,8 +169,9 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	session := ctxpkg.GlobalSessionMgr.GetOrCreate(channelID, workDir)
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	// 每會話用 factory 現造一個掛了專屬 CostTracker、且工具 rooted 在本頻道 WorkDir 的引擎
-	eng := b.factory(session)
+	// 每會話用 factory 現造一個掛了專屬 CostTracker、且工具 rooted 在本頻道 WorkDir 的引擎；
+	// 傳入 reporter 讓子智能體（spawn_subagent）的逐步進度也回推到本頻道
+	eng := b.factory(session, reporter)
 	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
 	}

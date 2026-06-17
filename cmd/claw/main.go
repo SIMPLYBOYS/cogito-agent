@@ -60,7 +60,7 @@ func main() {
 		return true, ""
 	}
 
-	factory := func(sess *ctxpkg.Session) *engine.AgentEngine {
+	factory := func(sess *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine {
 		registry := tools.NewRegistry()
 		registry.Register(tools.NewReadFileTool(sess.WorkDir))
 		registry.Register(tools.NewWriteFileTool(sess.WorkDir))
@@ -81,9 +81,10 @@ func main() {
 		readOnly.Register(tools.NewReadFileTool(sess.WorkDir))
 		readOnly.Register(tools.NewBashTool(sess.WorkDir))
 		readOnly.Use(approval)
-		// reporter 傳 nil：子 agent 的逐步進度不串流到 Slack（主循環仍會回報 spawn_subagent 的
-		// 調用與最終報告）；要串流可改造 factory 簽名把 SlackReporter 傳進來。
-		registry.Register(tools.NewSubagentTool(eng, readOnly, nil))
+		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（RunSub 內以「[Subagent] …」
+		// 前綴回報）也會串流回本頻道。SlackReporter 的 PostMessage 對並發安全，多隊偵察兵
+		// 同時回報只是訊息交錯。
+		registry.Register(tools.NewSubagentTool(eng, readOnly, reporter))
 
 		return eng
 	}
