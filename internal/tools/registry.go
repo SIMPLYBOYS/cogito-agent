@@ -81,8 +81,11 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	// 最內層 handler：真正執行工具底層邏輯。
+	// 最內層 handler：真正執行工具底層邏輯。executed 標記工具是否被觸達——若中間件短路
+	// （如審批拒絕，未調用 next），它會維持 false，據此在 span 標記攔截。
+	executed := false
 	handler := func(ctx context.Context, call schema.ToolCall) schema.ToolResult {
+		executed = true
 		output, err := tool.Execute(ctx, call.Arguments)
 		if err != nil {
 			return schema.ToolResult{
@@ -110,7 +113,16 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	return handler(ctx, call)
+	result := handler(ctx, call)
+
+	// 中間件短路（未觸達工具）→ 在 span 標記攔截，便於 trace 回放分辨「被攔」與「工具自身報錯」。
+	if !executed {
+		log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 短路攔截\n", call.Name)
+		span.AddAttribute("intercepted", true)
+		span.AddAttribute("reject_reason", truncate(result.Output, 100))
+	}
+
+	return result
 }
 
 func truncate(s string, max int) string {
