@@ -6,39 +6,68 @@
 
 ## Features
 
-- 🤖 **自主 Agent 循環**：內置 Thinking（慢思考）→ Action（調用工具）→ Observation（觀察結果）的多輪循環，直到任務完成。
-- 🧠 **Claude 驅動**：基於 Anthropic 官方 Go SDK（`anthropic-sdk-go`），通過統一的 `LLMProvider` 接口對接大模型，便於替換底層 Provider。
-- 🛠️ **內置文件與命令工具**，全部在鎖定的工作區內運行：
-  - `read_file` —— 讀取文件內容（超長自動截斷至 8000 字節）
-  - `write_file` —— 創建或覆蓋寫入文件（自動創建目錄）
-  - `edit_file` —— 對文件做局部字符串替換
-  - `bash` —— 執行任意 bash 命令（帶 30s 超時保護，合併 stdout/stderr）
-- 🔌 **可插拔工具註冊表**：通過 `Registry` 接口統一註冊、發現與執行工具，新增工具只需實現 `BaseTool` 接口。
-- 💬 **Slack 集成**：基於 Slack Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息避免迴環。
-- 📡 **實時進度回推**：通過 `Reporter` 接口將"正在思考 / 正在調用工具 / 執行成功或報錯 / 最終回答"實時推送到 Slack。
-- ⚡ **併發工具執行**：單輪內的多個工具調用併發執行，再按序彙總結果。
+**核心引擎**
+- 🤖 **自主 Agent 循環**：Thinking（慢思考）→ Action（調用工具）→ Observation（觀察結果）的多輪 ReAct 循環，直到任務完成。
+- 🧠 **Claude 驅動 / 可替換 Provider**：基於 Anthropic 官方 Go SDK（`anthropic-sdk-go`），透過統一的 `LLMProvider` 接口（`Generate` + `MaxContextTokens`）對接，便於替換底層模型。
+
+**內置工具**（全部在鎖定的工作區內運行）
+- `read_file`（超長自動截斷至 8000 字節）、`write_file`（自動創建目錄）、`edit_file`（局部字符串替換，L4 模糊匹配會**自動對齊縮排**）、`bash`（任意命令，帶 30s 超時保護，合併 stdout/stderr）。
+- 🧭 **`spawn_subagent`**：把深度探索委派給受限的只讀子智能體（agent-as-tool），上下文隔離、可**並行派出多路偵察兵**。
+- 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即可註冊；`Registry.Use` 掛載環繞式中間件（審批 / 計時等）。
+
+**駕馭工程（失控控制）**
+- 🛡️ **HITL 危險指令審批**：命中黑名單（`rm -rf` / `sudo` / 覆蓋 `.go` / `kill` …）的調用會被掛起，把審批請求推回 Slack 頻道，回 `approve` / `reject` 才放行（含超時自動拒絕）。
+- 🚦 **三道硬防線**：主循環**回合上限**（默認 40）、**死循環指紋探測**（參數正規化看穿尾空格/冗餘路徑微差 + 同工具雙閾值）、**per-task 成本熔斷**（默認 \$1）。
+- ⚡ **工具併發限流**：單輪多工具併發執行，由緩衝 channel 信號量限制同時在跑數（默認 5），避免打爆下游。
+- 🩹 **錯誤自愈**：工具報錯時由 `RecoveryManager` 注入「下一步怎麼做」的救援指南。
+
+**上下文工程**
+- 🗜️ **自適應上下文壓縮**：壓縮水位按模型**真實上下文窗口**（token）設定，並用每次 API 回傳的真實 `PromptTokens` 自校準，自動適配不同窗口的模型。
+- 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`）。
+
+**接入與可觀測性**
+- 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
+- 📡 **實時進度回推**：`Reporter` 接口把思考 / 工具調用 / 成敗 / 最終回答（含子智能體進度）實時推到 Slack。
+- 💰 **成本追蹤**：`CostTracker` 裝飾器按會話累計 token 與 USD 費用。
+- 🔭 **OpenTelemetry 鏈路追蹤**：span 經 OTel SDK 匯出（OTLP → Jaeger / Langfuse / Collector），LLM span 帶 `gen_ai.*` 語意約定；未配置端點時為零成本 no-op。
 
 ## Architecture
 
 ```
-cmd/claw/main.go          程序入口：加載配置、裝配 Provider/Registry/Engine/SlackBot，啟動 HTTP 服務
+cmd/
+├── claw/                 Slack 服務端入口（生產用）：裝配 Provider/Registry/Engine/SlackBot + OTel，啟動 HTTP
+├── claw-cli/             通用命令行入口（-prompt / -dir / -session / -plan）
+├── bench/                自動化評測 runner
+└── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
 internal/
-├── engine/               Agent 核心引擎
-│   ├── loop.go           Thinking → Action → Observation 主循環
-│   └── reporter.go       進度上報接口 Reporter
-├── provider/             大模型 Provider 抽象
-│   ├── interface.go      統一的 LLMProvider 接口
-│   └── claude.go         Anthropic Claude 實現
-├── tools/                工具集與註冊表
-│   ├── registry.go       工具註冊 / 發現 / 執行
-│   ├── read_file.go      read_file 工具
-│   ├── write_file.go     write_file 工具
-│   ├── edit_file.go      edit_file 工具
-│   └── bash.go           bash 工具
-├── slackbot/             Slack 接入層
-│   └── bot.go            Events API 回調、SlackReporter
-└── schema/               消息與工具的通用數據結構
-    └── message.go
+├── engine/                  Agent 核心引擎
+│   ├── loop.go              主循環 + RunSub（子智能體）；回合/成本熔斷、併發限流、死循環探測接線
+│   ├── reminder.go          死循環探測（指紋參數正規化 + 同工具雙閾值）
+│   ├── reporter.go          進度上報接口 Reporter
+│   ├── terminal_reporter.go 終端 Reporter
+│   └── context.go           把 session 注入 ctx（供中間件取觸發頻道）
+├── context/                 上下文工程
+│   ├── composer.go          System Prompt 組裝（身份/紀律/Plan Mode/AGENTS.md/Skills）
+│   ├── skill.go             .claw/skills 技能載入
+│   ├── compactor.go         自適應上下文壓縮（按真實窗口 + PromptTokens 自校準）
+│   ├── recovery.go          工具錯誤自愈（救援指南注入）
+│   └── session.go           會話歷史 + 滑動窗口 + 成本記帳
+├── provider/                大模型 Provider 抽象
+│   ├── interface.go         LLMProvider（Generate + MaxContextTokens）
+│   └── claude.go            Anthropic Claude 實現
+├── tools/                   工具集、註冊表與中間件
+│   ├── registry.go          註冊 / 發現 / 執行 + 環繞式中間件鏈
+│   ├── middleware.go        計時中間件（量測工具物理執行耗時）
+│   ├── read_file/write_file/edit_file/bash.go   內置工具
+│   └── subagent.go          spawn_subagent（agent-as-tool）
+├── slackbot/                Slack 接入層
+│   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
+│   └── approval.go          危險指令 HITL 審批
+├── observability/           可觀測性
+│   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
+│   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
+├── eval/                    評測框架（benchmark）
+└── schema/                 消息與工具的通用數據結構
 ```
 
 ## Install
@@ -68,6 +97,8 @@ cp .env.example .env
 | `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，從 <https://console.anthropic.com> 獲取 |
 | `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history` |
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret，用於校驗回調請求籤名 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
+| `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
 
 ## Usage
 
@@ -91,7 +122,7 @@ cp .env.example .env
    - 在頻道中 **@機器人** 並描述任務；
    - 或直接給機器人發 **私聊（DM）** 消息。
 
-機器人會在鎖定的工作目錄（服務進程的當前目錄）內自主完成任務，並把進度實時回覆到對應會話。
+機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度實時回覆到對應會話。
 
 > ⚠️ **安全提示**：`bash` 工具會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改文件。請僅在隔離/受控環境中運行，並妥善限制可訪問的工作區。
 
