@@ -30,6 +30,12 @@ func NewClaudeProvider(model string) *ClaudeProvider {
 	}
 }
 
+// MaxContextTokens 返回 Claude 模型的上下文窗口。當前 Claude 家族（Opus/Sonnet/Haiku 4.x）
+// 標準窗口均為 200k tokens。
+func (p *ClaudeProvider) MaxContextTokens() int {
+	return 200000
+}
+
 func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	anthropicMsgs, systemPrompt := buildAnthropicMessages(msgs)
 

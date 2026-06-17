@@ -19,6 +19,8 @@ func (s *stubProvider) Generate(ctx context.Context, msgs []schema.Message, tool
 	}, nil
 }
 
+func (s *stubProvider) MaxContextTokens() int { return 200000 }
+
 func approxEq(a, b float64) bool {
 	d := a - b
 	if d < 0 {

@@ -53,9 +53,9 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		MaxTurns:           defaultMaxTurns,
 		MaxCostUSD:         defaultMaxCostUSD,
 		MaxConcurrentTools: defaultMaxConcurrentTools,
-		// 閾值從演示用的 3000 提到 20000（≈6000 中文字），更貼近正常使用；
-		// 生產環境仍建議按 model context window 自動計算或改用 token 級估算。
-		compactor: ctxpkg.NewCompactor(200000, 6),
+		// 自適應壓縮：水位線按 provider 的真實上下文窗口（token）設定，而非寫死字符數；
+		// watermark 傳 0 → 用默認 75%。壓縮器再以每輪真實 PromptTokens 自校準 byte/token 比。
+		compactor: ctxpkg.NewCompactor(p.MaxContextTokens(), 0, 6),
 		recovery:  ctxpkg.NewRecoveryManager(),
 		injector:  NewReminderInjector(),
 	}
@@ -177,6 +177,11 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		actSpan.EndSpan()
 		if err != nil {
 			return fmt.Errorf("Action 階段失敗: %w", err)
+		}
+
+		// 自校準：用本輪真實 PromptTokens 與實際送出的上下文，更新壓縮器的 byte/token 估算比。
+		if actionResp.Usage != nil {
+			e.compactor.Calibrate(compactedContext, actionResp.Usage.PromptTokens)
 		}
 
 		// 【核心修正】：把 thinking 與 action 合併成單一 assistant 消息進 session，
@@ -303,6 +308,9 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyReg
 		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
 		if err != nil {
 			return "", fmt.Errorf("子智能體推理失敗: %w", err)
+		}
+		if actionResp.Usage != nil {
+			e.compactor.Calibrate(compactedContext, actionResp.Usage.PromptTokens)
 		}
 
 		contextHistory = append(contextHistory, *actionResp)

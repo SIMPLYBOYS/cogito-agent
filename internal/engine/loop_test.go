@@ -37,6 +37,7 @@ func (f *fakeProvider) Generate(ctx context.Context, _ []schema.Message, _ []sch
 		ToolCalls: []schema.ToolCall{{ID: "1", Name: "noop", Arguments: []byte("{}")}},
 	}, nil
 }
+func (f *fakeProvider) MaxContextTokens() int { return 200000 }
 
 type noopTool struct{}
 
@@ -164,6 +165,7 @@ func (p *batchProvider) Generate(context.Context, []schema.Message, []schema.Too
 	}
 	return &schema.Message{Role: schema.RoleAssistant, Content: "done"}, nil
 }
+func (p *batchProvider) MaxContextTokens() int { return 200000 }
 
 // 一次吐出 12 個工具、上限 3：同時在跑的峰值必須 ≤3，且確實達到併發（≥2）。
 func TestRun_ToolConcurrencyIsCapped(t *testing.T) {
@@ -222,6 +224,7 @@ func (p *captureProvider) Generate(_ context.Context, msgs []schema.Message, _ [
 	}
 	return &schema.Message{Role: schema.RoleAssistant, Content: "done"}, nil
 }
+func (p *captureProvider) MaxContextTokens() int { return 200000 }
 
 // AssetsDir 有設：composer 應從 AssetsDir 讀 AGENTS.md，而非 session.WorkDir。
 func TestRun_ComposerReadsAssetsDirWhenSet(t *testing.T) {

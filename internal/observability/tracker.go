@@ -39,6 +39,11 @@ func NewCostTracker(next provider.LLMProvider, modelName string, session *ctxpkg
 	}
 }
 
+// MaxContextTokens 透傳被包裝的 provider 的上下文窗口（decorator 不改變該屬性）。
+func (t *CostTracker) MaxContextTokens() int {
+	return t.nextProvider.MaxContextTokens()
+}
+
 func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	startTime := time.Now()
 
