@@ -17,9 +17,13 @@ type BaseTool interface {
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 }
 
-// MiddlewareFunc 定義了工具中間件的簽名：接收當前 ToolCall，返回是否允許執行
-// 以及被攔截時的原因。tools 包只暴露這個 hook 點，完全不感知具體業務（如 IM 平臺審批）。
-type MiddlewareFunc func(ctx context.Context, call schema.ToolCall) (allowed bool, rejectReason string)
+// ToolHandler 是中間件鏈中的「下一步」，最終落到工具本身的執行。
+type ToolHandler func(ctx context.Context, call schema.ToolCall) schema.ToolResult
+
+// MiddlewareFunc 是環繞式（around）工具中間件：拿到 call 與 next（鏈的下一步），可在 next() 前後
+// 插入邏輯（計時/日誌/重試/快取），也可不調用 next() 直接短路返回（如審批拒絕）。tools 包只
+// 暴露這個 hook 點，完全不感知具體業務（如 IM 平臺審批）。
+type MiddlewareFunc func(ctx context.Context, call schema.ToolCall, next ToolHandler) schema.ToolResult
 
 type Registry interface {
 	Register(tool BaseTool)
@@ -77,38 +81,36 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	// 【核心防禦】執行底層邏輯前，依次運行所有 middleware；任一拒絕則短路。
-	for _, mw := range r.middlewares {
-		allowed, reason := mw(ctx, call)
-		if !allowed {
-			log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 攔截: %s\n", call.Name, reason)
-			span.AddAttribute("intercepted", true)
-			span.AddAttribute("reject_reason", reason)
+	// 最內層 handler：真正執行工具底層邏輯。
+	handler := func(ctx context.Context, call schema.ToolCall) schema.ToolResult {
+		output, err := tool.Execute(ctx, call.Arguments)
+		if err != nil {
 			return schema.ToolResult{
 				ToolCallID: call.ID,
-				Output:     fmt.Sprintf("執行被系統攔截。原因: %s", reason),
-				IsError:    true, // 必須返回 Error，強制大模型閱讀拒絕理由
+				Output:     fmt.Sprintf("Error executing %s: %v", call.Name, err),
+				IsError:    true,
 			}
 		}
-	}
-
-	output, err := tool.Execute(ctx, call.Arguments)
-	if err != nil {
+		// 只截前 100 字符放進 Trace，防止 trace 文件膨脹
+		span.AddAttribute("output_preview", truncate(output, 100))
 		return schema.ToolResult{
 			ToolCallID: call.ID,
-			Output:     fmt.Sprintf("Error executing %s: %v", call.Name, err),
-			IsError:    true,
+			Output:     output,
+			IsError:    false,
 		}
 	}
 
-	// 只截前 100 字符放進 Trace，防止 trace 文件膨脹
-	span.AddAttribute("output_preview", truncate(output, 100))
-
-	return schema.ToolResult{
-		ToolCallID: call.ID,
-		Output:     output,
-		IsError:    false,
+	// 由內而外包裝中間件：註冊順序靠前者位於外層（最先進入、最後返回）。
+	// 環繞式 middleware 可在 next() 前後計時/日誌，或不調 next() 直接短路（如審批拒絕）。
+	for i := len(r.middlewares) - 1; i >= 0; i-- {
+		mw := r.middlewares[i]
+		next := handler
+		handler = func(ctx context.Context, call schema.ToolCall) schema.ToolResult {
+			return mw(ctx, call, next)
+		}
 	}
+
+	return handler(ctx, call)
 }
 
 func truncate(s string, max int) string {
