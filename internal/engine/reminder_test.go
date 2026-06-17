@@ -77,6 +77,54 @@ func TestReminderInjector_VaryingArgsTripsSameToolThreshold(t *testing.T) {
 	}
 }
 
+// 指紋正規化：本質相同、只差微小寫法的參數應產生【同一】指紋。
+func TestFingerprint_NormalizesTrivialDiffs(t *testing.T) {
+	same := [][2]string{
+		{`{"path":"/tmp/a.txt"}`, `{"path":"/tmp/a.txt "}`},  // 尾空格
+		{`{"path":"/tmp/a.txt"}`, `{"path":"/tmp/./a.txt"}`}, // 冗餘 ./
+		{`{"path":"/tmp/a.txt"}`, `{"path":"/tmp//a.txt"}`},  // 雙斜線
+		{`{"a":"1","b":"2"}`, `{"b":"2","a":"1"}`},           // key 順序
+		{`{"command":"ls -la"}`, `{"command":"ls -la "}`},    // command 尾空格
+	}
+	for _, p := range same {
+		if generateFingerprint("read_file", []byte(p[0])) != generateFingerprint("read_file", []byte(p[1])) {
+			t.Errorf("應視為同一指紋: %s vs %s", p[0], p[1])
+		}
+	}
+}
+
+// 反面：本質不同的參數不應被過度正規化而誤併。
+func TestFingerprint_DoesNotOverNormalize(t *testing.T) {
+	diff := [][2]string{
+		{`{"path":"/tmp/a.txt"}`, `{"path":"/tmp/b.txt"}`},     // 不同檔
+		{`{"path":"/tmp/a.txt"}`, `{"path":"/tmp/A.txt"}`},     // 大小寫敏感
+		{`{"path":"/tmp/a.txt"}`, `{"path":"./../tmp/a.txt"}`}, // 相對 vs 絕對：語意不同，刻意不併
+		{`{"command":"ls -la"}`, `{"command":"ls  -la"}`},      // command 內部空白不折疊（保守）
+	}
+	for _, p := range diff {
+		if generateFingerprint("read_file", []byte(p[0])) == generateFingerprint("read_file", []byte(p[1])) {
+			t.Errorf("不應併為同一指紋: %s vs %s", p[0], p[1])
+		}
+	}
+}
+
+// 端到端：三次「微差」重試（規範化後同一目標）應在第 3 次觸發死循環，不再被尾空格/冗餘 ./ 繞過。
+func TestReminderInjector_TrivialDiffRetriesTripAtThree(t *testing.T) {
+	r := NewReminderInjector()
+	calls := []string{
+		`{"path":"/tmp/a.txt"}`,
+		`{"path":"/tmp/a.txt "}`,
+		`{"path":"/tmp/./a.txt"}`,
+	}
+	var last *schema.Message
+	for _, a := range calls {
+		last = r.CheckAndInject(mkCall("read_file", a), errResult())
+	}
+	if last == nil {
+		t.Fatal("三次微差重試（規範化後同一目標）應在第 3 次觸發死循環提醒")
+	}
+}
+
 // CheckTurn 應把本輪所有並行工具結果都納入計數（而非只看第一個）。
 func TestReminderInjector_CheckTurnCountsAllParallelTools(t *testing.T) {
 	r := NewReminderInjector()

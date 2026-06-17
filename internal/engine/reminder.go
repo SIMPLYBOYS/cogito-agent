@@ -3,8 +3,11 @@ package engine
 import (
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
+	"strings"
 
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
 )
@@ -33,10 +36,47 @@ func NewReminderInjector() *ReminderInjector {
 	}
 }
 
+// fingerprintPathKeys 是會被當成「路徑」做 filepath.Clean 規範化的參數名。
+var fingerprintPathKeys = map[string]bool{
+	"path": true, "file": true, "filepath": true,
+	"filename": true, "dir": true, "dirpath": true,
+}
+
+// normalizeArgs 把工具參數正規化成 canonical 形式再供雜湊，讓「本質相同、只差微小寫法」的
+// 重試塌縮成同一指紋：
+//   - 解析 JSON 後重新序列化（Go 對 map key 排序）→ 消掉 key 順序與 JSON 內空白差異。
+//   - 所有字串值 TrimSpace → 吃掉尾/首空格（如 "/tmp/a.txt " ≡ "/tmp/a.txt"）。
+//   - 路徑類參數再 filepath.Clean → 消掉 "./"、"//"、"a/../b" 等冗餘寫法。
+//
+// 刻意「保守」：不做大小寫折疊（Linux 路徑大小寫敏感），也不把相對路徑解析成絕對路徑
+// （需 workDir 上下文且語意依 cwd 而定，易誤併本質不同的目標）——那類殘留交給 sameToolThreshold 兜底。
+func normalizeArgs(args []byte) string {
+	var m map[string]any
+	if err := json.Unmarshal(args, &m); err != nil {
+		return strings.TrimSpace(string(args)) // 非 JSON：退化成 trim 原始字串
+	}
+	for k, v := range m {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s != "" && fingerprintPathKeys[k] {
+			s = filepath.Clean(s)
+		}
+		m[k] = s
+	}
+	b, err := json.Marshal(m) // Marshal 對 map key 排序 → canonical
+	if err != nil {
+		return strings.TrimSpace(string(args))
+	}
+	return string(b)
+}
+
 func generateFingerprint(toolName string, args []byte) string {
 	hasher := md5.New()
 	hasher.Write([]byte(toolName))
-	hasher.Write(args)
+	hasher.Write([]byte(normalizeArgs(args)))
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
