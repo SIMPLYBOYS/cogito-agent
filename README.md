@@ -35,60 +35,57 @@
 
 ```mermaid
 flowchart TB
-  HUMAN(("人類開發者 / 運維"))
-  IM["Slack Events API · webhook<br/>(+ CLI: cmd/claw-cli)"]
+  HUMAN["人類開發者與運維"]
+  IM["Slack webhook 與 CLI"]
 
-  subgraph ENGINE["cogito-agent 引擎 · Harness"]
-    direction TB
-    LLM["LLM Provider<br/>Claude · Anthropic 官方 SDK"]
-    COST["CostTracker · decorator<br/>USD 成本 / Token 記帳"]
-    LOOP["Main Loop · ReAct 執行器<br/>回合熔斷 · per-task 成本熔斷 · 併發限流"]
+  subgraph ENGINE["cogito-agent 引擎"]
+    LLM["LLM Provider<br/>Claude Anthropic SDK"]
+    COST["CostTracker<br/>USD 成本記帳"]
+    LOOP["Main Loop ReAct<br/>回合熔斷 成本熔斷 併發限流"]
 
-    subgraph CTX["上下文工程 · 記憶管理"]
-      direction LR
-      COMPOSER["PromptComposer<br/>身份/Plan Mode/技能 組裝"]
-      COMPACT["自適應 Compactor<br/>真實窗口 + PromptTokens 自校準"]
-      REMIND["ReminderInjector<br/>死循環指紋探測 · 參數正規化"]
-      RECOVER["RecoveryManager<br/>上下文感知錯誤自愈"]
+    subgraph CTX["上下文工程"]
+      COMPOSER["PromptComposer<br/>Plan Mode 與技能組裝"]
+      COMPACT["自適應 Compactor<br/>真實窗口自校準"]
+      REMIND["ReminderInjector<br/>死循環指紋探測"]
+      RECOVER["RecoveryManager<br/>錯誤自愈"]
     end
 
-    subgraph TZ["工具與安全 · 物理交互"]
-      direction TB
-      REG["Tool Registry · 動態路由<br/>環繞式中間件鏈"]
-      MW["中間件: HITL 審批(高危攔截) + 計時"]
-      PRIM["極簡原語<br/>read / write / edit_file · bash(30s)"]
-      SUB["spawn_subagent<br/>並行探路 · 只讀沙箱 · 上下文隔離"]
+    subgraph TZ["工具與安全"]
+      REG["Tool Registry<br/>環繞式中間件鏈"]
+      MW["HITL 審批與計時中間件"]
+      PRIM["極簡原語<br/>read write edit bash"]
+      SUB["spawn_subagent<br/>並行探路 只讀沙箱"]
     end
   end
 
-  subgraph WS["物理世界 · 工作區 · per-channel 隔離 + per-WorkDir 鎖"]
-    direction TB
-    ASSETS["共享資產（根 workspace）<br/>AGENTS.md · .claw/skills"]
-    PROJ["各頻道目錄 channels/「id」<br/>目標項目代碼 / 伺服器日誌"]
-    STATE["狀態外部化<br/>PLAN.md · TODO.md · 斷點續傳"]
+  subgraph WS["工作區 per-channel 隔離"]
+    ASSETS["共享資產<br/>AGENTS.md 與 skills"]
+    PROJ["各頻道目錄<br/>項目代碼與日誌"]
+    STATE["狀態外部化<br/>PLAN.md 與 TODO.md"]
   end
 
-  subgraph OBS["可觀測性 · OpenTelemetry"]
-    OTEL["OTel SDK · OTLP 匯出<br/>gen_ai 語意約定"]
-    BACKEND["Jaeger / Langfuse<br/>甘特圖 · generation 成本"]
+  subgraph OBS["可觀測性 OTel"]
+    OTEL["OTel SDK OTLP"]
+    BACKEND["Jaeger 或 Langfuse"]
   end
 
-  COMPOSER -->|"1 注入動態 Context"| LOOP
-  LOOP <-->|"2 Thinking / Action"| LLM
-  LLM --> COST --> LOOP
-  LOOP -->|"3 發起 ToolCall"| REG
-  LOOP --> CTX
-  REG -->|"4 高危 → 攔截審批"| MW
-  MW -->|"5 放行並執行"| PRIM
-  MW -->|"5 放行並執行"| SUB
-  SUB -.->|"並行子循環（只讀）"| PRIM
-  ASSETS -->|"啟動時載入"| COMPOSER
-  PRIM <-->|"物理 IO / 讀寫進度"| PROJ
+  HUMAN -->|指令與審批| IM
+  IM -->|事件回推| LOOP
+  COMPOSER -->|注入 Context| LOOP
+  LOOP -->|Thinking Action| LLM
+  LLM --> COST
+  COST --> LOOP
+  LOOP -->|ToolCall| REG
+  REG -->|高危攔截審批| MW
+  MW -->|放行| PRIM
+  MW -->|放行| SUB
+  SUB -.-> PRIM
+  ASSETS -->|啟動載入| COMPOSER
+  PRIM -->|物理 IO| PROJ
   PRIM --> STATE
-  LOOP -.->|"6 span 匯出"| OTEL --> BACKEND
-  HUMAN <-->|"指令 / 審批 approve·reject"| IM
-  IM <-->|"事件回推 / 進度"| LOOP
-  HUMAN -->|"7 隨時干預 / 閱讀"| STATE
+  HUMAN -->|隨時干預閱讀| STATE
+  LOOP -.->|span| OTEL
+  OTEL --> BACKEND
 ```
 
 目錄結構：
