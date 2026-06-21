@@ -6,6 +6,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
@@ -31,7 +34,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
 	}
-	defer func() { _ = shutdownTracing(context.Background()) }()
 
 	rootDir, _ := os.Getwd()
 	rootDir += "/workspace" // 工作區根目錄；各頻道隔離到其下 channels/<id> 子目錄（見 bot.channelWorkDir）
@@ -110,10 +112,27 @@ func main() {
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 
-	port := ":48080"
-	log.Printf("🚀 go-tiny-claw Slack 服務端已啟動，正在監聽 %s 端口\n", port)
+	srv := &http.Server{Addr: ":48080"}
 
-	if err := http.ListenAndServe(port, nil); err != nil {
-		log.Fatalf("服務器啟動失敗: %v", err)
+	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停 HTTP，再 flush OTel span（否則 batch 緩衝可能丟失）。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Printf("🚀 go-tiny-claw Slack 服務端已啟動，正在監聽 %s 端口\n", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("服務器啟動失敗: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("收到關閉信號，優雅關閉中...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP 關閉異常: %v", err)
+	}
+	if err := shutdownTracing(shutdownCtx); err != nil {
+		log.Printf("Tracing flush 異常: %v", err)
 	}
 }
