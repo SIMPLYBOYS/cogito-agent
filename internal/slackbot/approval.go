@@ -1,9 +1,12 @@
 package slackbot
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -105,13 +108,13 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 	return count
 }
 
-// IsDangerousCommand 判斷工具調用是否命中高危黑名單。
-// 注意（已知侷限）：write_file / edit_file 在白名單內但暫無檢查邏輯，是預留擴展點。
+// IsDangerousCommand 判斷工具調用是否命中高危黑名單，命中則觸發人工審批。
+//   - bash：命中危險指令模式（遞歸刪除/提權/重啟服務/殺進程/覆蓋源碼…）。
+//   - write_file / edit_file：寫入路徑試圖逃出工作區（絕對路徑 / .. 穿越）或觸及敏感目標
+//     （.env 機密、.git/.ssh/.aws 憑證、.claw 自身配置）。正常的工作區內源碼寫入不攔，保留 UX。
 func IsDangerousCommand(toolName string, args string) bool {
-	if toolName != "bash" && toolName != "write_file" && toolName != "edit_file" {
-		return false
-	}
-	if toolName == "bash" {
+	switch toolName {
+	case "bash":
 		dangerousPatterns := []string{
 			`rm\s+-r`,      // 遞歸刪除
 			`sudo\s+`,      // 提權
@@ -123,6 +126,31 @@ func IsDangerousCommand(toolName string, args string) bool {
 		}
 		for _, p := range dangerousPatterns {
 			if matched, _ := regexp.MatchString(p, args); matched {
+				return true
+			}
+		}
+	case "write_file", "edit_file":
+		var a struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal([]byte(args), &a) != nil || a.Path == "" {
+			return false
+		}
+		// 逃出工作區：絕對路徑或 .. 穿越
+		if filepath.IsAbs(a.Path) {
+			return true
+		}
+		cleaned := filepath.Clean(a.Path)
+		if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+			return true
+		}
+		// 敏感目標：機密文件與憑證/版控/自身配置目錄
+		if base := filepath.Base(cleaned); base == ".env" || strings.HasPrefix(base, ".env.") {
+			return true
+		}
+		for _, seg := range strings.Split(cleaned, string(filepath.Separator)) {
+			switch seg {
+			case ".git", ".ssh", ".aws", ".claw":
 				return true
 			}
 		}

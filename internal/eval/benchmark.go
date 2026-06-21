@@ -24,7 +24,7 @@ type TestCase struct {
 	SetupScript    string // 【可選】Agent 運行前執行的 bash（準備靶機文件）
 	TaskPrompt     string // 發送給 Agent 的任務指令
 	ValidateScript string // 【核心】Agent 運行後執行的 bash 校驗腳本，exit 0 視為成功
-	MaxTurns       int    // 允許的最大輪數（目前未接入）
+	MaxTurns       int    // 允許的最大輪數；>0 時覆蓋引擎默認回合上限（<=0 用引擎默認）
 }
 
 // TestResult 存放單次跑分結果。除了「結果/總成本/總耗時」，還收集兩個【過程】指標來區分
@@ -128,6 +128,9 @@ func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestRe
 	registry.Register(tools.NewEditFileTool(workDir))
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, false)
+	if tc.MaxTurns > 0 {
+		eng.MaxTurns = tc.MaxTurns // 用例可覆蓋回合上限（複雜任務放寬、簡單任務收緊以暴露低效）
+	}
 
 	// 4. 讓 Agent 幹活；用計數 Reporter 靜默收集回合數與工具報錯次數（過程指標）
 	rep := &benchReporter{}

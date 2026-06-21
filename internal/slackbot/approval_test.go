@@ -18,12 +18,19 @@ func TestIsDangerousCommand(t *testing.T) {
 		{"bash", `{"command":"echo '' > main.go"}`, true}, // >.*\.go 覆蓋源碼
 		{"bash", `{"command":"ls -la"}`, false},
 		{"bash", `{"command":"go build ./..."}`, false},
-		{"bash", `{"command":"nginx -s reload"}`, true},         // 重啟服務
-		{"bash", `{"command":"systemctl restart nginx"}`, true}, // 系統服務
-		{"bash", `{"command":"kill -9 1234"}`, true},            // 殺進程
-		{"read_file", `{"path":"/etc/passwd"}`, false},          // 只讀工具永遠放行
-		{"write_file", `{"path":"main.go"}`, false},             // 已知侷限：白名單內但暫無檢查
-		{"edit_file", `{"path":"main.go"}`, false},
+		{"bash", `{"command":"nginx -s reload"}`, true},           // 重啟服務
+		{"bash", `{"command":"systemctl restart nginx"}`, true},   // 系統服務
+		{"bash", `{"command":"kill -9 1234"}`, true},              // 殺進程
+		{"read_file", `{"path":"/etc/passwd"}`, false},            // 只讀工具永遠放行
+		{"write_file", `{"path":"main.go"}`, false},               // 工作區內正常源碼寫入，放行
+		{"write_file", `{"path":"src/app/handler.go"}`, false},    // 子目錄正常寫入，放行
+		{"edit_file", `{"path":"main.go"}`, false},                // 正常編輯，放行
+		{"write_file", `{"path":"/etc/passwd"}`, true},            // 絕對路徑逃出工作區
+		{"write_file", `{"path":"../../etc/cron"}`, true},         // .. 穿越逃出工作區
+		{"write_file", `{"path":".env"}`, true},                   // 機密文件
+		{"edit_file", `{"path":"config/.env.production"}`, true},  // 機密文件 .env.*
+		{"write_file", `{"path":".git/hooks/pre-commit"}`, true},  // 版控目錄
+		{"edit_file", `{"path":".claw/skills/x/SKILL.md"}`, true}, // 自身配置/技能目錄
 	}
 	for _, c := range cases {
 		if got := IsDangerousCommand(c.tool, c.args); got != c.want {
