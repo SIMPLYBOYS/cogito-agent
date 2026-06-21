@@ -44,6 +44,11 @@ func (t *CostTracker) MaxContextTokens() int {
 	return t.nextProvider.MaxContextTokens()
 }
 
+// ModelName 透傳被包裝的 provider 的模型 id。
+func (t *CostTracker) ModelName() string {
+	return t.nextProvider.ModelName()
+}
+
 func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	startTime := time.Now()
 

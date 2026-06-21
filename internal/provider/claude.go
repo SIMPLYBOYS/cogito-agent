@@ -36,6 +36,11 @@ func (p *ClaudeProvider) MaxContextTokens() int {
 	return 200000
 }
 
+// ModelName 返回構造時傳入的 Claude 模型 id（如 claude-opus-4-8）。
+func (p *ClaudeProvider) ModelName() string {
+	return p.model
+}
+
 func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	anthropicMsgs, systemPrompt := buildAnthropicMessages(msgs)
 

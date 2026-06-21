@@ -20,6 +20,7 @@ func (s *stubProvider) Generate(ctx context.Context, msgs []schema.Message, tool
 }
 
 func (s *stubProvider) MaxContextTokens() int { return 200000 }
+func (s *stubProvider) ModelName() string     { return "stub-model" }
 
 func approxEq(a, b float64) bool {
 	d := a - b

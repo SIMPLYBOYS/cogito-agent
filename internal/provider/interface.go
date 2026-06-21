@@ -14,4 +14,6 @@ type LLMProvider interface {
 	// MaxContextTokens 返回該模型的上下文窗口大小（token）。供自適應壓縮按真實窗口設定水位線
 	//（不同模型差異很大：Claude 200k、Gemini 1M、本地 Llama 可能僅 8k）。
 	MaxContextTokens() int
+	// ModelName 返回模型 id（如 claude-opus-4-8），供 OTel gen_ai.request.model 與成本計算使用。
+	ModelName() string
 }

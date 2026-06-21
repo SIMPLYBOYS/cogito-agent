@@ -174,10 +174,12 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// Phase 2: Action
 		// 【埋點 4】記錄 Action 調用
 		actCtx, actSpan := observability.StartSpan(turnCtx, "LLM.Action")
+		// gen_ai 語意約定：讓 Langfuse 等後端把此 span 識別為一次 LLM 生成並算成本（需 model）。
+		actSpan.AddAttribute("gen_ai.operation.name", "chat")
+		actSpan.AddAttribute("gen_ai.system", "anthropic")
+		actSpan.AddAttribute("gen_ai.request.model", e.provider.ModelName())
 		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
 		if actionResp != nil && actionResp.Usage != nil {
-			// gen_ai 語意約定：讓 Langfuse 等後端把此 span 識別為一次 LLM 生成並計 token/成本。
-			actSpan.AddAttribute("gen_ai.operation.name", "chat")
 			actSpan.AddAttribute("gen_ai.usage.input_tokens", actionResp.Usage.PromptTokens)
 			actSpan.AddAttribute("gen_ai.usage.output_tokens", actionResp.Usage.CompletionTokens)
 		}
