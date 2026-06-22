@@ -114,8 +114,11 @@ func main() {
 		registry.Register(tools.NewBashTool(sess.WorkDir))
 		registry.Register(tools.NewEditFileTool(sess.WorkDir))
 		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
-		registry.Use(approval)                             // 外層：先審批
-		registry.Use(timing)                               // 內層：只量工具本身執行耗時
+		for _, mt := range mcpTools {                      // 外部 MCP 工具（若有配置）與內建工具並列
+			registry.Register(mt)
+		}
+		registry.Use(approval) // 外層：先審批
+		registry.Use(timing)   // 內層：只量工具本身執行耗時
 
 		tracked := observability.NewCostTracker(llmProvider, modelName, sess)
 		eng := engine.NewAgentEngine(tracked, registry, false, false)
