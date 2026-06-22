@@ -73,7 +73,7 @@ func (c *PromptComposer) Build() schema.Message {
 		promptBuilder.WriteString("\n```\n")
 	}
 
-	skillsContent := c.skillLoader.LoadAll()
+	skillsContent := c.skillLoader.LoadIndex()
 	if skillsContent != "" {
 		promptBuilder.WriteString(skillsContent)
 	}

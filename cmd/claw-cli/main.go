@@ -70,6 +70,7 @@ func main() {
 	registry.Register(tools.NewWriteFileTool(workDir))
 	registry.Register(tools.NewBashTool(workDir))
 	registry.Register(tools.NewEditFileTool(workDir))
+	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, *planPtr)
 	reporter := engine.NewTerminalReporter()
