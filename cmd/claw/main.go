@@ -12,6 +12,7 @@ import (
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -33,6 +34,35 @@ func main() {
 	shutdownTracing, err := observability.InitTracing(context.Background(), "cogito-agent")
 	if err != nil {
 		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
+	}
+
+	// 載入並連接 MCP 伺服器（設了 COGITO_MCP_CONFIG 才啟用）：外部 MCP 工具會註冊進每個會話的
+	// registry。連線是程式級長壽命的，優雅關閉時統一 Close。連不上的 server 略過、不影響啟動。
+	var mcpClients []*mcp.Client
+	var mcpTools []tools.BaseTool
+	if cfgPath := os.Getenv("COGITO_MCP_CONFIG"); cfgPath != "" {
+		servers, errCfg := mcp.LoadConfig(cfgPath)
+		if errCfg != nil {
+			log.Fatalf("讀取 MCP 設定失敗: %v", errCfg)
+		}
+		for _, s := range servers {
+			cl, errDial := mcp.Dial(context.Background(), s)
+			if errDial != nil {
+				log.Printf("[mcp] 連接 %q 失敗，略過: %v", s.Name, errDial)
+				continue
+			}
+			ts, errList := cl.Tools(context.Background())
+			if errList != nil {
+				log.Printf("[mcp] %q tools/list 失敗，略過: %v", s.Name, errList)
+				_ = cl.Close()
+				continue
+			}
+			mcpClients = append(mcpClients, cl)
+			for _, t := range ts {
+				mcpTools = append(mcpTools, t)
+			}
+			log.Printf("[mcp] 已掛載 server %q 的 %d 個工具", s.Name, len(ts))
+		}
 	}
 
 	rootDir, _ := os.Getwd()
@@ -134,5 +164,8 @@ func main() {
 	}
 	if err := shutdownTracing(shutdownCtx); err != nil {
 		log.Printf("Tracing flush 異常: %v", err)
+	}
+	for _, cl := range mcpClients {
+		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留
 	}
 }
