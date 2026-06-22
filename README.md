@@ -30,6 +30,7 @@
 - 📡 **實時進度回推**：`Reporter` 接口把思考 / 工具調用 / 成敗 / 最終回答（含子智能體進度）實時推到 Slack。
 - 💰 **成本追蹤**：`CostTracker` 裝飾器按會話累計 token 與 USD 費用。
 - 🔭 **OpenTelemetry 鏈路追蹤**：span 經 OTel SDK 匯出（OTLP → Jaeger / Langfuse / Collector），LLM span 帶 `gen_ai.*` 語意約定；未配置端點時為零成本 no-op。
+- 🧩 **MCP 集成**：透過 `COGITO_MCP_CONFIG` 載入 `.mcp.json`，連接外部 [Model Context Protocol](https://modelcontextprotocol.io) 工具伺服器（stdio），其工具以 `<server>__` 前綴註冊，與內建工具並列供模型調用（v1 支援 tools）。
 
 ## Architecture
 
@@ -117,6 +118,7 @@ internal/
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
 │   ├── read_file/write_file/edit_file/bash.go   內置工具
 │   └── subagent.go          spawn_subagent（agent-as-tool）
+├── mcp/                     MCP 客戶端（stdio/JSON-RPC）：連外部工具伺服器，適配成 BaseTool
 ├── slackbot/                Slack 接入層
 │   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
 │   └── approval.go          危險指令 HITL 審批
@@ -156,6 +158,28 @@ cp .env.example .env
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret，用於校驗回調請求籤名 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
+| `OTEL_TRACES_EXPORTER` | （選填）設為 `console` 時把 span 印到終端（本地除錯，不需後端） |
+| `COGITO_MCP_CONFIG` | （選填）`.mcp.json` 路徑；載入並連接外部 MCP 工具伺服器 |
+
+### MCP 工具伺服器（選填）
+
+設定 `COGITO_MCP_CONFIG` 指向一份 `.mcp.json`（格式與 Claude Desktop 同構），啟動時會連接其中的 stdio MCP 伺服器，把它們的工具以 `<server>__<tool>` 之名註冊進來：
+
+```jsonc
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/some/dir"]
+    }
+  }
+}
+```
+
+```bash
+export COGITO_MCP_CONFIG=./.mcp.json
+go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem" 的 N 個工具」
+```
 
 ## Usage
 
