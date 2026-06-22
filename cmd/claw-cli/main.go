@@ -54,7 +54,7 @@ func main() {
 	}
 
 	fmt.Println("==================================================")
-	fmt.Printf("🚀 go-tiny-claw CLI | 📁 工作區: %s\n", workDir)
+	fmt.Printf("🚀 cogito-agent CLI | 📁 工作區: %s\n", workDir)
 	fmt.Println("==================================================")
 
 	modelName := "claude-opus-4-8"

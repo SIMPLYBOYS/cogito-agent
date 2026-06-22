@@ -27,7 +27,7 @@ func main() {
 	}
 
 	// 設了 OTEL_EXPORTER_OTLP_ENDPOINT 才會上報；否則為 no-op。
-	shutdownTracing, err := observability.InitTracing(context.Background(), "go-tiny-claw-demo-trace")
+	shutdownTracing, err := observability.InitTracing(context.Background(), "cogito-agent-demo-trace")
 	if err != nil {
 		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
 	}

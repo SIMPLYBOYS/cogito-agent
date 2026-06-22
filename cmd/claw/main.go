@@ -30,7 +30,7 @@ func main() {
 
 	// 初始化 OTel 鏈路追蹤：設了 OTEL_EXPORTER_OTLP_ENDPOINT 即上報（Jaeger/Langfuse/Collector），
 	// 未設則 no-op。defer Shutdown 在優雅退出時 flush。
-	shutdownTracing, err := observability.InitTracing(context.Background(), "go-tiny-claw")
+	shutdownTracing, err := observability.InitTracing(context.Background(), "cogito-agent")
 	if err != nil {
 		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
 	}
@@ -119,7 +119,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("🚀 go-tiny-claw Slack 服務端已啟動，正在監聽 %s 端口\n", srv.Addr)
+		log.Printf("🚀 cogito-agent Slack 服務端已啟動，正在監聽 %s 端口\n", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("服務器啟動失敗: %v", err)
 		}

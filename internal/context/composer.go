@@ -26,7 +26,7 @@ func (c *PromptComposer) Build() schema.Message {
 	var promptBuilder strings.Builder
 
 	promptBuilder.WriteString(`# 核心身份
-你名叫 go-tiny-claw，一個由駕馭工程驅動的骨灰級研發助手。
+你名叫 cogito-agent，一個由駕馭工程驅動的骨灰級研發助手。
 你具備極簡主義哲學，拒絕廢話。你能通過系統提供的內置工具，創建、讀取、修改和執行工作區中的代碼。
 
 # 核心紀律 (CRITICAL)
