@@ -64,14 +64,20 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 	if respMsg.Usage != nil {
 		promptTokens := respMsg.Usage.PromptTokens
 		completionTokens := respMsg.Usage.CompletionTokens
+		cacheRead := respMsg.Usage.CacheReadTokens
+		cacheCreation := respMsg.Usage.CacheCreationTokens
 
 		var cost float64
 		if price, exists := PricingModel[t.modelName]; exists {
-			cost = (float64(promptTokens)*price.InputPrice + float64(completionTokens)*price.OutputPrice) / 1000000.0
+			// Anthropic 快取計費：命中讀取約 0.1x、寫入約 1.25x 基礎輸入價（promptTokens 已不含快取讀取）。
+			cost = (float64(promptTokens)*price.InputPrice +
+				float64(cacheRead)*price.InputPrice*0.1 +
+				float64(cacheCreation)*price.InputPrice*1.25 +
+				float64(completionTokens)*price.OutputPrice) / 1000000.0
 		}
 
-		log.Printf("[Tracker] 📊 API 調用完成 | 耗時: %v | 輸入: %d tk | 輸出: %d tk | 花費: $%.6f\n",
-			latency, promptTokens, completionTokens, cost)
+		log.Printf("[Tracker] 📊 API 調用完成 | 耗時: %v | 輸入: %d tk (快取讀 %d / 寫 %d) | 輸出: %d tk | 花費: $%.6f\n",
+			latency, promptTokens, cacheRead, cacheCreation, completionTokens, cost)
 
 		if t.session != nil {
 			t.session.RecordUsage(promptTokens, completionTokens, cost)

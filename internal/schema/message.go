@@ -12,8 +12,10 @@ const (
 
 // Usage 記錄單次大模型 API 調用的 Token 消耗。
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`     // 輸入 Token 數
-	CompletionTokens int `json:"completion_tokens"` // 輸出 Token 數
+	PromptTokens        int `json:"prompt_tokens"`         // 輸入 Token 數
+	CompletionTokens    int `json:"completion_tokens"`     // 輸出 Token 數
+	CacheReadTokens     int `json:"cache_read_tokens"`     // 命中 prompt cache 的輸入 Token（約 0.1x 計費）
+	CacheCreationTokens int `json:"cache_creation_tokens"` // 寫入 prompt cache 的輸入 Token（約 1.25x 計費）
 }
 
 type Message struct {

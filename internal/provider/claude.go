@@ -85,14 +85,20 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		Messages:  anthropicMsgs,
 	}
 
-	if systemPrompt != "" {
-		params.System = []anthropic.TextBlockParam{
-			{Text: systemPrompt},
+	// Prompt caching：系統提示與工具列表是同一 session 多輪間不變的前綴，標上 ephemeral 快取
+	// 斷點後，後續輪次該前綴約 1 折計費（5 分鐘 TTL）。在「最後一個工具」與「系統提示」各設一個
+	// 斷點即可快取整個 tools+system 前綴。
+	if len(anthropicTools) > 0 {
+		if last := anthropicTools[len(anthropicTools)-1].OfTool; last != nil {
+			last.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		}
+		params.Tools = anthropicTools
 	}
 
-	if len(anthropicTools) > 0 {
-		params.Tools = anthropicTools
+	if systemPrompt != "" {
+		params.System = []anthropic.TextBlockParam{
+			{Text: systemPrompt, CacheControl: anthropic.NewCacheControlEphemeralParam()},
+		}
 	}
 
 	resp, err := p.client.Messages.New(ctx, params)
@@ -119,10 +125,12 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	}
 
 	// 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 計費
-	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 {
+	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
 		resultMsg.Usage = &schema.Usage{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
+			PromptTokens:        int(resp.Usage.InputTokens),
+			CompletionTokens:    int(resp.Usage.OutputTokens),
+			CacheReadTokens:     int(resp.Usage.CacheReadInputTokens),
+			CacheCreationTokens: int(resp.Usage.CacheCreationInputTokens),
 		}
 	}
 
