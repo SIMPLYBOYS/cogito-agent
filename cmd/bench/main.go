@@ -8,7 +8,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/eval"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
 	"github.com/joho/godotenv"
 )
 

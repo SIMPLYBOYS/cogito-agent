@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // NewTimingMiddleware 返回一個環繞式中間件，量測【工具本身】的物理執行耗時（毫秒）並交給

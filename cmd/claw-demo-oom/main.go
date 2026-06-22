@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/provider"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 	"github.com/joho/godotenv"
 )
 

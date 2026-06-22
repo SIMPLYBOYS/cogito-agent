@@ -1,4 +1,4 @@
-module github.com/SIMPLYBOYS/go-tiny-claw
+module github.com/SIMPLYBOYS/cogito-agent
 
 go 1.25.0
 

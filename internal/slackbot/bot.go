@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 
-	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/engine"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )

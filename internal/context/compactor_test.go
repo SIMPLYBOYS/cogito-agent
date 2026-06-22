@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // 一份含「早期大 tool_result」的上下文，壓縮時該結果（在保護區外）會被替換成佔位符。

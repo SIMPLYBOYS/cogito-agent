@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // recTool 記錄自己是否被執行，並 sleep 製造可量測的物理耗時。

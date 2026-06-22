@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )

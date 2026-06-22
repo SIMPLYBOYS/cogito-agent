@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // AgentRunner 定義引擎向工具層暴露的"拉起子智能體"能力。接口定義在 tools 包（使用端），

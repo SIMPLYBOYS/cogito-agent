@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 type BaseTool interface {

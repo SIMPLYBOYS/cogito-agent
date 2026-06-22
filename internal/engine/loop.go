@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/provider"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
 // 主循環硬性防線的默認值：兩者都是框架層強制（不依賴模型自覺），<=0 表示關閉該防線。

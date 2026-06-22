@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/tools"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
 // fakeProvider 永遠回一個工具調用（製造一個本來會無限循環的 ReAct），可選地每輪累加成本，

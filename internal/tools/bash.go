@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 type BashTool struct {

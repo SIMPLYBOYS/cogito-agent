@@ -4,7 +4,7 @@ package provider
 import (
 	"context"
 
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // LLMProvider defines the unified interface for communicating with large models

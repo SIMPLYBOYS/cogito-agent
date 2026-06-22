@@ -9,7 +9,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "github.com/SIMPLYBOYS/go-tiny-claw"
+const tracerName = "github.com/SIMPLYBOYS/cogito-agent"
 
 // Span 是對 OTel trace.Span 的薄包裝：保留專案既有的 StartSpan/EndSpan/AddAttribute API，
 // 底層改由 OTel SDK 負責 TraceID/SpanID 分配、context 父子傳播、批次與匯出

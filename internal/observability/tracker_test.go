@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	ctxpkg "github.com/SIMPLYBOYS/go-tiny-claw/internal/context"
-	"github.com/SIMPLYBOYS/go-tiny-claw/internal/schema"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // stubProvider 返回固定 Usage 的假 provider，用於離線驗證計費邏輯（不打真實 API）。
