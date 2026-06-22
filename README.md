@@ -181,6 +181,8 @@ export COGITO_MCP_CONFIG=./.mcp.json
 go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem" 的 N 個工具」
 ```
 
+> **無頭瀏覽器**：cogito-agent 沒有原生瀏覽器工具，但掛上 [Playwright MCP](https://github.com/microsoft/playwright-mcp)（`@playwright/mcp --headless`，見 `.mcp.json.example`）即獲得導航 / 點擊 / 抓取 / 截圖等能力，工具以 `playwright__*` 註冊。
+
 ## Usage
 
 1. 配置好 `.env` 後，啟動服務：
