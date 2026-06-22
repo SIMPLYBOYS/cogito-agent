@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -59,27 +60,27 @@ func main() {
 			continue
 		}
 		clients = append(clients, cl)
-		ts, errList := cl.Tools(ctx)
-		if errList != nil {
-			log.Printf("    ❌ tools/list 失敗: %v", errList)
-			continue
-		}
-		for _, t := range ts {
-			registry.Register(t)
-		}
-		log.Printf("    ✅ 發現 %d 個工具", len(ts))
+		log.Printf("    ✅ 已連接")
+	}
+	if len(clients) == 0 {
+		log.Fatal("沒有任何 MCP server 連接成功")
 	}
 
-	log.Println("\n===== 已註冊的 MCP 工具 =====")
-	defs := registry.GetAvailableTools()
-	if len(defs) == 0 {
-		log.Fatal("沒有任何工具被註冊（檢查 server 是否啟動成功）")
+	// 經 gateway 漸進式暴露：只註冊 mcp_call_tool / mcp_describe_tool 兩個工具（與 cmd/claw 同路徑）。
+	gw, err := mcp.NewGateway(ctx, clients)
+	if err != nil {
+		log.Fatalf("建立 gateway 失敗: %v", err)
 	}
-	for _, def := range defs {
-		log.Printf("  • %s — %s", def.Name, def.Description)
+	for _, gt := range gw.Tools() {
+		registry.Register(gt)
 	}
 
-	// 模式 C（L2 全鏈路）：由 Claude 經 ReAct 迴圈自行決定調用 MCP 工具。
+	log.Printf("\n===== MCP 工具目錄（共 %d 個，經 mcp_call_tool 調用）=====", gw.Count())
+	for _, name := range gw.Names() {
+		log.Printf("  • %s", name)
+	}
+
+	// 模式 C（L2 全鏈路）：由 Claude 經 ReAct 迴圈自行 mcp_describe_tool / mcp_call_tool。
 	if *prompt != "" {
 		if os.Getenv("ANTHROPIC_API_KEY") == "" {
 			log.Fatal("-prompt 模式需要 ANTHROPIC_API_KEY")
@@ -89,20 +90,21 @@ func main() {
 		eng := engine.NewAgentEngine(llm, registry, false, false)
 		sess := ctxpkg.NewSession("mcp-demo", workDir)
 		sess.Append(schema.Message{Role: schema.RoleUser, Content: *prompt})
-		log.Printf("\n===== L2：agent 執行任務（可自行調用上面的 MCP 工具）=====\n>>> %s", *prompt)
+		log.Printf("\n===== L2：agent 執行任務（自行經 gateway 調用 MCP 工具）=====\n>>> %s", *prompt)
 		if err := eng.Run(ctx, sess, engine.NewTerminalReporter()); err != nil {
 			log.Fatalf("agent 運行失敗: %v", err)
 		}
 		return
 	}
 
-	// 模式 B：直接調用一個工具（純 tools/call，不經 LLM）。
+	// 模式 B：直接調用一個工具（經 gateway 的 mcp_call_tool，不經 LLM）。
 	if *callName != "" {
-		log.Printf("\n===== 調用 %s args=%s =====", *callName, *callArgs)
+		log.Printf("\n===== 經 gateway 調用 %s args=%s =====", *callName, *callArgs)
+		wrapped := fmt.Sprintf(`{"name":%q,"arguments":%s}`, *callName, *callArgs)
 		res := registry.Execute(ctx, schema.ToolCall{
 			ID:        "demo-1",
-			Name:      *callName,
-			Arguments: []byte(*callArgs),
+			Name:      "mcp_call_tool",
+			Arguments: []byte(wrapped),
 		})
 		if res.IsError {
 			log.Printf("❌ 工具報錯:\n%s", res.Output)
@@ -112,6 +114,6 @@ func main() {
 		return
 	}
 
-	// 模式 A：僅列出（預設）。
-	log.Println("\n（-call <工具名> -args '<JSON>' 直接調用驗 tools/call；-prompt '<任務>' 讓 Claude 自行調用驗全鏈路）")
+	// 模式 A：僅列出目錄（預設）。
+	log.Println("\n（-call <工具名> -args '<JSON>' 經 gateway 直接調用；-prompt '<任務>' 讓 Claude 自行調用驗全鏈路）")
 }

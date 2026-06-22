@@ -39,7 +39,7 @@ func main() {
 	// 載入並連接 MCP 伺服器（設了 COGITO_MCP_CONFIG 才啟用）：外部 MCP 工具會註冊進每個會話的
 	// registry。連線是程式級長壽命的，優雅關閉時統一 Close。連不上的 server 略過、不影響啟動。
 	var mcpClients []*mcp.Client
-	var mcpTools []tools.BaseTool
+	var mcpGateway *mcp.Gateway
 	if cfgPath := os.Getenv("COGITO_MCP_CONFIG"); cfgPath != "" {
 		servers, errCfg := mcp.LoadConfig(cfgPath)
 		if errCfg != nil {
@@ -51,17 +51,17 @@ func main() {
 				log.Printf("[mcp] 連接 %q 失敗，略過: %v", s.Name, errDial)
 				continue
 			}
-			ts, errList := cl.Tools(context.Background())
-			if errList != nil {
-				log.Printf("[mcp] %q tools/list 失敗，略過: %v", s.Name, errList)
-				_ = cl.Close()
-				continue
-			}
 			mcpClients = append(mcpClients, cl)
-			for _, t := range ts {
-				mcpTools = append(mcpTools, t)
+			log.Printf("[mcp] 已連接 server %q", s.Name)
+		}
+		if len(mcpClients) > 0 {
+			// 用 gateway 漸進式暴露：context 只帶輕量目錄 + 2 個 gateway 工具，而非 N 個完整 schema。
+			if gw, errGw := mcp.NewGateway(context.Background(), mcpClients); errGw != nil {
+				log.Printf("[mcp] 建立 gateway 失敗: %v", errGw)
+			} else {
+				mcpGateway = gw
+				log.Printf("[mcp] gateway 就緒：%d 個外部工具經 mcp_call_tool 漸進式暴露", gw.Count())
 			}
-			log.Printf("[mcp] 已掛載 server %q 的 %d 個工具", s.Name, len(ts))
 		}
 	}
 
@@ -114,8 +114,10 @@ func main() {
 		registry.Register(tools.NewBashTool(sess.WorkDir))
 		registry.Register(tools.NewEditFileTool(sess.WorkDir))
 		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
-		for _, mt := range mcpTools {                      // 外部 MCP 工具（若有配置）與內建工具並列
-			registry.Register(mt)
+		if mcpGateway != nil {                             // 外部 MCP 工具經 gateway 漸進式暴露（2 個工具 + 輕量目錄）
+			for _, gt := range mcpGateway.Tools() {
+				registry.Register(gt)
+			}
 		}
 		registry.Use(approval) // 外層：先審批
 		registry.Use(timing)   // 內層：只量工具本身執行耗時

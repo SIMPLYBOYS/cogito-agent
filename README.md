@@ -30,7 +30,7 @@
 - 📡 **實時進度回推**：`Reporter` 接口把思考 / 工具調用 / 成敗 / 最終回答（含子智能體進度）實時推到 Slack。
 - 💰 **成本追蹤**：`CostTracker` 裝飾器按會話累計 token 與 USD 費用。
 - 🔭 **OpenTelemetry 鏈路追蹤**：span 經 OTel SDK 匯出（OTLP → Jaeger / Langfuse / Collector），LLM span 帶 `gen_ai.*` 語意約定；未配置端點時為零成本 no-op。
-- 🧩 **MCP 集成**：透過 `COGITO_MCP_CONFIG` 載入 `.mcp.json`，連接外部 [Model Context Protocol](https://modelcontextprotocol.io) 工具伺服器（stdio），其工具以 `<server>__` 前綴註冊，與內建工具並列供模型調用（v1 支援 tools）。
+- 🧩 **MCP 集成**：透過 `COGITO_MCP_CONFIG` 載入 `.mcp.json`，連接外部 [Model Context Protocol](https://modelcontextprotocol.io) 工具伺服器（stdio）。外部工具經 **gateway 漸進式暴露**（`mcp_call_tool` + `mcp_describe_tool` + 輕量目錄），避免把 N 個完整 schema 塞進每輪 context（v1 支援 tools）。
 
 ## Architecture
 
@@ -118,7 +118,7 @@ internal/
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
 │   ├── read_file/write_file/edit_file/bash.go   內置工具
 │   └── subagent.go          spawn_subagent（agent-as-tool）
-├── mcp/                     MCP 客戶端（stdio/JSON-RPC）：連外部工具伺服器，適配成 BaseTool
+├── mcp/                     MCP 客戶端（stdio/JSON-RPC）+ gateway（mcp_call_tool/mcp_describe_tool 漸進式暴露）
 ├── slackbot/                Slack 接入層
 │   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
 │   └── approval.go          危險指令 HITL 審批
