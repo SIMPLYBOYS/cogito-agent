@@ -36,6 +36,10 @@ go.work.sum
 .env.*
 !.env.example
 
+# MCP 設定可能含敏感 server 參數（如金鑰）；只追蹤範例
+.mcp.json
+!.mcp.json.example
+
 # Agent 沙箱：workspace 是独立 git repo（含 AGENTS.md / .claw/skills 及 agent 运行产物），
 # 由其自身版本控制，不纳入主仓库追踪
 /workspace/
