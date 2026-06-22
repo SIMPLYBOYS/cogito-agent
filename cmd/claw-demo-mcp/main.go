@@ -12,7 +12,10 @@ import (
 	"log"
 	"os"
 
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 	"github.com/joho/godotenv"
@@ -24,6 +27,7 @@ func main() {
 	cfgPath := flag.String("config", os.Getenv("COGITO_MCP_CONFIG"), ".mcp.json 路徑")
 	callName := flag.String("call", "", "要調用的工具（exposed 名，如 filesystem__list_directory）")
 	callArgs := flag.String("args", "{}", "調用參數（JSON）")
+	prompt := flag.String("prompt", "", "給 agent 的任務（設了則由 Claude 經 ReAct 迴圈自行調用 MCP 工具，需 ANTHROPIC_API_KEY）")
 	flag.Parse()
 
 	if *cfgPath == "" {
@@ -75,20 +79,39 @@ func main() {
 		log.Printf("  • %s — %s", def.Name, def.Description)
 	}
 
-	if *callName == "" {
-		log.Println("\n（加 -call <工具名> -args '<JSON>' 可直接調用一個工具，驗證完整的 tools/call 路徑）")
+	// 模式 C（L2 全鏈路）：由 Claude 經 ReAct 迴圈自行決定調用 MCP 工具。
+	if *prompt != "" {
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			log.Fatal("-prompt 模式需要 ANTHROPIC_API_KEY")
+		}
+		workDir, _ := os.MkdirTemp("", "claw_mcp_demo")
+		llm := provider.NewClaudeProvider("claude-opus-4-8")
+		eng := engine.NewAgentEngine(llm, registry, false, false)
+		sess := ctxpkg.NewSession("mcp-demo", workDir)
+		sess.Append(schema.Message{Role: schema.RoleUser, Content: *prompt})
+		log.Printf("\n===== L2：agent 執行任務（可自行調用上面的 MCP 工具）=====\n>>> %s", *prompt)
+		if err := eng.Run(ctx, sess, engine.NewTerminalReporter()); err != nil {
+			log.Fatalf("agent 運行失敗: %v", err)
+		}
 		return
 	}
 
-	log.Printf("\n===== 調用 %s args=%s =====", *callName, *callArgs)
-	res := registry.Execute(ctx, schema.ToolCall{
-		ID:        "demo-1",
-		Name:      *callName,
-		Arguments: []byte(*callArgs),
-	})
-	if res.IsError {
-		log.Printf("❌ 工具報錯:\n%s", res.Output)
-	} else {
-		log.Printf("✅ 結果:\n%s", res.Output)
+	// 模式 B：直接調用一個工具（純 tools/call，不經 LLM）。
+	if *callName != "" {
+		log.Printf("\n===== 調用 %s args=%s =====", *callName, *callArgs)
+		res := registry.Execute(ctx, schema.ToolCall{
+			ID:        "demo-1",
+			Name:      *callName,
+			Arguments: []byte(*callArgs),
+		})
+		if res.IsError {
+			log.Printf("❌ 工具報錯:\n%s", res.Output)
+		} else {
+			log.Printf("✅ 結果:\n%s", res.Output)
+		}
+		return
 	}
+
+	// 模式 A：僅列出（預設）。
+	log.Println("\n（-call <工具名> -args '<JSON>' 直接調用驗 tools/call；-prompt '<任務>' 讓 Claude 自行調用驗全鏈路）")
 }
