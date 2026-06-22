@@ -139,7 +139,7 @@ func main() {
 		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（RunSub 內以「[Subagent] …」
 		// 前綴回報）也會串流回本頻道。SlackReporter 的 PostMessage 對並發安全，多隊偵察兵
 		// 同時回報只是訊息交錯。
-		registry.Register(tools.NewSubagentTool(eng, readOnly, reporter))
+		registry.Register(tools.NewSubagentTool(eng, readOnly, reporter, rootDir)) // skillsBaseDir=rootDir：可綁定技能進子 context
 
 		return eng
 	}

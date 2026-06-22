@@ -12,7 +12,7 @@
 
 **內置工具**（全部在鎖定的工作區內運行）
 - `read_file`（超長自動截斷至 8000 字節）、`write_file`（自動創建目錄）、`edit_file`（局部字符串替換，L4 模糊匹配會**自動對齊縮排**）、`bash`（任意命令，帶 30s 超時保護，合併 stdout/stderr）。
-- 🧭 **`spawn_subagent`**：把深度探索委派給受限的只讀子智能體（agent-as-tool），上下文隔離、可**並行派出多路偵察兵**。
+- 🧭 **`spawn_subagent`**：把深度探索委派給受限的只讀子智能體（agent-as-tool），上下文隔離、可**並行派出多路偵察兵**；可選 `skill` 參數**綁定技能**，該技能正文只載入子智能體的隔離 context（主 context 不被汙染）。
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即可註冊；`Registry.Use` 掛載環繞式中間件（審批 / 計時等）。
 
 **駕馭工程（失控控制）**
@@ -23,7 +23,7 @@
 
 **上下文工程**
 - 🗜️ **自適應上下文壓縮**：壓縮水位按模型**真實上下文窗口**（token）設定，並用每次 API 回傳的真實 `PromptTokens` 自校準，自動適配不同窗口的模型。
-- 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`）。
+- 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`，**漸進式載入**：System Prompt 只放索引，正文用 `read_skill` 載入自身 context，或經 `spawn_subagent` 綁定進子 context）。
 
 **接入與可觀測性**
 - 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
@@ -106,7 +106,7 @@ internal/
 │   └── context.go           把 session 注入 ctx（供中間件取觸發頻道）
 ├── context/                 上下文工程
 │   ├── composer.go          System Prompt 組裝（身份/紀律/Plan Mode/AGENTS.md/Skills）
-│   ├── skill.go             .claw/skills 技能載入
+│   ├── skill.go             .claw/skills 技能漸進式載入（LoadIndex 索引 / ReadSkill 正文）
 │   ├── compactor.go         自適應上下文壓縮（按真實窗口 + PromptTokens 自校準）
 │   ├── recovery.go          工具錯誤自愈（救援指南注入）
 │   └── session.go           會話歷史 + 滑動窗口 + 成本記帳

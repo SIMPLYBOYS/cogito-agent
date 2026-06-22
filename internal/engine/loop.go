@@ -285,18 +285,22 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 //   - 返回值 string 即"探索報告"，作為 spawn_subagent 工具的輸出回給主 agent。
 //
 // 滿足 tools.AgentRunner 接口；reporter 用 any 規避包依賴，內部斷言回 Reporter。
-func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, readOnlyRegistry tools.Registry, reporter any) (string, error) {
-	contextHistory := []schema.Message{
-		{
-			Role: schema.RoleSystem,
-			Content: `你是一個專門負責深度探索的探路者 (Explorer Subagent)。
+func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, skillBody string, readOnlyRegistry tools.Registry, reporter any) (string, error) {
+	systemContent := `你是一個專門負責深度探索的探路者 (Explorer Subagent)。
 你的任務是根據主架構師的指令，在當前工作區內仔細閱讀代碼、查閱日誌，蒐集足夠的信息。
 
 【核心紀律】
 1. 你必須、且只能依靠內置工具（如 bash 的 find/grep，或 read_file）去尋找答案。絕對不允許憑空捏造或猜測！
 2. 如果你沒有找到確切的答案，你必須繼續使用工具深入搜索。
-3. 當且僅當你找到了確切的線索後，停止調用工具，直接輸出一段純文本作為你的終極彙報。主架構師會根據你的彙報來做下一步決策。`,
-		},
+3. 當且僅當你找到了確切的線索後，停止調用工具，直接輸出一段純文本作為你的終極彙報。主架構師會根據你的彙報來做下一步決策。`
+
+	// 綁定技能：完整正文只活在這個子 agent 的隔離 context（主 context 不被汙染）。
+	if skillBody != "" {
+		systemContent += "\n\n---\n【已綁定專業技能 · 嚴格依照以下操作指南執行本次任務】\n\n" + skillBody
+	}
+
+	contextHistory := []schema.Message{
+		{Role: schema.RoleSystem, Content: systemContent},
 		{Role: schema.RoleUser, Content: taskPrompt},
 	}
 

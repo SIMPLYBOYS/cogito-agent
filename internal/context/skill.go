@@ -52,8 +52,9 @@ func (s *SkillLoader) LoadIndex() string {
 	}
 	var b strings.Builder
 	b.WriteString("\n### 可用專業技能索引 (Agent Skills)\n")
-	b.WriteString("以下是你擁有的技能【索引】（僅名稱與適用場景）。當任務符合某技能的描述時，")
-	b.WriteString("**務必先用 `read_skill` 工具載入該技能的正文**，再嚴格依其指令執行：\n\n")
+	b.WriteString("以下是你擁有的技能【索引】（僅名稱與適用場景）。當任務符合某技能的描述時，依其正文指令執行。載入正文有兩種方式：\n")
+	b.WriteString("1. **`read_skill`**：把技能正文載入【你自己的 context】，適合你要親自一步步操作的情境。\n")
+	b.WriteString("2. **`spawn_subagent` 的 `skill` 參數**：把技能正文只載入【子智能體的隔離 context】，由它執行完只回傳結論——適合長篇操作指南或你想保持主 context 精簡時。\n\n")
 	for _, sk := range skills {
 		b.WriteString(fmt.Sprintf("- **%s**：%s\n", sk.Name, sk.Description))
 	}

@@ -58,7 +58,7 @@ func main() {
 	eng := engine.NewAgentEngine(llmProvider, mainRegistry, false, false)
 
 	// 【核心裝配】把持有 engine + 只讀 registry 的 spawn_subagent 工具塞進主工具池
-	mainRegistry.Register(tools.NewSubagentTool(eng, readOnlyRegistry, reporter))
+	mainRegistry.Register(tools.NewSubagentTool(eng, readOnlyRegistry, reporter, workDir))
 
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate("test_subagent_001", workDir)
 
