@@ -8,6 +8,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/SIMPLYBOYS/go-tiny-claw/internal/observability"
 
@@ -30,7 +31,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
 	}
-	defer func() { _ = shutdownTracing(context.Background()) }()
+	defer func() {
+		// 顯式 flush 並打印結果：BatchSpanProcessor 在退出時才送根 span，吞掉錯誤會讓「沒上報」變無聲。
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := shutdownTracing(ctx); err != nil {
+			log.Printf("[Tracing] ❌ flush/關閉失敗（span 可能未送達）: %v", err)
+		} else {
+			log.Println("[Tracing] ✅ span 已 flush（若有設 OTLP 端點即已上報）")
+		}
+	}()
 
 	workDir := "/tmp/claw_trace_demo"
 	if err := os.MkdirAll(workDir, 0755); err != nil {
