@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
@@ -173,6 +175,26 @@ func main() {
 	}
 
 	bot = slackbot.NewSlackBot(factory, rootDir)
+
+	// Tier 4 技能自生成（opt-in）：任務成功後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
+	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），須人工 review 後移到 .claw/skills/ 才生效。
+	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
+		proposedDir := filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName)
+		synth := evolve.NewSkillSynthesizer(llmProvider, proposedDir)
+		bot.SetPostRunHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt string) {
+			path, err := synth.Reflect(ctx, taskPrompt, session.GetWorkingMemory(0))
+			switch {
+			case err != nil:
+				log.Printf("[evolve] 技能反思失敗（不影響任務）: %v", err)
+			case path != "":
+				log.Printf("[evolve] 💡 提案技能：%s", path)
+				bot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
+			default:
+				log.Printf("[evolve] 本次未發現可保存技能")
+			}
+		})
+		log.Printf("[evolve] 技能自生成已啟用（提案技能寫入 %s，需人工 review）", proposedDir)
+	}
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 

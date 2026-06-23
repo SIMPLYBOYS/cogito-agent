@@ -27,11 +27,16 @@ import (
 // 也回推到本頻道。
 type EngineFactory func(session *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine
 
+// PostRunHook 在每次 Agent【成功】跑完一個任務後被呼叫（如 Tier 4 技能自生成反思）。可為 nil。
+// 與引擎解耦：bot 只負責在對的時機呼叫，具體做什麼由 cmd 注入。
+type PostRunHook func(ctx context.Context, session *ctxpkg.Session, taskPrompt string)
+
 type SlackBot struct {
 	client        *slackapi.Client
 	signingSecret string
 	botUserID     string
 	factory       EngineFactory // 每會話現造引擎（替換原來的固定 engine）
+	postRun       PostRunHook   // 可選：任務成功後的鉤子（技能自生成等），由 cmd 注入
 	workDir       string        // 工作區【根】目錄；各頻道隔離到其下子目錄（見 channelWorkDir）
 
 	// per-WorkDir 鎖：key 為頻道的工作目錄。確保同一目錄同一時刻只有一個 Agent 任務在跑
@@ -66,6 +71,9 @@ func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
 		busy:          make(map[string]bool),
 	}
 }
+
+// SetPostRunHook 注入任務成功後的鉤子（如技能自生成）。傳 nil 可清除。
+func (b *SlackBot) SetPostRunHook(h PostRunHook) { b.postRun = h }
 
 // HandleEvent 是 Slack Events API 的 HTTP 回調入口
 func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
@@ -174,6 +182,12 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	eng := b.factory(session, reporter)
 	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
+		return
+	}
+
+	// 任務成功 → 觸發 post-run 鉤子（如技能自生成反思）。失敗的軌跡不萃取技能。
+	if b.postRun != nil {
+		b.postRun(context.Background(), session, prompt)
 	}
 }
 

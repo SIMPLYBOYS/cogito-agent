@@ -29,7 +29,7 @@
 - 🗜️ **自適應上下文壓縮**：壓縮水位按模型**真實上下文窗口**（token）設定，並用每次 API 回傳的真實 `PromptTokens` 自校準，自動適配不同窗口的模型。
 - 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`，**漸進式載入**：System Prompt 只放索引，正文用 `read_skill` 載入自身 context，或經 `spawn_subagent` 綁定進子 context）。
 - 💾 **Session 持久化（可選）**：設 `COGITO_SESSION_DIR` 後，對話歷史/費用以「一 session 一 JSON 檔」write-through 落地磁碟（原子寫），**重啟後按 ID 復原**——讓 CLI 的 `-session` 斷點續傳跨重啟生效、Slack 各頻道記憶不因重啟丟失。未設則維持純記憶體。
-- 🧬 **技能自生成（Tier 4 · 可選 · `COGITO_SKILL_SYNTH=1`）**：任務**成功後**反思軌跡，把可複用流程寫成 SKILL.md。**安全鐵律**：只寫進**暫存區** `.claw/skills-proposed/`、**不自動啟用**（`SkillLoader` 只讀 `.claw/skills/`），須人工 review 後手動移過去才生效——自我進化不繞過「失控控制」。
+- 🧬 **技能自生成（Tier 4 · 可選 · `COGITO_SKILL_SYNTH=1`）**：任務**成功後**反思軌跡，把可複用流程寫成 SKILL.md（CLI 與 Slack 入口皆支援；Slack 還會回貼一則提案通知）。**安全鐵律**：只寫進**暫存區** `.claw/skills-proposed/`、**不自動啟用**（`SkillLoader` 只讀 `.claw/skills/`），須人工 review 後手動移過去才生效——自我進化不繞過「失控控制」。
 
 **接入與可觀測性**
 - 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
