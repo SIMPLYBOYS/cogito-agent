@@ -119,6 +119,18 @@ func main() {
 		}
 	}
 
+	// Tier 4 記憶自更新（opt-in）：把學到的耐久專案慣例/雷點追加到提案記憶暫存區（不自動併入 AGENTS.md）。
+	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
+		mSynth := evolve.NewMemorySynthesizer(trackedProvider, workDir)
+		if added, err := mSynth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0)); err != nil {
+			log.Printf("[evolve] 記憶反思失敗（不影響任務結果）: %v", err)
+		} else if len(added) > 0 {
+			log.Printf("[evolve] 🧠 新增 %d 條提案記憶到 .claw/%s（需人工 review 後併入 AGENTS.md）", len(added), evolve.ProposedMemoryFileName)
+		} else {
+			log.Printf("[evolve] 本次任務未發現值得記入專案記憶的慣例")
+		}
+	}
+
 	fmt.Println("\n==================================================")
 	fmt.Printf("💰 Session 累計消耗: $%.6f | Token: Input %d, Output %d\n",
 		sess.TotalCostUSD, sess.TotalPromptTokens, sess.TotalCompletionTokens)

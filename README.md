@@ -30,6 +30,7 @@
 - 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`，**漸進式載入**：System Prompt 只放索引，正文用 `read_skill` 載入自身 context，或經 `spawn_subagent` 綁定進子 context）。
 - 💾 **Session 持久化（可選）**：設 `COGITO_SESSION_DIR` 後，對話歷史/費用以「一 session 一 JSON 檔」write-through 落地磁碟（原子寫），**重啟後按 ID 復原**——讓 CLI 的 `-session` 斷點續傳跨重啟生效、Slack 各頻道記憶不因重啟丟失。未設則維持純記憶體。
 - 🧬 **技能自生成 + eval 把關（Tier 4 · 可選 · `COGITO_SKILL_SYNTH=1`）**：任務**成功後**反思軌跡，把可複用流程寫成 SKILL.md（CLI 與 Slack 入口皆支援；Slack 還會回貼一則提案通知）。**安全鐵律**：只寫進**暫存區** `.claw/skills-proposed/`、**不自動啟用**（`SkillLoader` 只讀 `.claw/skills/`）。晉升須過 **`cmd/skillgate` 把關**（結構 + **危險指令/憑證黑名單**確定性掃描）才移到生效目錄——人選哪個、自動擋壞的，自我進化不繞過「失控控制」。
+- 🧠 **記憶自更新（Tier 4 · 可選 · `COGITO_MEMORY_SYNTH=1`）**：任務成功後萃取耐久的專案慣例/雷點（建置·測試命令、repo 慣用法、坑），**去重 + 安全掃描**後追加到**提案記憶** `.claw/AGENTS.proposed.md`（不自動套用），人工 review 後併入 `AGENTS.md` 才會在下次自動帶出。
 
 **接入與可觀測性**
 - 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
@@ -267,8 +268,9 @@ go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
 ### 技能自生成 + 把關（Tier 4）
 
 ```bash
-# 1) 開啟自生成：任務成功後把可複用流程寫成「提案技能」（只進暫存區、不自動啟用）
-export COGITO_SKILL_SYNTH=1
+# 1) 開啟自生成（技能 + 專案記憶）：產物只進暫存區、不自動生效
+export COGITO_SKILL_SYNTH=1      # 可複用流程 → .claw/skills-proposed/
+export COGITO_MEMORY_SYNTH=1     # 耐久專案慣例/雷點 → .claw/AGENTS.proposed.md（review 後併入 AGENTS.md）
 go run ./cmd/claw-cli -session t1 -prompt "<會用到某個可複用流程的任務>"
 
 # 2) 把關 review：列出提案技能 + 確定性把關（結構 + 危險指令/憑證黑名單）

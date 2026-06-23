@@ -176,24 +176,38 @@ func main() {
 
 	bot = slackbot.NewSlackBot(factory, rootDir)
 
-	// Tier 4 技能自生成（opt-in）：任務成功後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
-	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），須人工 review 後移到 .claw/skills/ 才生效。
+	// Tier 4 自我進化（opt-in）：任務成功後反思軌跡。安全鐵律一致——產物只進【暫存區】、不自動生效，
+	// 須人工 review（技能用 skillgate 晉升；提案記憶須併入 AGENTS.md 才生效）。
+	var skillSynth *evolve.SkillSynthesizer
+	var memSynth *evolve.MemorySynthesizer
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
-		proposedDir := filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName)
-		synth := evolve.NewSkillSynthesizer(llmProvider, proposedDir)
+		skillSynth = evolve.NewSkillSynthesizer(llmProvider, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
+		log.Printf("[evolve] 技能自生成已啟用（寫入 .claw/%s，需人工 review）", evolve.ProposedSkillsDirName)
+	}
+	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
+		memSynth = evolve.NewMemorySynthesizer(llmProvider, rootDir)
+		log.Printf("[evolve] 記憶自更新已啟用（寫入 .claw/%s，需人工併入 AGENTS.md）", evolve.ProposedMemoryFileName)
+	}
+	if skillSynth != nil || memSynth != nil {
 		bot.SetPostRunHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt string) {
-			path, err := synth.Reflect(ctx, taskPrompt, session.GetWorkingMemory(0))
-			switch {
-			case err != nil:
-				log.Printf("[evolve] 技能反思失敗（不影響任務）: %v", err)
-			case path != "":
-				log.Printf("[evolve] 💡 提案技能：%s", path)
-				bot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
-			default:
-				log.Printf("[evolve] 本次未發現可保存技能")
+			history := session.GetWorkingMemory(0)
+			if skillSynth != nil {
+				if path, err := skillSynth.Reflect(ctx, taskPrompt, history); err != nil {
+					log.Printf("[evolve] 技能反思失敗（不影響任務）: %v", err)
+				} else if path != "" {
+					log.Printf("[evolve] 💡 提案技能：%s", path)
+					bot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
+				}
+			}
+			if memSynth != nil {
+				if added, err := memSynth.Reflect(ctx, taskPrompt, history); err != nil {
+					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
+				} else if len(added) > 0 {
+					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
+					bot.SendMessage(session.ID, fmt.Sprintf("🧠 我從這次任務記下 %d 條*提案專案慣例*，已存到暫存區，需你 review 後併入 AGENTS.md 才生效。", len(added)))
+				}
 			}
 		})
-		log.Printf("[evolve] 技能自生成已啟用（提案技能寫入 %s，需人工 review）", proposedDir)
 	}
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)

@@ -60,13 +60,22 @@ func Gate(skillPath string) (GateResult, error) {
 	}
 
 	// 安全掃描整份內容（含正文）。
-	for _, p := range dangerousSkillPatterns {
-		if p.re.MatchString(content) {
-			issues = append(issues, "命中危險模式："+p.desc)
-		}
+	for _, d := range scanDangerous(content) {
+		issues = append(issues, "命中危險模式："+d)
 	}
 
 	return GateResult{Passed: len(issues) == 0, Issues: issues}, nil
+}
+
+// scanDangerous 回傳文字命中的危險模式描述（空＝乾淨）。供技能把關與記憶自更新共用，避免黑名單漂移。
+func scanDangerous(text string) []string {
+	var hits []string
+	for _, p := range dangerousSkillPatterns {
+		if p.re.MatchString(text) {
+			hits = append(hits, p.desc)
+		}
+	}
+	return hits
 }
 
 // Promote 先過 Gate，通過才把提案技能從 proposedPath 移到 activeDir（生效）。不過則不移、回傳原因。
