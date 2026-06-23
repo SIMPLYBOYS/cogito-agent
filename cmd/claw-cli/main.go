@@ -87,6 +87,13 @@ func main() {
 	registry.Register(tools.NewEditFileTool(workDir))
 	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
 
+	// 背景任務工具：長命命令（dev server / 長建置）不受 bash 30s 逾時限制。退出時統一收掉。
+	taskMgr := tools.NewTaskManager(executor, workDir)
+	for _, tt := range tools.NewTaskTools(taskMgr) {
+		registry.Register(tt)
+	}
+	defer taskMgr.KillAll()
+
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, *planPtr)
 	reporter := engine.NewTerminalReporter()
 

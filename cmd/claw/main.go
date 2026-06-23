@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -84,6 +85,10 @@ func main() {
 	modelName := "claude-opus-4-8"
 	llmProvider := provider.NewClaudeProvider(modelName)
 
+	// 背景任務管理器：每會話一個（session 級作用域），統一收集供優雅關閉時 kill 掉所有殘留進程。
+	var taskMgrs []*tools.TaskManager
+	var taskMgrsMu sync.Mutex
+
 	// bot 先聲明後賦值：factory/中介層的閉包按引用捕獲 bot，工廠在服務啟動後才被調用，屆時已賦值。
 	var bot *slackbot.SlackBot
 
@@ -132,7 +137,17 @@ func main() {
 				registry.Register(gt)
 			}
 		}
-		registry.Use(approval) // 外層：先審批
+		// 背景任務工具（bash_background/task_output/task_kill/task_list）：每會話一個 TaskManager
+		// （session 級作用域），rooted 在該會話 WorkDir、共用同一沙箱 executor。
+		tm := tools.NewTaskManager(executor, sess.WorkDir)
+		for _, tt := range tools.NewTaskTools(tm) {
+			registry.Register(tt)
+		}
+		taskMgrsMu.Lock()
+		taskMgrs = append(taskMgrs, tm)
+		taskMgrsMu.Unlock()
+
+		registry.Use(approval) // 外層：先審批（bash_background 也走同一危險黑名單）
 		registry.Use(timing)   // 內層：只量工具本身執行耗時
 
 		tracked := observability.NewCostTracker(llmProvider, modelName, sess)
@@ -187,6 +202,11 @@ func main() {
 	for _, cl := range mcpClients {
 		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留
 	}
+	taskMgrsMu.Lock()
+	for _, tm := range taskMgrs {
+		tm.KillAll() // 收掉所有背景任務，避免殘留孤兒進程
+	}
+	taskMgrsMu.Unlock()
 	if c, ok := executor.(interface{ Close() error }); ok {
 		_ = c.Close() // 移除 per-session sandbox 容器（docker 模式）
 	}

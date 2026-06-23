@@ -114,7 +114,9 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 //     （.env 機密、.git/.ssh/.aws 憑證、.claw 自身配置）。正常的工作區內源碼寫入不攔，保留 UX。
 func IsDangerousCommand(toolName string, args string) bool {
 	switch toolName {
-	case "bash":
+	case "bash", "bash_background":
+		// 背景 bash 與前景 bash 走同一危險黑名單——否則 `bash_background` 會成為審批繞道
+		// （長駐的 rm -rf / kill 更危險）。對應 memory「拉起需審批」的重啟條件。
 		dangerousPatterns := []string{
 			`rm\s+-r`,      // 遞歸刪除
 			`sudo\s+`,      // 提權

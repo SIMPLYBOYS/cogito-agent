@@ -14,8 +14,12 @@ import (
 //
 // 約定：非零退出等「命令層級錯誤」以 error 回傳（呼叫方——bash 工具——走 error-as-observation
 // 把它轉成給模型看的觀察，而非中斷迴圈）。ctx 帶 timeout，實作必須尊重取消。
+//
+// Command 回傳一個【未 Start】的 *exec.Cmd（已配置成在此沙箱執行 command）：供背景任務（TaskManager）
+// 自行接管 stdout/stderr、Start、Wait、Kill；同步 Run 也以它為基礎，確保兩條路徑隔離邊界一致。
 type Executor interface {
 	Run(ctx context.Context, command, workDir string) (output []byte, err error)
+	Command(ctx context.Context, command, workDir string) (*exec.Cmd, error)
 	Name() string // "host" / "docker"，供日誌與識別
 }
 
@@ -24,8 +28,16 @@ type HostExecutor struct{}
 
 func (HostExecutor) Name() string { return "host" }
 
-func (HostExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
+func (HostExecutor) Command(ctx context.Context, command, workDir string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = workDir
+	return cmd, nil
+}
+
+func (h HostExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
+	cmd, err := h.Command(ctx, command, workDir)
+	if err != nil {
+		return nil, err
+	}
 	return cmd.CombinedOutput()
 }

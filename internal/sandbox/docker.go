@@ -107,12 +107,19 @@ func (d *DockerExecutor) ensure(ctx context.Context, workDir string) (string, er
 	return name, nil
 }
 
-func (d *DockerExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
+func (d *DockerExecutor) Command(ctx context.Context, command, workDir string) (*exec.Cmd, error) {
 	name, err := d.ensure(ctx, workDir)
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "docker", d.execArgs(name, command)...)
+	return exec.CommandContext(ctx, "docker", d.execArgs(name, command)...), nil
+}
+
+func (d *DockerExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
+	cmd, err := d.Command(ctx, command, workDir)
+	if err != nil {
+		return nil, err
+	}
 	return cmd.CombinedOutput()
 }
 

@@ -13,6 +13,7 @@
 **內置工具**（全部在鎖定的工作區內運行）
 - `read_file`（超長自動截斷至 8000 字節）、`write_file`（自動創建目錄）、`edit_file`（局部字符串替換，L4 模糊匹配會**自動對齊縮排**）、`bash`（任意命令，帶 30s 超時保護，合併 stdout/stderr）。
 - 🧭 **`spawn_subagent`**：把深度探索委派給受限的只讀子智能體（agent-as-tool），上下文隔離、可**並行派出多路偵察兵**；可選 `skill` 參數**綁定技能**，該技能正文只載入子智能體的隔離 context（主 context 不被汙染）。
+- ⏱️ **背景任務（`bash_background` / `task_output` / `task_kill` / `task_list`）**：長命命令（dev server、長建置/訓練）丟到背景跑，**不受一般 `bash` 的 30s 逾時限制**，可跨 Turn 查輸出/終止。session 級 `TaskManager`（每會話獨立）、**並發上限**、走同一危險審批、服務關閉時統一 kill；命令在與前景 bash **同一沙箱邊界**內執行。
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即可註冊；`Registry.Use` 掛載環繞式中間件（審批 / 計時等）。
 
 **駕馭工程（失控控制）**
@@ -120,7 +121,8 @@ internal/
 │   ├── registry.go          註冊 / 發現 / 執行 + 環繞式中間件鏈
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
 │   ├── read_file/write_file/edit_file/bash.go   內置工具
-│   └── subagent.go          spawn_subagent（agent-as-tool）
+│   ├── subagent.go          spawn_subagent（agent-as-tool）
+│   └── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
 ├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
 ├── mcp/                     MCP 客戶端（stdio/JSON-RPC）+ gateway（mcp_call_tool/mcp_describe_tool 漸進式暴露）
 ├── slackbot/                Slack 接入層

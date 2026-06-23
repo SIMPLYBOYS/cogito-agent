@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -21,6 +22,12 @@ func (f *fakeExecutor) Run(_ context.Context, command, workDir string) ([]byte, 
 	f.gotCmd = command
 	f.gotWorkDir = workDir
 	return f.out, f.err
+}
+
+func (f *fakeExecutor) Command(ctx context.Context, command, workDir string) (*exec.Cmd, error) {
+	f.gotCmd = command
+	f.gotWorkDir = workDir
+	return exec.CommandContext(ctx, "true"), nil
 }
 
 func TestBashTool_RoutesThroughExecutor(t *testing.T) {
