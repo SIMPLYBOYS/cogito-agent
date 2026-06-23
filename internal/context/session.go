@@ -1,6 +1,7 @@
 package context
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -23,6 +24,9 @@ type Session struct {
 	TotalPromptTokens     int
 	TotalCompletionTokens int
 	TotalCostUSD          float64
+
+	// store 非 nil 時開啟 write-through 持久化（每次變動落盤）。nil 則純記憶體（預設）。
+	store SessionStore
 }
 
 func NewSession(id string, workDir string) *Session {
@@ -35,12 +39,57 @@ func NewSession(id string, workDir string) *Session {
 	}
 }
 
+// newSessionFromSnapshot 從持久化快照復原 Session，並綁回 store 以便後續繼續 write-through。
+func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session {
+	created, _ := time.Parse(time.RFC3339Nano, snap.CreatedAt)
+	updated, _ := time.Parse(time.RFC3339Nano, snap.UpdatedAt)
+	return &Session{
+		ID:                    snap.ID,
+		WorkDir:               snap.WorkDir,
+		CreatedAt:             created,
+		UpdatedAt:             updated,
+		history:               snap.History,
+		TotalPromptTokens:     snap.TotalPromptTokens,
+		TotalCompletionTokens: snap.TotalCompletionTokens,
+		TotalCostUSD:          snap.TotalCostUSD,
+		store:                 store,
+	}
+}
+
+// snapshotLocked 在持有鎖時打一份可序列化快照（history 做拷貝，避免外部持有底層 slice）。
+func (s *Session) snapshotLocked() *SessionSnapshot {
+	h := make([]schema.Message, len(s.history))
+	copy(h, s.history)
+	return &SessionSnapshot{
+		ID:                    s.ID,
+		WorkDir:               s.WorkDir,
+		CreatedAt:             s.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:             s.UpdatedAt.Format(time.RFC3339Nano),
+		History:               h,
+		TotalPromptTokens:     s.TotalPromptTokens,
+		TotalCompletionTokens: s.TotalCompletionTokens,
+		TotalCostUSD:          s.TotalCostUSD,
+	}
+}
+
+// persistLocked 在【持有鎖時】落盤。刻意在鎖內寫：Append/RecordUsage 是序列化的，鎖內寫能保證
+// 落盤順序與變動順序一致，杜絕「舊快照覆蓋新快照」；單 session 檔案小、原子寫，鎖內 I/O 成本可忽略。
+func (s *Session) persistLocked() {
+	if s.store == nil {
+		return
+	}
+	if err := s.store.Save(s.snapshotLocked()); err != nil {
+		log.Printf("[Session] 持久化失敗 (%s): %v", s.ID, err)
+	}
+}
+
 // Append 是長期記憶的寫入口（thinking / action / observation 都落這裡）。
 func (s *Session) Append(msgs ...schema.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.history = append(s.history, msgs...)
 	s.UpdatedAt = time.Now()
+	s.persistLocked()
 }
 
 // GetWorkingMemory 返回短期工作記憶：末尾 limit 條的滑動窗口。
@@ -76,6 +125,14 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 type SessionManager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
+	store    SessionStore // 非 nil 時，GetOrCreate 會從磁碟復原、新 session 也綁定 write-through
+}
+
+// SetStore 開啟持久化：之後 GetOrCreate 會優先從 store 復原、新建的 session 也會 write-through。
+func (sm *SessionManager) SetStore(store SessionStore) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.store = store
 }
 
 // GlobalSessionMgr 是包級全局單例，方便各 IM adapter（Slack 等）共享同一 session 池。
@@ -90,6 +147,7 @@ func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
 	s.TotalPromptTokens += prompt
 	s.TotalCompletionTokens += completion
 	s.TotalCostUSD += cost
+	s.persistLocked()
 }
 
 // CostUSD 在鎖保護下快照當前累計花費，供引擎做成本熔斷判斷時併發安全地讀取
@@ -107,7 +165,24 @@ func (sm *SessionManager) GetOrCreate(id string, workDir string) *Session {
 	if sess, exists := sm.sessions[id]; exists {
 		return sess
 	}
+
+	// 記憶體沒有 → 嘗試從持久化後端復原（跨重啟續傳的關鍵）。
+	if sm.store != nil {
+		if snap, found, err := sm.store.Load(id); err != nil {
+			log.Printf("[Session] 載入 (%s) 失敗，改新建: %v", id, err)
+		} else if found {
+			sess := newSessionFromSnapshot(snap, sm.store)
+			if workDir != "" {
+				sess.WorkDir = workDir // 以當前傳入的工作區為準（重啟後路徑可能變），但保留歷史
+			}
+			sm.sessions[id] = sess
+			log.Printf("[Session] 從磁碟復原 (%s)，歷史 %d 則、累計 $%.6f", id, len(sess.history), sess.TotalCostUSD)
+			return sess
+		}
+	}
+
 	sess := NewSession(id, workDir)
+	sess.store = sm.store // 綁定 store（可能為 nil）→ 開啟 write-through
 	sm.sessions[id] = sess
 	return sess
 }

@@ -25,6 +25,7 @@
 **上下文工程**
 - 🗜️ **自適應上下文壓縮**：壓縮水位按模型**真實上下文窗口**（token）設定，並用每次 API 回傳的真實 `PromptTokens` 自校準，自動適配不同窗口的模型。
 - 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`，**漸進式載入**：System Prompt 只放索引，正文用 `read_skill` 載入自身 context，或經 `spawn_subagent` 綁定進子 context）。
+- 💾 **Session 持久化（可選）**：設 `COGITO_SESSION_DIR` 後，對話歷史/費用以「一 session 一 JSON 檔」write-through 落地磁碟（原子寫），**重啟後按 ID 復原**——讓 CLI 的 `-session` 斷點續傳跨重啟生效、Slack 各頻道記憶不因重啟丟失。未設則維持純記憶體。
 
 **接入與可觀測性**
 - 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
@@ -110,7 +111,8 @@ internal/
 │   ├── skill.go             .claw/skills 技能漸進式載入（LoadIndex 索引 / ReadSkill 正文）
 │   ├── compactor.go         自適應上下文壓縮（按真實窗口 + PromptTokens 自校準）
 │   ├── recovery.go          工具錯誤自愈（救援指南注入）
-│   └── session.go           會話歷史 + 滑動窗口 + 成本記帳
+│   ├── session.go           會話歷史 + 滑動窗口 + 成本記帳（store 非 nil 時 write-through 持久化）
+│   └── session_store.go     SessionStore / FileSessionStore（一 session 一 JSON、原子寫、跨重啟復原）
 ├── provider/                大模型 Provider 抽象
 │   ├── interface.go         LLMProvider（Generate + MaxContextTokens）
 │   └── claude.go            Anthropic Claude 實現
@@ -222,6 +224,17 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 > 持久的是**檔案系統層**的狀態（套件/檔案/進程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新進程（與 host 模式「每次新 shell」一致）。要持久環境變數請寫進 `~/.bashrc` 等檔案。
 >
 > 注意：首次啟動容器若需拉映像會較慢（建議先 `docker build` 好本地映像）；目前一個 session 對應一個容器、不對單條命令再做細分。
+
+### Session 持久化（跨重啟續傳）
+
+```bash
+export COGITO_SESSION_DIR=./workspace/sessions   # 設了才落地磁碟；未設＝純記憶體
+go run ./cmd/claw-cli -session task_001 -prompt "開始一個多步驟任務"
+# 重啟後同一 -session 接著跑，歷史與費用都還在：
+go run ./cmd/claw-cli -session task_001 -prompt "繼續"
+```
+
+對 Slack（`cmd/claw`）同理：設 `COGITO_SESSION_DIR` 後各頻道記憶不因服務重啟而丟失。每個 session 一個 JSON 檔（含對話歷史），請勿入庫（已加進 `.gitignore`）。
 
 ## Development
 

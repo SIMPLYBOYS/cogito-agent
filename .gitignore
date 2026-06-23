@@ -44,6 +44,9 @@ go.work.sum
 # 由其自身版本控制，不纳入主仓库追踪
 /workspace/
 
+# Session 持久化產物（COGITO_SESSION_DIR）：含對話歷史，勿入庫
+/sessions/
+
 # Editor / IDE
 .idea/
 .vscode/

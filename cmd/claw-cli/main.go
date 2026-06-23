@@ -61,6 +61,13 @@ func main() {
 	modelName := "claude-opus-4-8"
 	realProvider := provider.NewClaudeProvider(modelName)
 
+	// session 持久化：設 COGITO_SESSION_DIR 即把歷史/費用落地磁碟——讓 -session 斷點續傳跨重啟生效。
+	// 必須在 GetOrCreate 之前 SetStore，才能從磁碟復原既有 session。
+	if store, dir := ctxpkg.StoreFromEnv(); store != nil {
+		ctxpkg.GlobalSessionMgr.SetStore(store)
+		log.Printf("[Session] 持久化已啟用: %s", dir)
+	}
+
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(*sessionPtr, workDir)
 
 	// 用 CostTracker 包裹 provider 自動記賬；trace 由 engine.Run 內部自動導出

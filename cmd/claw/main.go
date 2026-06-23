@@ -73,6 +73,14 @@ func main() {
 	executor := sandbox.FromEnv()
 	log.Printf("[sandbox] bash 執行模式: %s", sandbox.Describe(executor))
 
+	// session 持久化：設 COGITO_SESSION_DIR 即把對話歷史/費用落地磁碟，重啟後按頻道 ID 復原。
+	if store, dir := ctxpkg.StoreFromEnv(); store != nil {
+		ctxpkg.GlobalSessionMgr.SetStore(store)
+		log.Printf("[Session] 持久化已啟用: %s", dir)
+	} else {
+		log.Printf("[Session] 純記憶體模式（設 COGITO_SESSION_DIR 可跨重啟續傳）")
+	}
+
 	modelName := "claude-opus-4-8"
 	llmProvider := provider.NewClaudeProvider(modelName)
 
