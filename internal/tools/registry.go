@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -58,10 +59,14 @@ func (r *registryImpl) Register(tool BaseTool) {
 }
 
 func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
-	var defs []schema.ToolDefinition
+	defs := make([]schema.ToolDefinition, 0, len(r.tools))
 	for _, tool := range r.tools {
 		defs = append(defs, tool.Definition())
 	}
+	// 按名稱排序：r.tools 是 map，迭代順序隨機；若不排序，每輪送給 LLM 的 tools 陣列順序都不同，
+	// prompt cache 的前綴（tools+system）就無法位元組一致 → 幾乎每輪 miss、且 cache_control 標到
+	// 的「最後工具」每輪都不同。固定順序後快取才能穩定命中。
+	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }
 
