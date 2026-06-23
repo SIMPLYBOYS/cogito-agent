@@ -17,6 +17,7 @@
 
 **駕馭工程（失控控制）**
 - 🛡️ **HITL 危險指令審批**：命中黑名單（`rm -rf` / `sudo` / 覆蓋 `.go` / `kill` …）的調用會被掛起，把審批請求推回 Slack 頻道，回 `approve` / `reject` 才放行（含超時自動拒絕）。
+- 📦 **可插拔沙箱執行器（OS 級硬邊界）**：`bash` 命令經 `sandbox.Executor` 執行——預設 `HostExecutor`（宿主機直跑）；設 `COGITO_SANDBOX=docker` 改用 `DockerExecutor`，每條命令丟進一次性容器：只掛入該 session 的 workDir（`cd /` 也逃不出去）、`--network none` 斷網、限記憶體/CPU/PID。這是軟性防線之外唯一能真正擋住逃逸的硬隔離。
 - 🚦 **三道硬防線**：主循環**回合上限**（默認 40）、**死循環指紋探測**（參數正規化看穿尾空格/冗餘路徑微差 + 同工具雙閾值）、**per-task 成本熔斷**（默認 \$1）。
 - ⚡ **工具併發限流**：單輪多工具併發執行，由緩衝 channel 信號量限制同時在跑數（默認 5），避免打爆下游。
 - 🩹 **錯誤自愈**：工具報錯時由 `RecoveryManager` 注入「下一步怎麼做」的救援指南。
@@ -118,6 +119,7 @@ internal/
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
 │   ├── read_file/write_file/edit_file/bash.go   內置工具
 │   └── subagent.go          spawn_subagent（agent-as-tool）
+├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
 ├── mcp/                     MCP 客戶端（stdio/JSON-RPC）+ gateway（mcp_call_tool/mcp_describe_tool 漸進式暴露）
 ├── slackbot/                Slack 接入層
 │   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
@@ -207,7 +209,15 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 
 機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度實時回覆到對應會話。
 
-> ⚠️ **安全提示**：`bash` 工具會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改文件。請僅在隔離/受控環境中運行，並妥善限制可訪問的工作區。
+> ⚠️ **安全提示**：預設（`HostExecutor`）下 `bash` 會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改文件——請僅在隔離/受控環境中運行。**生產建議啟用 Docker 沙箱**取得 OS 級硬邊界：
+>
+> ```bash
+> docker build -t cogito-sandbox:latest -f docker/sandbox.Dockerfile .
+> export COGITO_SANDBOX=docker     # bash 命令改在隔離容器內執行
+> # 可調：COGITO_SANDBOX_IMAGE / _MEMORY（512m）/ _CPUS（1.0）/ _NETWORK（none）/ _PIDS（256）
+> ```
+>
+> 啟用後每條 bash 命令在一次性容器內跑，只掛入該 session 的 workDir、預設斷網、限資源。**v1 為「每命令一容器」**（檔案經掛載持久化，與宿主機「每次新 shell」語義一致；容器內安裝的套件/背景進程不跨呼叫保留——需持久 env 可後續升級成 per-session 常駐容器 + `docker exec`）。
 
 ## Development
 

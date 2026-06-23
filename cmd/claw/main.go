@@ -15,6 +15,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/slackbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
@@ -68,6 +69,10 @@ func main() {
 	rootDir, _ := os.Getwd()
 	rootDir += "/workspace" // 工作區根目錄；各頻道隔離到其下 channels/<id> 子目錄（見 bot.channelWorkDir）
 
+	// 沙箱執行器：COGITO_SANDBOX=docker 時 bash 命令丟進隔離容器（OS 級硬邊界），否則宿主機直跑。
+	executor := sandbox.FromEnv()
+	log.Printf("[sandbox] bash 執行模式: %s", sandbox.Describe(executor))
+
 	modelName := "claude-opus-4-8"
 	llmProvider := provider.NewClaudeProvider(modelName)
 
@@ -111,7 +116,7 @@ func main() {
 		registry := tools.NewRegistry()
 		registry.Register(tools.NewReadFileTool(sess.WorkDir))
 		registry.Register(tools.NewWriteFileTool(sess.WorkDir))
-		registry.Register(tools.NewBashTool(sess.WorkDir))
+		registry.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
 		registry.Register(tools.NewEditFileTool(sess.WorkDir))
 		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
 		if mcpGateway != nil {                             // 外部 MCP 工具經 gateway 漸進式暴露（2 個工具 + 輕量目錄）
@@ -133,7 +138,7 @@ func main() {
 		// 註冊 spawn_subagent 後，主 Agent 一次吐多個即可並行委派多路偵察兵（引擎並行 fan-out）。
 		readOnly := tools.NewRegistry()
 		readOnly.Register(tools.NewReadFileTool(sess.WorkDir))
-		readOnly.Register(tools.NewBashTool(sess.WorkDir))
+		readOnly.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
 		readOnly.Use(approval)
 		readOnly.Use(timing)
 		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（RunSub 內以「[Subagent] …」

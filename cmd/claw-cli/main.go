@@ -21,6 +21,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 	"github.com/joho/godotenv"
@@ -65,10 +66,14 @@ func main() {
 	// 用 CostTracker 包裹 provider 自動記賬；trace 由 engine.Run 內部自動導出
 	trackedProvider := observability.NewCostTracker(realProvider, modelName, sess)
 
+	// 沙箱執行器：COGITO_SANDBOX=docker 時 bash 命令丟進隔離容器，否則宿主機直跑。
+	executor := sandbox.FromEnv()
+	log.Printf("[sandbox] bash 執行模式: %s", sandbox.Describe(executor))
+
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))
 	registry.Register(tools.NewWriteFileTool(workDir))
-	registry.Register(tools.NewBashTool(workDir))
+	registry.Register(tools.NewBashToolWithExecutor(workDir, executor))
 	registry.Register(tools.NewEditFileTool(workDir))
 	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
 
