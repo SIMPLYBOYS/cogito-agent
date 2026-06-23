@@ -4,18 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 type BashTool struct {
-	workDir string
+	workDir  string
+	executor sandbox.Executor
 }
 
+// NewBashTool 預設用 HostExecutor（宿主機執行，原行為不變）。
 func NewBashTool(workDir string) *BashTool {
-	return &BashTool{workDir: workDir}
+	return &BashTool{workDir: workDir, executor: sandbox.HostExecutor{}}
+}
+
+// NewBashToolWithExecutor 注入自訂 Executor（如 DockerExecutor），把命令丟進隔離環境執行。
+func NewBashToolWithExecutor(workDir string, ex sandbox.Executor) *BashTool {
+	if ex == nil {
+		ex = sandbox.HostExecutor{}
+	}
+	return &BashTool{workDir: workDir, executor: ex}
 }
 
 func (t *BashTool) Name() string {
@@ -52,10 +62,7 @@ func (t *BashTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(timeoutCtx, "bash", "-c", input.Command)
-	cmd.Dir = t.workDir
-
-	out, err := cmd.CombinedOutput()
+	out, err := t.executor.Run(timeoutCtx, input.Command, t.workDir)
 	outputStr := string(out)
 
 	if timeoutCtx.Err() == context.DeadlineExceeded {
