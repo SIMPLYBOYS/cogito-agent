@@ -19,6 +19,7 @@ import (
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
@@ -102,6 +103,20 @@ func main() {
 
 	if err := eng.Run(context.Background(), sess, reporter); err != nil {
 		log.Fatalf("\n💥 引擎運行崩潰: %v", err)
+	}
+
+	// Tier 4 技能自生成（opt-in）：任務【成功】後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
+	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），需人工 review 後手動移到 .claw/skills/。
+	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
+		proposedDir := filepath.Join(workDir, ".claw", evolve.ProposedSkillsDirName)
+		synth := evolve.NewSkillSynthesizer(trackedProvider, proposedDir)
+		if path, err := synth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0)); err != nil {
+			log.Printf("[evolve] 技能反思失敗（不影響任務結果）: %v", err)
+		} else if path != "" {
+			log.Printf("[evolve] 💡 已產出提案技能：%s（需人工 review 後移到 .claw/skills/ 才生效）", path)
+		} else {
+			log.Printf("[evolve] 本次任務未發現值得保存的可複用技能")
+		}
 	}
 
 	fmt.Println("\n==================================================")

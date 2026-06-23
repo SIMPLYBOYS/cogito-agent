@@ -53,6 +53,9 @@ go.work.sum
 # Playwright MCP 執行暫存（無頭瀏覽器產物），勿入庫
 /.playwright-mcp/
 
+# 自我進化的「提案技能」暫存（COGITO_SKILL_SYNTH）：自動生成草稿，需人工 review，勿自動入庫
+skills-proposed/
+
 # Editor / IDE
 .idea/
 .vscode/
