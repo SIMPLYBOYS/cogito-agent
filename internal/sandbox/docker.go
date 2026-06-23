@@ -2,7 +2,11 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os/exec"
+	"sync"
 )
 
 // DockerConfig 控制 DockerExecutor 的隔離與資源邊界。零值欄位會套用安全預設。
@@ -28,35 +32,38 @@ func (c DockerConfig) withDefaults() DockerConfig {
 	return c
 }
 
-// DockerExecutor 把每條命令丟進一個一次性容器執行（docker run --rm）：
-//   - 只把 workDir 以 volume 掛入容器的 Mount 點 → 宿主機其餘檔案系統不可見，`cd /` 也逃不出去；
-//   - --network none 預設斷網；--memory/--cpus/--pids-limit 限資源（擋 fork bomb / 吃爆記憶體）。
+// DockerExecutor 為每個 session（以 workDir 識別）維持一個【常駐容器】，命令經 docker exec 進去執行：
+//   - 首次對某 workDir 執行時 docker run -d ... sleep infinity 拉起容器（只掛 workDir:/workspace →
+//     宿主機其餘檔案系統不可見，cd / 逃不出去）；--network none 斷網、--memory/--cpus/--pids-limit 限資源；
+//   - 之後同 workDir 的命令都走 docker exec，省去每命令啟動容器的延遲，且容器內安裝的套件 / 環境變數 /
+//     背景進程在同 session 多次呼叫間【持久保留】。
 //
-// 語義對齊 HostExecutor：每次呼叫是全新環境，檔案透過掛載的 workDir 持久化（與宿主機「每次新 shell、
-// 磁碟保留」一致）。容器內安裝的套件/背景進程不跨呼叫保留——若需持久 env，未來可升級成
-// 「per-session 常駐容器 + docker exec」。
+// 容器名由 workDir 雜湊決定（穩定、可在崩潰重啟後辨識並清理）。Close 會移除本進程拉起的所有容器。
 type DockerExecutor struct {
-	cfg DockerConfig
+	cfg     DockerConfig
+	mu      sync.Mutex
+	started map[string]string // workDir → 容器名
 }
 
-func NewDockerExecutor(cfg DockerConfig) DockerExecutor {
-	return DockerExecutor{cfg: cfg.withDefaults()}
+func NewDockerExecutor(cfg DockerConfig) *DockerExecutor {
+	return &DockerExecutor{cfg: cfg.withDefaults(), started: make(map[string]string)}
 }
 
-func (d DockerExecutor) Name() string { return "docker" }
+func (d *DockerExecutor) Name() string { return "docker" }
 
 // Config 回傳生效中的設定（含預設），供啟動時日誌顯示。
-func (d DockerExecutor) Config() DockerConfig { return d.cfg }
+func (d *DockerExecutor) Config() DockerConfig { return d.cfg }
 
-func (d DockerExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "docker", d.dockerArgs(command, workDir)...)
-	return cmd.CombinedOutput()
+// containerName 由 workDir 推導穩定容器名（docker 名稱字元限制：用 hex 雜湊最安全）。
+func containerName(workDir string) string {
+	h := sha256.Sum256([]byte(workDir))
+	return "cogito-sb-" + hex.EncodeToString(h[:])[:12]
 }
 
-// dockerArgs 組裝 docker run 參數（抽出以便單測，不需真的有 Docker daemon）。
-func (d DockerExecutor) dockerArgs(command, workDir string) []string {
+// runArgs 組裝「拉起常駐容器」的 docker run 參數（抽出以便單測）。
+func (d *DockerExecutor) runArgs(name, workDir string) []string {
 	args := []string{
-		"run", "--rm",
+		"run", "-d", "--name", name,
 		"-v", workDir + ":" + d.cfg.Mount,
 		"-w", d.cfg.Mount,
 		"--network", d.cfg.Network,
@@ -70,5 +77,51 @@ func (d DockerExecutor) dockerArgs(command, workDir string) []string {
 	if d.cfg.Pids != "" {
 		args = append(args, "--pids-limit", d.cfg.Pids)
 	}
-	return append(args, d.cfg.Image, "bash", "-c", command)
+	// sleep infinity 讓容器常駐等待 exec。
+	return append(args, d.cfg.Image, "sleep", "infinity")
+}
+
+// execArgs 組裝「在常駐容器內執行命令」的 docker exec 參數（抽出以便單測）。
+func (d *DockerExecutor) execArgs(name, command string) []string {
+	return []string{"exec", "-w", d.cfg.Mount, name, "bash", "-c", command}
+}
+
+// ensure 確保該 workDir 的常駐容器已啟動，回傳容器名。對同一 workDir 只會建立一次。
+func (d *DockerExecutor) ensure(ctx context.Context, workDir string) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if name, ok := d.started[workDir]; ok {
+		return name, nil // 快路徑：本 session 容器已在跑
+	}
+
+	name := containerName(workDir)
+	// 清掉可能殘留的同名容器（上次進程崩潰留下的），再起全新常駐容器。best-effort。
+	_ = exec.Command("docker", "rm", "-f", name).Run()
+
+	if out, err := exec.CommandContext(ctx, "docker", d.runArgs(name, workDir)...).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("啟動 sandbox 容器失敗（請確認 docker 可用且映像 %s 已建置）: %v\n%s", d.cfg.Image, err, out)
+	}
+	d.started[workDir] = name
+	return name, nil
+}
+
+func (d *DockerExecutor) Run(ctx context.Context, command, workDir string) ([]byte, error) {
+	name, err := d.ensure(ctx, workDir)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "docker", d.execArgs(name, command)...)
+	return cmd.CombinedOutput()
+}
+
+// Close 移除本進程拉起的所有常駐容器（cmd 優雅關閉時呼叫）。
+func (d *DockerExecutor) Close() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for workDir, name := range d.started {
+		_ = exec.Command("docker", "rm", "-f", name).Run()
+		delete(d.started, workDir)
+	}
+	return nil
 }

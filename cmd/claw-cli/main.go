@@ -69,6 +69,9 @@ func main() {
 	// 沙箱執行器：COGITO_SANDBOX=docker 時 bash 命令丟進隔離容器，否則宿主機直跑。
 	executor := sandbox.FromEnv()
 	log.Printf("[sandbox] bash 執行模式: %s", sandbox.Describe(executor))
+	if c, ok := executor.(interface{ Close() error }); ok {
+		defer c.Close() // 退出時移除 per-session sandbox 容器（docker 模式）
+	}
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))

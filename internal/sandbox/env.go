@@ -26,7 +26,7 @@ func FromEnv() Executor {
 
 // Describe 回傳一行人類可讀的生效設定，供啟動日誌。
 func Describe(ex Executor) string {
-	if d, ok := ex.(DockerExecutor); ok {
+	if d, ok := ex.(*DockerExecutor); ok {
 		c := d.Config()
 		return fmt.Sprintf("docker（image=%s, network=%s, memory=%s, cpus=%s, pids=%s）—— OS 級硬隔離",
 			c.Image, c.Network, c.Memory, c.CPUs, c.Pids)

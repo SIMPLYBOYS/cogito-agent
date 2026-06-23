@@ -179,4 +179,7 @@ func main() {
 	for _, cl := range mcpClients {
 		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留
 	}
+	if c, ok := executor.(interface{ Close() error }); ok {
+		_ = c.Close() // 移除 per-session sandbox 容器（docker 模式）
+	}
 }
