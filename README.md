@@ -98,7 +98,8 @@ flowchart TB
 cmd/
 ├── claw/                 Slack 服務端入口（生產用）：裝配 Provider/Registry/Engine/SlackBot + OTel，啟動 HTTP
 ├── claw-cli/             通用命令行入口（-prompt / -dir / -session / -plan）
-├── bench/                自動化評測 runner
+├── bench/                自動化評測 runner（-out 輸出 JSON 報告、-min-pass-rate CI 門檻）
+├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 └── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
 internal/
 ├── engine/                  Agent 核心引擎
@@ -245,6 +246,20 @@ go test ./...      # 運行測試
 go vet ./...       # 靜態檢查
 go build ./...     # 構建
 ```
+
+### 評測（eval）與儀表板
+
+```bash
+# 1) 跑分（真實 API、需 ANTHROPIC_API_KEY）並輸出 JSON 報告
+go run ./cmd/bench -model claude-haiku-4-5 -out ./bench-reports
+# CI 門檻：通過率低於 0.8 即以非 0 退出碼結束 → 讓 CI job 失敗
+go run ./cmd/bench -out ./bench-reports -min-pass-rate 0.8
+
+# 2) 視覺化：讀報告目錄、開儀表板（成功率 / 逐用例回合·試錯·成本·耗時 / 歷次趨勢）
+go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
+```
+
+CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 gofmt/vet/build/`test -race`（無需 key）；[`benchmark.yml`](.github/workflows/benchmark.yml) 手動或每週排程跑分（需在 repo Secrets 設 `ANTHROPIC_API_KEY`），上傳 JSON 報告為 artifact。
 
 ## Contributing
 
