@@ -5,8 +5,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
 	"github.com/joho/godotenv"
@@ -14,6 +19,12 @@ import (
 
 func main() {
 	_ = godotenv.Load()
+
+	model := flag.String("model", "claude-haiku-4-5", "跑分使用的模型（便宜起見預設 haiku）")
+	outDir := flag.String("out", "", "輸出 JSON 報告的目錄（空＝不輸出）；檔名為 bench-<unixtime>.json")
+	minPassRate := flag.Float64("min-pass-rate", 0, "通過率門檻 0..1；低於則以非 0 退出碼結束（CI 用，0＝不檢查）")
+	flag.Parse()
+
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY 進行跑分測試")
 	}
@@ -37,7 +48,36 @@ func main() {
 	}
 
 	// 跑分是真實 API 調用、要花錢：默認選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
-	// 想測更強能力可換 claude-opus-4-8。
-	runner := eval.NewBenchmarkRunner("claude-haiku-4-5")
-	runner.RunSuite(context.Background(), testcases)
+	// 想測更強能力可換 -model claude-opus-4-8。
+	runner := eval.NewBenchmarkRunner(*model)
+	report := runner.RunSuite(context.Background(), testcases)
+
+	// 輸出 JSON 報告（供儀表板/CI artifact）。
+	if *outDir != "" {
+		if err := writeReport(*outDir, report); err != nil {
+			log.Printf("[bench] 寫入報告失敗: %v", err)
+		}
+	}
+
+	// CI 門檻：通過率低於 -min-pass-rate 即非 0 退出，讓 CI job 失敗。
+	if *minPassRate > 0 && report.PassRate < *minPassRate {
+		log.Printf("[bench] ❌ 通過率 %.2f%% 低於門檻 %.2f%%", report.PassRate*100, *minPassRate*100)
+		os.Exit(1)
+	}
+}
+
+func writeReport(dir string, report *eval.SuiteReport) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("bench-%d.json", time.Now().Unix()))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return err
+	}
+	log.Printf("[bench] 📄 報告已寫入 %s", path)
+	return nil
 }

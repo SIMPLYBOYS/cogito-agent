@@ -30,13 +30,24 @@ type TestCase struct {
 // TestResult 存放單次跑分結果。除了「結果/總成本/總耗時」，還收集兩個【過程】指標來區分
 // 「一發入魂」與「重試多次才過」——它們與 Passed 正交，量測架構（Prompt/工具設計）的順滑度。
 type TestResult struct {
-	TestCaseID     string
-	Passed         bool
-	TotalCostUSD   float64
-	DurationMs     int64
-	TurnCount      int // 完成任務用了幾輪 ReAct（駕馭順滑度：一發入魂 vs 掙扎多輪）
-	ToolErrorCount int // 中途工具報錯次數（試錯成本：摔了幾跤）
-	ErrorMsg       string
+	TestCaseID     string  `json:"test_case_id"`
+	Passed         bool    `json:"passed"`
+	TotalCostUSD   float64 `json:"total_cost_usd"`
+	DurationMs     int64   `json:"duration_ms"`
+	TurnCount      int     `json:"turn_count"`       // 完成任務用了幾輪 ReAct（駕馭順滑度：一發入魂 vs 掙扎多輪）
+	ToolErrorCount int     `json:"tool_error_count"` // 中途工具報錯次數（試錯成本：摔了幾跤）
+	ErrorMsg       string  `json:"error_msg,omitempty"`
+}
+
+// SuiteReport 是一次完整跑分的機器可讀報告（供 CI 判定門檻、儀表板視覺化）。
+type SuiteReport struct {
+	Model        string       `json:"model"`
+	GeneratedAt  string       `json:"generated_at"` // RFC3339
+	Total        int          `json:"total"`
+	Passed       int          `json:"passed"`
+	PassRate     float64      `json:"pass_rate"` // 0..1
+	TotalCostUSD float64      `json:"total_cost_usd"`
+	Results      []TestResult `json:"results"`
 }
 
 // benchReporter 是跑分專用的計數 Reporter：靜默收集「回合數」與「工具報錯次數」，不刷屏。
@@ -67,8 +78,8 @@ func NewBenchmarkRunner(model string) *BenchmarkRunner {
 	return &BenchmarkRunner{modelName: model}
 }
 
-// RunSuite 順序執行一組評測集並打印跑分報告。
-func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) {
+// RunSuite 順序執行一組評測集，打印跑分報告，並回傳機器可讀的 SuiteReport（供 CI/儀表板）。
+func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) *SuiteReport {
 	log.Println("==================================================")
 	log.Printf("🚀 啟動自動化 Harness Benchmark 評估... | 模型: %s\n", b.modelName)
 	log.Println("==================================================")
@@ -93,10 +104,25 @@ func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) {
 		totalCost += res.TotalCostUSD
 	}
 
+	passRate := 0.0
+	if len(testcases) > 0 {
+		passRate = float64(passedCount) / float64(len(testcases))
+	}
+
 	log.Println("\n================ 🏆 跑分終極報告 ================")
-	log.Printf("總用例數: %d | 成功數: %d | 成功率: %.2f%%\n", len(testcases), passedCount, float64(passedCount)/float64(len(testcases))*100)
+	log.Printf("總用例數: %d | 成功數: %d | 成功率: %.2f%%\n", len(testcases), passedCount, passRate*100)
 	log.Printf("總消耗成本: $%.6f\n", totalCost)
 	log.Println("==================================================")
+
+	return &SuiteReport{
+		Model:        b.modelName,
+		GeneratedAt:  time.Now().Format(time.RFC3339),
+		Total:        len(testcases),
+		Passed:       passedCount,
+		PassRate:     passRate,
+		TotalCostUSD: totalCost,
+		Results:      results,
+	}
 }
 
 func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestResult {

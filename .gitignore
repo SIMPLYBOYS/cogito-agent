@@ -47,6 +47,9 @@ go.work.sum
 # Session 持久化產物（COGITO_SESSION_DIR）：含對話歷史，勿入庫
 /sessions/
 
+# Benchmark JSON 報告（cmd/bench -out）：跑分產物，勿入庫
+/bench-reports/
+
 # Editor / IDE
 .idea/
 .vscode/
