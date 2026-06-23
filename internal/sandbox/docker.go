@@ -35,8 +35,9 @@ func (c DockerConfig) withDefaults() DockerConfig {
 // DockerExecutor 為每個 session（以 workDir 識別）維持一個【常駐容器】，命令經 docker exec 進去執行：
 //   - 首次對某 workDir 執行時 docker run -d ... sleep infinity 拉起容器（只掛 workDir:/workspace →
 //     宿主機其餘檔案系統不可見，cd / 逃不出去）；--network none 斷網、--memory/--cpus/--pids-limit 限資源；
-//   - 之後同 workDir 的命令都走 docker exec，省去每命令啟動容器的延遲，且容器內安裝的套件 / 環境變數 /
-//     背景進程在同 session 多次呼叫間【持久保留】。
+//   - 之後同 workDir 的命令都走 docker exec，省去每命令啟動容器的延遲，且容器內安裝的套件 / 寫入的檔案 /
+//     背景進程在同 session 多次呼叫間【持久保留】。注意：每條命令是獨立的 docker exec ... bash -c（全新
+//     進程），故 shell 的 export 環境變數 / cd / 別名【不】跨呼叫保留——要持久得寫進檔案（如 ~/.bashrc）。
 //
 // 容器名由 workDir 雜湊決定（穩定、可在崩潰重啟後辨識並清理）。Close 會移除本進程拉起的所有容器。
 type DockerExecutor struct {

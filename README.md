@@ -17,7 +17,7 @@
 
 **駕馭工程（失控控制）**
 - 🛡️ **HITL 危險指令審批**：命中黑名單（`rm -rf` / `sudo` / 覆蓋 `.go` / `kill` …）的調用會被掛起，把審批請求推回 Slack 頻道，回 `approve` / `reject` 才放行（含超時自動拒絕）。
-- 📦 **可插拔沙箱執行器（OS 級硬邊界）**：`bash` 命令經 `sandbox.Executor` 執行——預設 `HostExecutor`（宿主機直跑）；設 `COGITO_SANDBOX=docker` 改用 `DockerExecutor`，**每個 session 一個常駐容器**（首次啟動、之後 `docker exec`，省啟動延遲且容器內套件/環境持久）：只掛入該 session 的 workDir（`cd /` 也逃不出去）、`--network none` 斷網、限記憶體/CPU/PID。這是軟性防線之外唯一能真正擋住逃逸的硬隔離。
+- 📦 **可插拔沙箱執行器（OS 級硬邊界）**：`bash` 命令經 `sandbox.Executor` 執行——預設 `HostExecutor`（宿主機直跑）；設 `COGITO_SANDBOX=docker` 改用 `DockerExecutor`，**每個 session 一個常駐容器**（首次啟動、之後 `docker exec`，省啟動延遲且容器內**套件/檔案/背景進程**跨呼叫持久）：只掛入該 session 的 workDir（`cd /` 也逃不出去）、`--network none` 斷網、限記憶體/CPU/PID。這是軟性防線之外唯一能真正擋住逃逸的硬隔離。
 - 🚦 **三道硬防線**：主循環**回合上限**（默認 40）、**死循環指紋探測**（參數正規化看穿尾空格/冗餘路徑微差 + 同工具雙閾值）、**per-task 成本熔斷**（默認 \$1）。
 - ⚡ **工具併發限流**：單輪多工具併發執行，由緩衝 channel 信號量限制同時在跑數（默認 5），避免打爆下游。
 - 🩹 **錯誤自愈**：工具報錯時由 `RecoveryManager` 注入「下一步怎麼做」的救援指南。
@@ -217,7 +217,9 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 > # 可調：COGITO_SANDBOX_IMAGE / _MEMORY（512m）/ _CPUS（1.0）/ _NETWORK（none）/ _PIDS（256）
 > ```
 >
-> 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內安裝的套件 / 環境變數 / 背景進程在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
+> 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景進程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
+>
+> 持久的是**檔案系統層**的狀態（套件/檔案/進程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新進程（與 host 模式「每次新 shell」一致）。要持久環境變數請寫進 `~/.bashrc` 等檔案。
 >
 > 注意：首次啟動容器若需拉映像會較慢（建議先 `docker build` 好本地映像）；目前一個 session 對應一個容器、不對單條命令再做細分。
 
