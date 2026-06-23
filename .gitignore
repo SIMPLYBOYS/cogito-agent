@@ -50,6 +50,9 @@ go.work.sum
 # Benchmark JSON 報告（cmd/bench -out）：跑分產物，勿入庫
 /bench-reports/
 
+# Playwright MCP 執行暫存（無頭瀏覽器產物），勿入庫
+/.playwright-mcp/
+
 # Editor / IDE
 .idea/
 .vscode/
