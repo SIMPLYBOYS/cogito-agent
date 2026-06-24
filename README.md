@@ -274,6 +274,18 @@ go run ./cmd/bench -tune -out ./bench-reports
 go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
 ```
 
+### Loop Engineering（goal 循環 + 心跳）
+
+```bash
+# goal 循環：跑到 bash 驗證通過為止（退出碼 0 = 達成）。verify 輸出當下一輪反饋，自動重試。
+go run ./cmd/claw-cli -session fix-bug \
+  -prompt "修好 ./app 的編譯錯誤" \
+  -verify "cd ./app && go build ./..." -max-attempts 5
+
+# 心跳：不在 app 內造排程器——OS 的 cron 就是心跳。一行 crontab 每早 8 點跑（-session 持久化＝跨次累積的「脊柱」）：
+# 0 8 * * 1-5  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session daily-triage -prompt "拉昨日 CI 失敗，挑出可修的，逐一處理"
+```
+
 ### 切換 LLM Provider
 
 ```bash

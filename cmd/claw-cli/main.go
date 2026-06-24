@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
@@ -34,6 +36,8 @@ func main() {
 	dirPtr := flag.String("dir", "./workspace", "Agent 工作區目錄")
 	sessionPtr := flag.String("session", "cli-session", "會話 ID，支持斷點續傳")
 	planPtr := flag.Bool("plan", false, "開啟 Plan Mode：狀態外部化到 PLAN.md / TODO.md")
+	verifyPtr := flag.String("verify", "", "goal 循環：驗證 bash 指令（退出碼 0 = 目標達成）。設了即跑到通過或用盡次數")
+	attemptsPtr := flag.Int("max-attempts", 5, "goal 循環最大嘗試次數")
 	flag.Parse()
 
 	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。flush 必須在退出前呼叫。
@@ -105,7 +109,12 @@ func main() {
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	runErr := eng.Run(context.Background(), sess, reporter)
+	var runErr error
+	if *verifyPtr != "" {
+		runErr = runGoalLoop(eng, sess, reporter, *verifyPtr, workDir, *attemptsPtr)
+	} else {
+		runErr = eng.Run(context.Background(), sess, reporter)
+	}
 
 	// Tier 4 技能自生成（opt-in）：任務【成功】後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
 	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），需人工 review 後手動移到 .claw/skills/。
@@ -156,4 +165,37 @@ func main() {
 	fmt.Printf("💰 Session 累計消耗: $%.6f | Token: Input %d, Output %d\n",
 		sess.TotalCostUSD, sess.TotalPromptTokens, sess.TotalCompletionTokens)
 	fmt.Println("==================================================")
+}
+
+// runGoalLoop 是 /goal 式的循環：跑 agent → 用 bash verify 判定目標是否達成（退出碼 0）→
+// 沒達成就把 verify 的輸出當反饋追加進對話、重試，直到通過或用盡次數。
+// ponytail: verify 輸出直接當下一輪反饋，不另叫 LLM 反思（省一次 API）。要更聰明的教訓再接 eval.ReflectOnFailure。
+func runGoalLoop(eng *engine.AgentEngine, sess *ctxpkg.Session, reporter engine.Reporter, verifyCmd, workDir string, maxAttempts int) error {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := eng.Run(context.Background(), sess, reporter); err != nil {
+			return err
+		}
+		out, ok := goalVerify(verifyCmd, workDir)
+		if ok {
+			log.Printf("[goal] ✅ 第 %d 次達成目標（`%s` 退出碼 0）", attempt, verifyCmd)
+			return nil
+		}
+		log.Printf("[goal] ❌ 第 %d/%d 次驗證未過：%s", attempt, maxAttempts, strings.TrimSpace(out))
+		if attempt < maxAttempts {
+			sess.Append(schema.Message{Role: schema.RoleUser, Content: fmt.Sprintf(
+				"目標驗證未通過：執行 `%s` 退出碼非 0，輸出：\n%s\n請據此修正後繼續，直到驗證通過。", verifyCmd, out)})
+		}
+	}
+	return fmt.Errorf("達到最大嘗試次數 %d，目標仍未通過驗證 `%s`", maxAttempts, verifyCmd)
+}
+
+// goalVerify 在 workDir 跑一條 bash 驗證指令，退出碼 0 視為目標達成。
+func goalVerify(cmd, workDir string) (output string, ok bool) {
+	c := exec.Command("bash", "-c", cmd)
+	c.Dir = workDir
+	out, err := c.CombinedOutput()
+	return string(out), err == nil
 }
