@@ -37,8 +37,11 @@ func main() {
 	flag.Parse()
 
 	_ = godotenv.Load()
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
+
+	// 選擇 LLM provider（COGITO_PROVIDER：claude 預設 / openai 相容）。
+	realProvider, modelName, errProv := provider.FromEnv()
+	if errProv != nil {
+		log.Fatal(errProv)
 	}
 
 	prompt := *promptPtr
@@ -59,8 +62,7 @@ func main() {
 	fmt.Printf("🚀 cogito-agent CLI | 📁 工作區: %s\n", workDir)
 	fmt.Println("==================================================")
 
-	modelName := "claude-opus-4-8"
-	realProvider := provider.NewClaudeProvider(modelName)
+	log.Printf("[provider] model=%s", modelName)
 
 	// session 持久化：設 COGITO_SESSION_DIR 即把歷史/費用落地磁碟——讓 -session 斷點續傳跨重啟生效。
 	// 必須在 GetOrCreate 之前 SetStore，才能從磁碟復原既有 session。

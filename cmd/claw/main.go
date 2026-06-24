@@ -29,9 +29,12 @@ func main() {
 	// 讀取當前目錄的 .env（文件不存在也不報錯；不會覆蓋已存在的環境變量）
 	_ = godotenv.Load()
 
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
+	// 選擇 LLM provider（COGITO_PROVIDER：claude 預設 / openai 相容）。
+	llmProvider, modelName, errProv := provider.FromEnv()
+	if errProv != nil {
+		log.Fatal(errProv)
 	}
+	log.Printf("[provider] model=%s", modelName)
 
 	// 初始化 OTel 鏈路追蹤：設了 OTEL_EXPORTER_OTLP_ENDPOINT 即上報（Jaeger/Langfuse/Collector），
 	// 未設則 no-op。defer Shutdown 在優雅退出時 flush。
@@ -83,9 +86,6 @@ func main() {
 	} else {
 		log.Printf("[Session] 純記憶體模式（設 COGITO_SESSION_DIR 可跨重啟續傳）")
 	}
-
-	modelName := "claude-opus-4-8"
-	llmProvider := provider.NewClaudeProvider(modelName)
 
 	// 背景任務管理器：每會話一個（session 級作用域），統一收集供優雅關閉時 kill 掉所有殘留進程。
 	var taskMgrs []*tools.TaskManager

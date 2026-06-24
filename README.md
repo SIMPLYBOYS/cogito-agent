@@ -10,7 +10,7 @@
 
 **核心引擎**
 - 🤖 **自主 Agent 循環**：Thinking（慢思考）→ Action（調用工具）→ Observation（觀察結果）的多輪 ReAct 循環，直到任務完成。
-- 🧠 **Claude 驅動 / 可替換 Provider**：基於 Anthropic 官方 Go SDK（`anthropic-sdk-go`），透過統一的 `LLMProvider` 接口（`Generate` + `MaxContextTokens`）對接，便於替換底層模型。
+- 🧠 **多 Provider（Claude / OpenAI 相容）**：統一 `LLMProvider` 接口（`Generate` + `MaxContextTokens` + `ModelName`）。預設 Claude（`anthropic-sdk-go`）；設 `COGITO_PROVIDER=openai` 改用**手寫的 OpenAI 相容 client**，`OPENAI_BASE_URL` 可指向 OpenAI / 本地 vLLM / Ollama / OpenRouter / Groq…——一招接上「200+ 模型」。含完整 tool-use 映射。
 
 **內置工具**（全部在鎖定的工作區內運行）
 - `read_file`（超長自動截斷至 8000 字節）、`write_file`（自動創建目錄）、`edit_file`（局部字符串替換，L4 模糊匹配會**自動對齊縮排**）、`bash`（任意命令，帶 30s 超時保護，合併 stdout/stderr）。
@@ -123,8 +123,10 @@ internal/
 │   ├── session.go           會話歷史 + 滑動窗口 + 成本記帳（store 非 nil 時 write-through 持久化）
 │   └── session_store.go     SessionStore / FileSessionStore（一 session 一 JSON、原子寫、跨重啟復原）
 ├── provider/                大模型 Provider 抽象
-│   ├── interface.go         LLMProvider（Generate + MaxContextTokens）
-│   └── claude.go            Anthropic Claude 實現
+│   ├── interface.go         LLMProvider（Generate + MaxContextTokens + ModelName）
+│   ├── factory.go           FromEnv 依 COGITO_PROVIDER 選 provider
+│   ├── claude.go            Anthropic Claude 實現
+│   └── openai.go            OpenAI 相容實現（可配 BaseURL：vLLM/Ollama/OpenRouter…）
 ├── tools/                   工具集、註冊表與中間件
 │   ├── registry.go          註冊 / 發現 / 執行 + 環繞式中間件鏈
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
@@ -269,6 +271,20 @@ go run ./cmd/bench -tune -out ./bench-reports
 
 # 2) 視覺化：讀報告目錄、開儀表板（成功率 / 逐用例回合·試錯·成本·耗時 / 歷次趨勢）
 go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
+```
+
+### 切換 LLM Provider
+
+```bash
+# 預設 Claude（需 ANTHROPIC_API_KEY；可選 CLAUDE_MODEL）
+go run ./cmd/claw-cli -prompt "..."
+
+# OpenAI 或任何 OpenAI 相容端點（本地 vLLM / Ollama / OpenRouter / Groq…）
+export COGITO_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://api.openai.com/v1   # 或 http://localhost:8000/v1 等
+export OPENAI_MODEL=gpt-4o-mini
+go run ./cmd/claw-cli -prompt "..."
 ```
 
 ### 技能自生成 + 把關（Tier 4）
