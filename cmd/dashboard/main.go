@@ -123,9 +123,10 @@ const pageTemplate = `<!doctype html>
     <div class="muted">{{.GeneratedAt}}</div></div>
 </div>
 <h2>最新一次 · 逐用例</h2>
-<table><thead><tr><th>用例</th><th>結果</th><th class="num">回合</th><th class="num">試錯</th>
+<table><thead><tr><th>用例</th><th>結果</th><th class="num">嘗試</th><th class="num">回合</th><th class="num">試錯</th>
   <th class="num">耗時(ms)</th><th class="num">成本</th><th>錯誤</th></tr></thead><tbody>
 {{range .Results}}<tr><td>{{.TestCaseID}}</td><td>{{pass .Passed}}</td>
+  <td class="num">{{.Attempts}}</td>
   <td class="num">{{.TurnCount}}</td><td class="num">{{.ToolErrorCount}}</td>
   <td class="num">{{.DurationMs}}</td><td class="num">{{usd .TotalCostUSD}}</td>
   <td class="err">{{.ErrorMsg}}</td></tr>{{end}}

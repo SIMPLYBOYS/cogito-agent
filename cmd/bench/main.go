@@ -23,6 +23,7 @@ func main() {
 	model := flag.String("model", "claude-haiku-4-5", "跑分使用的模型（便宜起見預設 haiku）")
 	outDir := flag.String("out", "", "輸出 JSON 報告的目錄（空＝不輸出）；檔名為 bench-<unixtime>.json")
 	minPassRate := flag.Float64("min-pass-rate", 0, "通過率門檻 0..1；低於則以非 0 退出碼結束（CI 用，0＝不檢查）")
+	reflexion := flag.Int("reflexion", 1, "Reflexion 重試上限：>1 時用例失敗會反思出教訓、帶教訓重試（每次重試多花 API）")
 	flag.Parse()
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
@@ -50,6 +51,7 @@ func main() {
 	// 跑分是真實 API 調用、要花錢：默認選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
 	// 想測更強能力可換 -model claude-opus-4-8。
 	runner := eval.NewBenchmarkRunner(*model)
+	runner.MaxAttempts = *reflexion // >1 啟用 Reflexion 反思重試
 	report := runner.RunSuite(context.Background(), testcases)
 
 	// 輸出 JSON 報告（供儀表板/CI artifact）。

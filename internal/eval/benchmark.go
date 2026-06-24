@@ -30,13 +30,15 @@ type TestCase struct {
 // TestResult 存放單次跑分結果。除了「結果/總成本/總耗時」，還收集兩個【過程】指標來區分
 // 「一發入魂」與「重試多次才過」——它們與 Passed 正交，量測架構（Prompt/工具設計）的順滑度。
 type TestResult struct {
-	TestCaseID     string  `json:"test_case_id"`
-	Passed         bool    `json:"passed"`
-	TotalCostUSD   float64 `json:"total_cost_usd"`
-	DurationMs     int64   `json:"duration_ms"`
-	TurnCount      int     `json:"turn_count"`       // 完成任務用了幾輪 ReAct（駕馭順滑度：一發入魂 vs 掙扎多輪）
-	ToolErrorCount int     `json:"tool_error_count"` // 中途工具報錯次數（試錯成本：摔了幾跤）
-	ErrorMsg       string  `json:"error_msg,omitempty"`
+	TestCaseID     string   `json:"test_case_id"`
+	Passed         bool     `json:"passed"`
+	TotalCostUSD   float64  `json:"total_cost_usd"`
+	DurationMs     int64    `json:"duration_ms"`
+	TurnCount      int      `json:"turn_count"`       // 完成任務用了幾輪 ReAct（駕馭順滑度：一發入魂 vs 掙扎多輪）
+	ToolErrorCount int      `json:"tool_error_count"` // 中途工具報錯次數（試錯成本：摔了幾跤）
+	ErrorMsg       string   `json:"error_msg,omitempty"`
+	Attempts       int      `json:"attempts"`          // 共嘗試幾次（Reflexion：>1 表示靠反思重試才過/仍敗）
+	Lessons        []string `json:"lessons,omitempty"` // 每次失敗反思出、回注下一次的教訓
 }
 
 // SuiteReport 是一次完整跑分的機器可讀報告（供 CI 判定門檻、儀表板視覺化）。
@@ -72,10 +74,12 @@ func (r *benchReporter) OnMessage(ctx context.Context, content string)         {
 
 type BenchmarkRunner struct {
 	modelName string
+	// MaxAttempts：Reflexion 重試上限。<=1 等於關閉（失敗就失敗）；>1 時失敗會反思出教訓、帶教訓重試。
+	MaxAttempts int
 }
 
 func NewBenchmarkRunner(model string) *BenchmarkRunner {
-	return &BenchmarkRunner{modelName: model}
+	return &BenchmarkRunner{modelName: model, MaxAttempts: 1}
 }
 
 // RunSuite 順序執行一組評測集，打印跑分報告，並回傳機器可讀的 SuiteReport（供 CI/儀表板）。
@@ -125,26 +129,64 @@ func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) *S
 	}
 }
 
+// runSingleTest 跑一個用例。MaxAttempts>1 時啟用 Reflexion：失敗就反思出教訓、帶教訓重試，
+// 直到通過或用盡次數。回傳最後一次的結果（含 Attempts 與歷次教訓）。
 func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestResult {
+	maxAttempts := b.MaxAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	var lessons []string
+	var last TestResult
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		prompt := injectLessons(tc.TaskPrompt, lessons) // 把歷次教訓回注到重試指令
+		res, history, failOut := b.runOnce(ctx, tc, prompt, attempt)
+		res.Attempts = attempt
+		res.Lessons = append([]string(nil), lessons...)
+		last = res
+
+		if res.Passed {
+			if attempt > 1 {
+				log.Printf("    🔁 Reflexion：第 %d 次嘗試通過（靠 %d 條教訓）", attempt, len(lessons))
+			}
+			return res
+		}
+		if attempt >= maxAttempts {
+			break
+		}
+		// 失敗 → 反思出一條教訓，回注下一次。反思失敗不致命，照樣重試。
+		reflectProvider := provider.NewClaudeProvider(b.modelName)
+		lesson, err := ReflectOnFailure(ctx, reflectProvider, tc.TaskPrompt, history, failOut)
+		if err != nil {
+			log.Printf("    ⚠️ 反思失敗（仍會重試）: %v", err)
+		} else if lesson != "" {
+			lessons = append(lessons, lesson)
+			log.Printf("    🧠 教訓 #%d：%s", len(lessons), lesson)
+		}
+	}
+	return last
+}
+
+// runOnce 跑一次嘗試：乾淨沙箱 + Setup + Agent 執行 + Validate。回傳結果、執行軌跡、失敗輸出。
+func (b *BenchmarkRunner) runOnce(ctx context.Context, tc TestCase, taskPrompt string, attempt int) (TestResult, []schema.Message, string) {
 	startTime := time.Now()
 
-	// 1. 為每個用例創建一個絕對乾淨的沙箱目錄（時間戳後綴防撞名，物理隔離不跨例汙染）
+	// 每次嘗試一個絕對乾淨的沙箱目錄（含 attempt 後綴防撞名，重試不被前次汙染）。
 	workDir, _ := os.Getwd()
-	workDir += fmt.Sprintf("/workspace/%s_%d", tc.ID, time.Now().Unix())
+	workDir += fmt.Sprintf("/workspace/%s_%d_%d", tc.ID, time.Now().Unix(), attempt)
 	_ = os.MkdirAll(workDir, 0755)
 
-	// 2. （可選）執行 Setup 準備靶機代碼
 	if tc.SetupScript != "" {
 		cmd := exec.Command("bash", "-c", tc.SetupScript)
 		cmd.Dir = workDir
 		if err := cmd.Run(); err != nil {
-			return TestResult{TestCaseID: tc.ID, Passed: false, ErrorMsg: "靶機 Setup 失敗"}
+			return TestResult{TestCaseID: tc.ID, Passed: false, ErrorMsg: "靶機 Setup 失敗"}, nil, "靶機 Setup 失敗"
 		}
 	}
 
-	// 3. 組裝具備計費打點能力的引擎（per-case 全新實例：provider/session/registry/engine 都是新的）
-	realProvider := provider.NewClaudeProvider(b.modelName) // 真實的 Claude API
-	session := ctxpkg.NewSession(tc.ID, workDir)            // 為本次跑分單獨建 Session 記賬
+	realProvider := provider.NewClaudeProvider(b.modelName)
+	session := ctxpkg.NewSession(tc.ID, workDir)
 	trackedProvider := observability.NewCostTracker(realProvider, b.modelName, session)
 
 	registry := tools.NewRegistry()
@@ -155,49 +197,35 @@ func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestRe
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, false)
 	if tc.MaxTurns > 0 {
-		eng.MaxTurns = tc.MaxTurns // 用例可覆蓋回合上限（複雜任務放寬、簡單任務收緊以暴露低效）
+		eng.MaxTurns = tc.MaxTurns
 	}
 
-	// 4. 讓 Agent 幹活；用計數 Reporter 靜默收集回合數與工具報錯次數（過程指標）
 	rep := &benchReporter{}
-	session.Append(schema.Message{Role: schema.RoleUser, Content: tc.TaskPrompt})
+	session.Append(schema.Message{Role: schema.RoleUser, Content: taskPrompt})
 	if err := eng.Run(ctx, session, rep); err != nil {
+		errMsg := fmt.Sprintf("Agent 崩潰: %v", err)
 		return TestResult{
-			TestCaseID:     tc.ID,
-			Passed:         false,
-			TotalCostUSD:   session.TotalCostUSD,
-			DurationMs:     time.Since(startTime).Milliseconds(),
-			TurnCount:      rep.turns,
-			ToolErrorCount: rep.toolErrors,
-			ErrorMsg:       fmt.Sprintf("Agent 崩潰: %v", err),
-		}
+			TestCaseID: tc.ID, Passed: false, TotalCostUSD: session.TotalCostUSD,
+			DurationMs: time.Since(startTime).Milliseconds(), TurnCount: rep.turns, ToolErrorCount: rep.toolErrors,
+			ErrorMsg: errMsg,
+		}, session.GetWorkingMemory(0), errMsg
 	}
 
-	// 5. 【核心斷言】用 ValidateScript 的 bash exit code 驗收成果
 	cmd := exec.Command("bash", "-c", tc.ValidateScript)
 	cmd.Dir = workDir
 	out, err := cmd.CombinedOutput()
-
 	duration := time.Since(startTime).Milliseconds()
 
 	if err != nil {
 		return TestResult{
-			TestCaseID:     tc.ID,
-			Passed:         false,
-			TotalCostUSD:   session.TotalCostUSD,
-			DurationMs:     duration,
-			TurnCount:      rep.turns,
-			ToolErrorCount: rep.toolErrors,
-			ErrorMsg:       fmt.Sprintf("驗證腳本執行失敗: %s", string(out)),
-		}
+			TestCaseID: tc.ID, Passed: false, TotalCostUSD: session.TotalCostUSD,
+			DurationMs: duration, TurnCount: rep.turns, ToolErrorCount: rep.toolErrors,
+			ErrorMsg: fmt.Sprintf("驗證腳本執行失敗: %s", string(out)),
+		}, session.GetWorkingMemory(0), string(out)
 	}
 
 	return TestResult{
-		TestCaseID:     tc.ID,
-		Passed:         true,
-		TotalCostUSD:   session.TotalCostUSD,
-		DurationMs:     duration,
-		TurnCount:      rep.turns,
-		ToolErrorCount: rep.toolErrors,
-	}
+		TestCaseID: tc.ID, Passed: true, TotalCostUSD: session.TotalCostUSD,
+		DurationMs: duration, TurnCount: rep.turns, ToolErrorCount: rep.toolErrors,
+	}, session.GetWorkingMemory(0), ""
 }
