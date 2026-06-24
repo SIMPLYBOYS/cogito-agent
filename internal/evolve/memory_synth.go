@@ -63,14 +63,47 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 	if err := json.Unmarshal([]byte(extractJSON(resp.Content)), &out); err != nil {
 		return nil, fmt.Errorf("記憶反思輸出非合法 JSON（%q）: %w", resp.Content, err)
 	}
+	return m.proposeLearnings(taskPrompt, out.Learnings, "慣例")
+}
 
-	// 去重基準：現有 AGENTS.md + 已暫存的提案記憶（都做正規化）。
-	existing := readFileIgnore(m.agentsPath) + "\n" + readFileIgnore(m.proposedPath)
-	existingNorm := normalize(existing)
+const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。一個 agent 在與使用者的互動中嘗試完成任務但【失敗了】
+（程式崩潰／達回合上限／成本熔斷／無法完成）。看完任務、執行軌跡、失敗原因後，萃取【一條】值得寫進
+專案長期記憶、未來能改善「判斷與決策」的教訓。
+- 聚焦「下次面對同類任務，該怎麼判斷／做不同才不會再卡」。可泛化、不要寫死本次數值。
+只輸出一個 JSON 物件：{"lesson": "<一句教訓>"}；若真的沒有可記的，輸出 {"lesson": ""}。`
+
+// ReflectFailure 在【真實互動失敗】後反思（live Reflexion）：萃取一條教訓，經同一去重+安全管道
+// 追加到提案記憶。回傳實際追加的（0 或 1 條）。教訓仍是提案，須人工併入 AGENTS.md 才生效。
+func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt string, history []schema.Message, failureMsg string) ([]string, error) {
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: failureReflectSystemPrompt},
+		{Role: schema.RoleUser, Content: fmt.Sprintf("任務：\n%s\n\n執行軌跡：\n%s\n\n失敗原因：\n%s",
+			taskPrompt, renderTranscript(history, 6000), oneLine(failureMsg))},
+	}
+	resp, err := m.provider.Generate(ctx, msgs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("失敗反思 LLM 調用失敗: %w", err)
+	}
+	var out struct {
+		Lesson string `json:"lesson"`
+	}
+	if err := json.Unmarshal([]byte(extractJSON(resp.Content)), &out); err != nil {
+		return nil, fmt.Errorf("失敗反思輸出非合法 JSON（%q）: %w", resp.Content, err)
+	}
+	if strings.TrimSpace(out.Lesson) == "" {
+		return nil, nil
+	}
+	return m.proposeLearnings(taskPrompt, []string{out.Lesson}, "失敗教訓")
+}
+
+// proposeLearnings 對候選學習做去重（vs AGENTS.md + 已暫存提案）+ 安全掃描，安全且不重複的追加到
+// 提案記憶。kind 是提案分類（如「慣例」「失敗教訓」），寫進區塊標題。回傳實際追加的。
+func (m *MemorySynthesizer) proposeLearnings(taskPrompt string, candidates []string, kind string) ([]string, error) {
+	existingNorm := normalize(readFileIgnore(m.agentsPath) + "\n" + readFileIgnore(m.proposedPath))
 
 	var added []string
 	seen := map[string]bool{}
-	for _, l := range out.Learnings {
+	for _, l := range candidates {
 		l = oneLine(l)
 		if l == "" {
 			continue
@@ -89,13 +122,13 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 	if len(added) == 0 {
 		return nil, nil
 	}
-	if err := m.appendProposed(taskPrompt, added); err != nil {
+	if err := m.appendProposed(taskPrompt, added, kind); err != nil {
 		return nil, err
 	}
 	return added, nil
 }
 
-func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string) error {
+func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string, kind string) error {
 	if err := os.MkdirAll(filepath.Dir(m.proposedPath), 0o755); err != nil {
 		return fmt.Errorf("建立提案記憶目錄失敗: %w", err)
 	}
@@ -103,7 +136,7 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 	if readFileIgnore(m.proposedPath) == "" {
 		b.WriteString("<!-- ⚠️ 自動生成的『提案記憶』。需人工 review 後再併入 AGENTS.md 才會生效（不會自動套用）。 -->\n")
 	}
-	fmt.Fprintf(&b, "\n## 來自任務「%s」（%s）\n", oneLine(taskPrompt), time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "\n## [%s] 來自任務「%s」（%s）\n", kind, oneLine(taskPrompt), time.Now().Format(time.RFC3339))
 	for _, l := range learnings {
 		b.WriteString("- " + l + "\n")
 	}

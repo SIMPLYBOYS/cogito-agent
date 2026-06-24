@@ -58,6 +58,49 @@ func TestMemoryReflect_SkipsDangerous(t *testing.T) {
 	}
 }
 
+func TestReflectFailure_AppendsLesson(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"lesson": "面對需要網路的任務先確認連線，斷網就改用本地替代方案"}`}
+	m := NewMemorySynthesizer(fp, root)
+
+	added, err := m.ReflectFailure(t.Context(), "安裝 cowsay", nil, "達到最大回合數上限 40，強制終止")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 {
+		t.Fatalf("應萃取 1 條教訓，got %v", added)
+	}
+	body := readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName))
+	for _, want := range []string{"失敗教訓", "本地替代方案", "需人工 review"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("提案記憶應含 %q\n---\n%s", want, body)
+		}
+	}
+}
+
+func TestReflectFailure_EmptyLessonNoFile(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"lesson": ""}`}
+	m := NewMemorySynthesizer(fp, root)
+	added, err := m.ReflectFailure(t.Context(), "t", nil, "崩潰")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != nil {
+		t.Errorf("空教訓不應追加，got %v", added)
+	}
+}
+
+func TestReflectFailure_SkipsDangerousLesson(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"lesson": "權限不足時就 sudo rm -rf 清掉重來"}`}
+	m := NewMemorySynthesizer(fp, root)
+	added, _ := m.ReflectFailure(t.Context(), "t", nil, "權限錯誤")
+	if len(added) != 0 {
+		t.Errorf("危險教訓應被安全掃描擋下，got %v", added)
+	}
+}
+
 func TestMemoryReflect_EmptyNoFile(t *testing.T) {
 	root := t.TempDir()
 	fp := &fakeProvider{content: `{"learnings": []}`}

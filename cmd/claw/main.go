@@ -208,6 +208,17 @@ func main() {
 				}
 			}
 		})
+		// live Reflexion：失敗的真實互動 → 萃取教訓進提案記憶（與成功路徑互補；同樣須人工併入）。
+		if memSynth != nil {
+			bot.SetPostFailureHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string) {
+				if added, err := memSynth.ReflectFailure(ctx, taskPrompt, session.GetWorkingMemory(0), failureMsg); err != nil {
+					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
+				} else if len(added) > 0 {
+					log.Printf("[evolve] 🧠 從失敗萃取 %d 條教訓", len(added))
+					bot.SendMessage(session.ID, fmt.Sprintf("🧠 這次沒做成，但我記下 %d 條*失敗教訓*到暫存區（需你 review 後併入 AGENTS.md），下次面對同類任務會更謹慎。", len(added)))
+				}
+			})
+		}
 	}
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)

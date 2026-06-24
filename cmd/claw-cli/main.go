@@ -101,13 +101,11 @@ func main() {
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	if err := eng.Run(context.Background(), sess, reporter); err != nil {
-		log.Fatalf("\n💥 引擎運行崩潰: %v", err)
-	}
+	runErr := eng.Run(context.Background(), sess, reporter)
 
 	// Tier 4 技能自生成（opt-in）：任務【成功】後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
 	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），需人工 review 後手動移到 .claw/skills/。
-	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
+	if os.Getenv("COGITO_SKILL_SYNTH") == "1" && runErr == nil {
 		proposedDir := filepath.Join(workDir, ".claw", evolve.ProposedSkillsDirName)
 		synth := evolve.NewSkillSynthesizer(trackedProvider, proposedDir)
 		if path, err := synth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0)); err != nil {
@@ -119,16 +117,33 @@ func main() {
 		}
 	}
 
-	// Tier 4 記憶自更新（opt-in）：把學到的耐久專案慣例/雷點追加到提案記憶暫存區（不自動併入 AGENTS.md）。
+	// Tier 4 記憶自更新（opt-in）：成功→萃取耐久慣例；失敗→live Reflexion 萃取教訓。皆追加到提案
+	// 記憶暫存區（不自動併入 AGENTS.md），這就是「從真實互動中持續優化判斷決策」的落點。
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
 		mSynth := evolve.NewMemorySynthesizer(trackedProvider, workDir)
-		if added, err := mSynth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0)); err != nil {
-			log.Printf("[evolve] 記憶反思失敗（不影響任務結果）: %v", err)
-		} else if len(added) > 0 {
-			log.Printf("[evolve] 🧠 新增 %d 條提案記憶到 .claw/%s（需人工 review 後併入 AGENTS.md）", len(added), evolve.ProposedMemoryFileName)
+		var added []string
+		var err error
+		if runErr != nil {
+			added, err = mSynth.ReflectFailure(context.Background(), prompt, sess.GetWorkingMemory(0), runErr.Error())
 		} else {
-			log.Printf("[evolve] 本次任務未發現值得記入專案記憶的慣例")
+			added, err = mSynth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0))
 		}
+		switch {
+		case err != nil:
+			log.Printf("[evolve] 記憶反思失敗（不影響任務結果）: %v", err)
+		case len(added) > 0:
+			kind := "慣例"
+			if runErr != nil {
+				kind = "失敗教訓"
+			}
+			log.Printf("[evolve] 🧠 新增 %d 條提案記憶（%s）到 .claw/%s（需人工 review 後併入 AGENTS.md）", len(added), kind, evolve.ProposedMemoryFileName)
+		default:
+			log.Printf("[evolve] 本次未發現值得記入專案記憶的內容")
+		}
+	}
+
+	if runErr != nil {
+		log.Fatalf("\n💥 引擎運行崩潰: %v", runErr)
 	}
 
 	fmt.Println("\n==================================================")

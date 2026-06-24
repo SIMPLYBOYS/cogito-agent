@@ -31,13 +31,18 @@ type EngineFactory func(session *ctxpkg.Session, reporter engine.Reporter) *engi
 // 與引擎解耦：bot 只負責在對的時機呼叫，具體做什麼由 cmd 注入。
 type PostRunHook func(ctx context.Context, session *ctxpkg.Session, taskPrompt string)
 
+// PostFailureHook 在 Agent【失敗】（崩潰／達回合上限／成本熔斷）後被呼叫，供 live Reflexion
+// 從真實互動的失敗中萃取教訓。可為 nil。
+type PostFailureHook func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string)
+
 type SlackBot struct {
 	client        *slackapi.Client
 	signingSecret string
 	botUserID     string
-	factory       EngineFactory // 每會話現造引擎（替換原來的固定 engine）
-	postRun       PostRunHook   // 可選：任務成功後的鉤子（技能自生成等），由 cmd 注入
-	workDir       string        // 工作區【根】目錄；各頻道隔離到其下子目錄（見 channelWorkDir）
+	factory       EngineFactory   // 每會話現造引擎（替換原來的固定 engine）
+	postRun       PostRunHook     // 可選：任務成功後的鉤子（技能自生成等），由 cmd 注入
+	postFailure   PostFailureHook // 可選：任務失敗後的鉤子（live Reflexion），由 cmd 注入
+	workDir       string          // 工作區【根】目錄；各頻道隔離到其下子目錄（見 channelWorkDir）
 
 	// per-WorkDir 鎖：key 為頻道的工作目錄。確保同一目錄同一時刻只有一個 Agent 任務在跑
 	// （改檔），杜絕多頻道/多指令在同一目錄並發 bash / write_file 的物理檔案競態。
@@ -74,6 +79,9 @@ func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
 
 // SetPostRunHook 注入任務成功後的鉤子（如技能自生成）。傳 nil 可清除。
 func (b *SlackBot) SetPostRunHook(h PostRunHook) { b.postRun = h }
+
+// SetPostFailureHook 注入任務失敗後的鉤子（live Reflexion）。傳 nil 可清除。
+func (b *SlackBot) SetPostFailureHook(h PostFailureHook) { b.postFailure = h }
 
 // HandleEvent 是 Slack Events API 的 HTTP 回調入口
 func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +190,10 @@ func (b *SlackBot) handleAgentRun(channelID string, prompt string) {
 	eng := b.factory(session, reporter)
 	if err := eng.Run(context.Background(), session, reporter); err != nil {
 		reporter.sendMsg(fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
+		// live Reflexion：從真實互動的失敗中萃取教訓（仍是提案，不自動生效）。
+		if b.postFailure != nil {
+			b.postFailure(context.Background(), session, prompt, err.Error())
+		}
 		return
 	}
 
