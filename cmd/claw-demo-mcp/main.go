@@ -12,20 +12,19 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
-	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	_ = godotenv.Load()
+	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。
+	defer cmdutil.Bootstrap("cogito-agent-demo-mcp")()
 
 	cfgPath := flag.String("config", os.Getenv("COGITO_MCP_CONFIG"), ".mcp.json 路徑")
 	callName := flag.String("call", "", "要調用的工具（exposed 名，如 filesystem__list_directory）")
@@ -36,22 +35,6 @@ func main() {
 	if *cfgPath == "" {
 		log.Fatal("請用 -config 或環境變數 COGITO_MCP_CONFIG 指定 .mcp.json（可 cp .mcp.json.example .mcp.json）")
 	}
-
-	// 初始化 OTel：設了 OTEL_EXPORTER_OTLP_ENDPOINT 才上報（Jaeger/Langfuse），否則 no-op。
-	// 退出時顯式 flush —— 否則 BatchSpanProcessor 緩衝的 span（含 Tool.Execute / LLM.Action）不會送出。
-	shutdownTracing, errTr := observability.InitTracing(context.Background(), "cogito-agent-demo-mcp")
-	if errTr != nil {
-		log.Fatalf("初始化鏈路追蹤失敗: %v", errTr)
-	}
-	defer func() {
-		fc, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if e := shutdownTracing(fc); e != nil {
-			log.Printf("[Tracing] ❌ flush 失敗: %v", e)
-		} else {
-			log.Println("[Tracing] ✅ span 已 flush（若有設 OTLP 端點即已上報）")
-		}
-	}()
 
 	servers, err := mcp.LoadConfig(*cfgPath)
 	if err != nil {

@@ -16,8 +16,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
@@ -26,7 +26,6 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
-	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -37,7 +36,9 @@ func main() {
 	planPtr := flag.Bool("plan", false, "開啟 Plan Mode：狀態外部化到 PLAN.md / TODO.md")
 	flag.Parse()
 
-	_ = godotenv.Load()
+	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。flush 必須在退出前呼叫。
+	flush := cmdutil.Bootstrap("cogito-agent-cli")
+	defer flush()
 
 	// 選擇 LLM provider（COGITO_PROVIDER：claude 預設 / openai 相容）。
 	realProvider, modelName, errProv := provider.FromEnv()
@@ -64,13 +65,6 @@ func main() {
 	fmt.Println("==================================================")
 
 	log.Printf("[provider] model=%s", modelName)
-
-	// 初始化 OTel：設了 OTEL_EXPORTER_OTLP_ENDPOINT 才上報（Jaeger/Langfuse），否則 no-op。
-	// CLI 是一次性程序，結束前需顯式 flush，否則 BatchSpanProcessor 緩衝的 span 不會送出。
-	shutdownTracing, errTr := observability.InitTracing(context.Background(), "cogito-agent-cli")
-	if errTr != nil {
-		log.Fatalf("初始化鏈路追蹤失敗: %v", errTr)
-	}
 
 	// session 持久化：設 COGITO_SESSION_DIR 即把歷史/費用落地磁碟——讓 -session 斷點續傳跨重啟生效。
 	// 必須在 GetOrCreate 之前 SetStore，才能從磁碟復原既有 session。
@@ -152,12 +146,7 @@ func main() {
 		}
 	}
 
-	// 顯式 flush span（放在可能 log.Fatalf 退出之前——log.Fatal 走 os.Exit 會略過 defer）。
-	flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if e := shutdownTracing(flushCtx); e != nil {
-		log.Printf("[Tracing] flush 失敗: %v", e)
-	}
-	cancel()
+	flush() // 顯式 flush（log.Fatal 走 os.Exit 會略過 defer；defer 仍涵蓋正常返回，once 去重）
 
 	if runErr != nil {
 		log.Fatalf("\n💥 引擎運行崩潰: %v", runErr)

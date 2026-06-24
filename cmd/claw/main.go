@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
@@ -22,12 +23,11 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/slackbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	// 讀取當前目錄的 .env（文件不存在也不報錯；不會覆蓋已存在的環境變量）
-	_ = godotenv.Load()
+	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。flush 在優雅關閉時呼叫。
+	flush := cmdutil.Bootstrap("cogito-agent")
 
 	// 選擇 LLM provider（COGITO_PROVIDER：claude 預設 / openai 相容）。
 	llmProvider, modelName, errProv := provider.FromEnv()
@@ -35,13 +35,6 @@ func main() {
 		log.Fatal(errProv)
 	}
 	log.Printf("[provider] model=%s", modelName)
-
-	// 初始化 OTel 鏈路追蹤：設了 OTEL_EXPORTER_OTLP_ENDPOINT 即上報（Jaeger/Langfuse/Collector），
-	// 未設則 no-op。defer Shutdown 在優雅退出時 flush。
-	shutdownTracing, err := observability.InitTracing(context.Background(), "cogito-agent")
-	if err != nil {
-		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
-	}
 
 	// 載入並連接 MCP 伺服器（設了 COGITO_MCP_CONFIG 才啟用）：外部 MCP 工具會註冊進每個會話的
 	// registry。連線是程式級長壽命的，優雅關閉時統一 Close。連不上的 server 略過、不影響啟動。
@@ -243,9 +236,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP 關閉異常: %v", err)
 	}
-	if err := shutdownTracing(shutdownCtx); err != nil {
-		log.Printf("Tracing flush 異常: %v", err)
-	}
+	flush() // flush OTel span（內部自帶 timeout + once 去重）
 	for _, cl := range mcpClients {
 		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留
 	}

@@ -8,39 +8,22 @@ import (
 	"context"
 	"log"
 	"os"
-	"time"
 
-	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
-
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-	_ = godotenv.Load()
+	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。
+	defer cmdutil.Bootstrap("cogito-agent-demo-trace")()
+
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
 	}
-
-	// 設了 OTEL_EXPORTER_OTLP_ENDPOINT 才會上報；否則為 no-op。
-	shutdownTracing, err := observability.InitTracing(context.Background(), "cogito-agent-demo-trace")
-	if err != nil {
-		log.Fatalf("初始化鏈路追蹤失敗: %v", err)
-	}
-	defer func() {
-		// 顯式 flush 並打印結果：BatchSpanProcessor 在退出時才送根 span，吞掉錯誤會讓「沒上報」變無聲。
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := shutdownTracing(ctx); err != nil {
-			log.Printf("[Tracing] ❌ flush/關閉失敗（span 可能未送達）: %v", err)
-		} else {
-			log.Println("[Tracing] ✅ span 已 flush（若有設 OTLP 端點即已上報）")
-		}
-	}()
 
 	workDir := "/tmp/claw_trace_demo"
 	if err := os.MkdirAll(workDir, 0755); err != nil {

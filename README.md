@@ -138,6 +138,7 @@ internal/
 ├── slackbot/                Slack 接入層
 │   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
 │   └── approval.go          危險指令 HITL 審批
+├── cmdutil/                 各 cmd 入口共用啟動樣板（Bootstrap：載入 .env + 初始化 OTel + 回傳 flush）
 ├── observability/           可觀測性
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
 │   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
