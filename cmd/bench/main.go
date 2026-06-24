@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/joho/godotenv"
 )
 
@@ -24,6 +25,7 @@ func main() {
 	outDir := flag.String("out", "", "輸出 JSON 報告的目錄（空＝不輸出）；檔名為 bench-<unixtime>.json")
 	minPassRate := flag.Float64("min-pass-rate", 0, "通過率門檻 0..1；低於則以非 0 退出碼結束（CI 用，0＝不檢查）")
 	reflexion := flag.Int("reflexion", 1, "Reflexion 重試上限：>1 時用例失敗會反思出教訓、帶教訓重試（每次重試多花 API）")
+	tune := flag.Bool("tune", false, "依跑分結果產出調參提案（寫入 workspace/.claw/config.proposed.json，不自動套用）")
 	flag.Parse()
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
@@ -61,10 +63,61 @@ func main() {
 		}
 	}
 
+	// 參數自調（Tier 4 #15）：依跑分聚合指標產出【提案參數】到暫存區，不自動套用。
+	if *tune {
+		emitTuningProposals(report)
+	}
+
 	// CI 門檻：通過率低於 -min-pass-rate 即非 0 退出，讓 CI job 失敗。
 	if *minPassRate > 0 && report.PassRate < *minPassRate {
 		log.Printf("[bench] ❌ 通過率 %.2f%% 低於門檻 %.2f%%", report.PassRate*100, *minPassRate*100)
 		os.Exit(1)
+	}
+}
+
+// emitTuningProposals 從跑分報告算出聚合指標，產出有界的調參提案到暫存區（不自動套用）。
+func emitTuningProposals(report *eval.SuiteReport) {
+	// current = 引擎預設（internal/engine/loop.go：defaultMaxTurns/ConcurrentTools/CostUSD）。
+	cur := evolve.Knobs{MaxTurns: 40, MaxConcurrentTools: 5, MaxCostUSD: 1.0}
+
+	n := len(report.Results)
+	if n == 0 {
+		return
+	}
+	var sumTurns, sumErr, maxCost float64
+	ceilingHits := 0
+	for _, r := range report.Results {
+		sumTurns += float64(r.TurnCount)
+		sumErr += float64(r.ToolErrorCount)
+		if r.TotalCostUSD > maxCost {
+			maxCost = r.TotalCostUSD
+		}
+		if !r.Passed && r.TurnCount >= cur.MaxTurns {
+			ceilingHits++
+		}
+	}
+	stats := evolve.RunStats{
+		N: n, PassRate: report.PassRate,
+		MeanTurns: sumTurns / float64(n), MeanToolErrors: sumErr / float64(n),
+		MaxCaseCostUSD: maxCost, CeilingHitRate: float64(ceilingHits) / float64(n),
+	}
+
+	proposals := evolve.Advise(stats, cur)
+	if len(proposals) == 0 {
+		log.Printf("[tune] 目前參數看起來合適，無調參提案")
+		return
+	}
+	for _, p := range proposals {
+		tag := ""
+		if p.Sensitive {
+			tag = "  ⚠️敏感（放寬安全旋鈕）"
+		}
+		log.Printf("[tune] %s: %v → %v%s（%s）", p.Knob, p.Current, p.Proposed, tag, p.Reason)
+	}
+	if path, err := evolve.WriteProposedConfig(filepath.Join("workspace", ".claw"), cur, proposals); err != nil {
+		log.Printf("[tune] 寫入提案失敗: %v", err)
+	} else {
+		log.Printf("[tune] 📄 調參提案已寫入 %s（須人工 review 後手動套用，不會自動生效）", path)
 	}
 }
 

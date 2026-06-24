@@ -32,6 +32,7 @@
 - 🧬 **技能自生成 + eval 把關（Tier 4 · 可選 · `COGITO_SKILL_SYNTH=1`）**：任務**成功後**反思軌跡，把可複用流程寫成 **folder-per-skill** 的 `<name>/SKILL.md`（對齊 [agentskills.io](https://agentskills.io/specification) 開放標準：標準 frontmatter + When to use/Steps/Examples 三段式，與 Hermes/Claude 技能生態互通；CLI 與 Slack 入口皆支援，Slack 還會回貼提案通知）。**安全鐵律**：只寫進**暫存區** `.claw/skills-proposed/`、**不自動啟用**（`SkillLoader` 只讀 `.claw/skills/`）。晉升須過 **`cmd/skillgate` 把關**（結構 + **危險指令/憑證黑名單**確定性掃描）才移到生效目錄——人選哪個、自動擋壞的，自我進化不繞過「失控控制」。
 - 🧠 **記憶自更新（Tier 4 · 可選 · `COGITO_MEMORY_SYNTH=1`）**：任務成功後萃取耐久的專案慣例/雷點（建置·測試命令、repo 慣用法、坑），**去重 + 安全掃描**後追加到**提案記憶** `.claw/AGENTS.proposed.md`（不自動套用），人工 review 後併入 `AGENTS.md` 才會在下次自動帶出。
 - ♻️ **Reflexion 失敗反思重試（Tier 4 · eval · `bench -reflexion N`）**：用例失敗時，用軌跡 + 指標（回合/試錯）+ 失敗輸出**反思出一條教訓**，**回注**到下一次重試（嘗試→反思→帶教訓重試），量測 pass@1 vs pass@k。報告/儀表板顯示每例 `Attempts` 與歷次教訓。
+- 🎛️ **參數自調（Tier 4 · `bench -tune`）**：依跑分聚合指標（通過率/平均回合/工具報錯/觸頂率/最貴成本）**確定性**產出有界的調參提案（`MaxTurns`/`MaxConcurrentTools`/`MaxCostUSD`）。**安全鐵律**：只寫**提案** `.claw/config.proposed.json`、**不自動套用**；放寬安全旋鈕的提案標 `sensitive` 需特別審慎，且一律 clamp 在安全區間內。
 
 **接入與可觀測性**
 - 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
@@ -263,6 +264,8 @@ go run ./cmd/bench -model claude-haiku-4-5 -out ./bench-reports
 go run ./cmd/bench -out ./bench-reports -min-pass-rate 0.8
 # Reflexion：失敗的用例反思出教訓、最多重試 3 次（每次重試多花 API）
 go run ./cmd/bench -reflexion 3 -out ./bench-reports
+# 參數自調：依跑分指標產出調參提案（→ workspace/.claw/config.proposed.json，不自動套用）
+go run ./cmd/bench -tune -out ./bench-reports
 
 # 2) 視覺化：讀報告目錄、開儀表板（成功率 / 逐用例回合·試錯·成本·耗時 / 歷次趨勢）
 go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
