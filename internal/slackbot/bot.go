@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -40,6 +41,7 @@ type SlackBot struct {
 	client        *slackapi.Client
 	signingSecret string
 	botUserID     string
+	mention       *regexp.Regexp  // 剝除 @提及（含 <@ID> 與 <@ID|顯示名> 兩種格式）
 	factory       EngineFactory   // 每會話現造引擎（替換原來的固定 engine）
 	postRun       PostRunHook     // 可選：任務成功後的鉤子（技能自生成等），由 cmd 注入
 	postFailure   PostFailureHook // 可選：任務失敗後的鉤子（live Reflexion），由 cmd 注入
@@ -72,10 +74,17 @@ func NewSlackBot(factory EngineFactory, workDir string) *SlackBot {
 		client:        client,
 		signingSecret: signingSecret,
 		botUserID:     authResp.UserID,
+		mention:       botMentionRegexp(authResp.UserID),
 		factory:       factory,
 		workDir:       workDir,
 		busy:          make(map[string]bool),
 	}
+}
+
+// botMentionRegexp 匹配本 bot 的 @提及，兩種格式都吃：<@U123> 與 <@U123|顯示名>。
+// 不剝顯示名那段會讓「approve / apply memory」等口令前面卡著提及文字而失配。
+func botMentionRegexp(botID string) *regexp.Regexp {
+	return regexp.MustCompile("<@" + regexp.QuoteMeta(botID) + `(\|[^>]*)?>`)
 }
 
 // SetPostRunHook 注入任務成功後的鉤子（如技能自生成）。傳 nil 可清除。
@@ -156,7 +165,7 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 		switch ev := event.InnerEvent.Data.(type) {
 		case *slackevents.AppMentionEvent:
 			// 頻道里 @機器人
-			prompt := strings.TrimSpace(strings.ReplaceAll(ev.Text, fmt.Sprintf("<@%s>", b.botUserID), ""))
+			prompt := strings.TrimSpace(b.mention.ReplaceAllString(ev.Text, ""))
 			// 先看是不是審批口令（即便會話忙碌也要處理——這正是解開忙碌的方式）
 			if b.tryResolveApproval(ev.Channel, prompt) {
 				break
