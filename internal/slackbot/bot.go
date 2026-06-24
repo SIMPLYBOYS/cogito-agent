@@ -17,6 +17,7 @@ import (
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	slackapi "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -83,6 +84,32 @@ func (b *SlackBot) SetPostRunHook(h PostRunHook) { b.postRun = h }
 // SetPostFailureHook 注入任務失敗後的鉤子（live Reflexion）。傳 nil 可清除。
 func (b *SlackBot) SetPostFailureHook(h PostFailureHook) { b.postFailure = h }
 
+// tryMemoryCommand 攔截「apply memory / reject memory」口令——自我進化的【閘】在 Slack 內一鍵放行/丟棄：
+// apply 把提案記憶併入 AGENTS.md（生效），reject 丟棄。命中即消費（return true）。閘仍在：人點頭才套用。
+func (b *SlackBot) tryMemoryCommand(channelID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "apply memory", "approve memory":
+		applied, err := evolve.ApplyProposedMemory(b.workDir)
+		switch {
+		case err != nil:
+			b.SendMessage(channelID, fmt.Sprintf("❌ 併入失敗: %v", err))
+		case applied == "":
+			b.SendMessage(channelID, "ℹ️ 目前沒有提案記憶。")
+		default:
+			b.SendMessage(channelID, "✅ 已把提案記憶併入 AGENTS.md，下次任務起生效。")
+		}
+		return true
+	case "reject memory", "discard memory":
+		if had, _ := evolve.DiscardProposedMemory(b.workDir); had {
+			b.SendMessage(channelID, "🗑️ 已丟棄提案記憶（未併入 AGENTS.md）。")
+		} else {
+			b.SendMessage(channelID, "ℹ️ 目前沒有提案記憶。")
+		}
+		return true
+	}
+	return false
+}
+
 // HandleEvent 是 Slack Events API 的 HTTP 回調入口
 func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
@@ -134,6 +161,10 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 			if b.tryResolveApproval(ev.Channel, prompt) {
 				break
 			}
+			// 自我進化的閘：apply/reject memory（不佔鎖、不當成新任務）
+			if b.tryMemoryCommand(ev.Channel, prompt) {
+				break
+			}
 			// 弱點修補②：會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session
 			if !b.tryAcquire(b.channelWorkDir(ev.Channel)) {
 				b.SendMessage(ev.Channel, "⏳ 上一個任務仍在進行（或正在等待審批），請先處理審批或稍候再發。")
@@ -150,6 +181,9 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 			if ev.ChannelType == "im" {
 				text := strings.TrimSpace(ev.Text)
 				if b.tryResolveApproval(ev.Channel, text) {
+					break
+				}
+				if b.tryMemoryCommand(ev.Channel, text) {
 					break
 				}
 				if !b.tryAcquire(b.channelWorkDir(ev.Channel)) {

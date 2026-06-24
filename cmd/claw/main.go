@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -197,7 +198,7 @@ func main() {
 					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
-					bot.SendMessage(session.ID, fmt.Sprintf("🧠 我從這次任務記下 %d 條*提案專案慣例*，已存到暫存區，需你 review 後併入 AGENTS.md 才生效。", len(added)))
+					bot.SendMessage(session.ID, memoryProposalMsg("慣例", added))
 				}
 			}
 		})
@@ -208,7 +209,7 @@ func main() {
 					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 從失敗萃取 %d 條教訓", len(added))
-					bot.SendMessage(session.ID, fmt.Sprintf("🧠 這次沒做成，但我記下 %d 條*失敗教訓*到暫存區（需你 review 後併入 AGENTS.md），下次面對同類任務會更謹慎。", len(added)))
+					bot.SendMessage(session.ID, memoryProposalMsg("失敗教訓", added))
 				}
 			})
 		}
@@ -248,4 +249,15 @@ func main() {
 	if c, ok := executor.(interface{ Close() error }); ok {
 		_ = c.Close() // 移除 per-session sandbox 容器（docker 模式）
 	}
+}
+
+// memoryProposalMsg 組裝「提案記憶」通知：直接列出內容 + 一鍵 apply/reject 指令（閘在 Slack 內，免去 cat 檔案）。
+func memoryProposalMsg(kind string, added []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*提案%s*（尚未生效）：\n", len(added), kind)
+	for _, l := range added {
+		b.WriteString("• " + l + "\n")
+	}
+	b.WriteString("回覆 `apply memory` 併入 AGENTS.md，或 `reject memory` 丟棄。")
+	return b.String()
 }

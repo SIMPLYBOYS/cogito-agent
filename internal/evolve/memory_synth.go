@@ -152,6 +152,51 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 	return nil
 }
 
+// ApplyProposedMemory 把提案記憶併入生效的 AGENTS.md（人工 review 後手動觸發），併入後清掉提案檔。
+// 回傳併入的內容（空字串表示當前沒有提案）。這就是「閘」的放行端：人點頭才生效。
+func ApplyProposedMemory(root string) (string, error) {
+	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
+	proposed := strings.TrimSpace(stripComments(readFileIgnore(proposedPath)))
+	if proposed == "" {
+		return "", nil
+	}
+	agentsPath := filepath.Join(root, "AGENTS.md")
+	f, err := os.OpenFile(agentsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", fmt.Errorf("開啟 AGENTS.md 失敗: %w", err)
+	}
+	if _, err := fmt.Fprintf(f, "\n%s\n", proposed); err != nil {
+		f.Close()
+		return "", fmt.Errorf("併入 AGENTS.md 失敗: %w", err)
+	}
+	f.Close()
+	if err := os.Remove(proposedPath); err != nil {
+		return proposed, fmt.Errorf("清除提案檔失敗: %w", err)
+	}
+	return proposed, nil
+}
+
+// DiscardProposedMemory 丟棄提案記憶。had 表示原本是否有提案。
+func DiscardProposedMemory(root string) (had bool, err error) {
+	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
+	if strings.TrimSpace(readFileIgnore(proposedPath)) == "" {
+		return false, nil
+	}
+	return true, os.Remove(proposedPath)
+}
+
+// stripComments 去掉 HTML 註解行（提案檔頂部的「需 review」提示，併入後已無意義）。
+func stripComments(s string) string {
+	var keep []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "<!--") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}
+
 func readFileIgnore(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {

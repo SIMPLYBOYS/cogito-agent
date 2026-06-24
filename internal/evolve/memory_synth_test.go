@@ -78,6 +78,52 @@ func TestReflectFailure_AppendsLesson(t *testing.T) {
 	}
 }
 
+func TestApplyAndDiscardProposedMemory(t *testing.T) {
+	root := t.TempDir()
+	// 先生成一條提案記憶
+	fp := &fakeProvider{content: `{"learnings": ["本專案用 pnpm 而非 npm"]}`}
+	if _, err := NewMemorySynthesizer(fp, root).Reflect(t.Context(), "裝依賴", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// apply → 併入 AGENTS.md、清掉提案檔
+	applied, err := ApplyProposedMemory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(applied, "pnpm") {
+		t.Errorf("應回傳併入內容，got %q", applied)
+	}
+	if !strings.Contains(readFileIgnore(filepath.Join(root, "AGENTS.md")), "pnpm") {
+		t.Error("AGENTS.md 應含併入的內容")
+	}
+	if strings.Contains(readFileIgnore(filepath.Join(root, "AGENTS.md")), "<!--") {
+		t.Error("併入後不該帶提案檔的警告註解")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
+		t.Error("併入後提案檔應已清除")
+	}
+
+	// 沒提案時 apply → 空、不報錯
+	if out, err := ApplyProposedMemory(root); err != nil || out != "" {
+		t.Errorf("沒提案時應回空，got out=%q err=%v", out, err)
+	}
+}
+
+func TestDiscardProposedMemory(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"learnings": ["x 慣例"]}`}
+	_, _ = NewMemorySynthesizer(fp, root).Reflect(t.Context(), "t", nil)
+
+	had, err := DiscardProposedMemory(root)
+	if err != nil || !had {
+		t.Fatalf("應丟棄既有提案，got had=%v err=%v", had, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
+		t.Error("丟棄後提案檔應消失")
+	}
+}
+
 func TestReflectFailure_EmptyLessonNoFile(t *testing.T) {
 	root := t.TempDir()
 	fp := &fakeProvider{content: `{"lesson": ""}`}
