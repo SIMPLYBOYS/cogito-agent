@@ -21,6 +21,10 @@ import (
 // ProposedSkillsDirName 是提案技能的暫存子目錄（相對於 assets/workspace 根）。
 const ProposedSkillsDirName = "skills-proposed"
 
+// SkillFileName 是每個技能資料夾內的必備檔（對齊 agentskills.io 開放標準：folder-per-skill）。
+// SkillLoader 也只認這個檔名，故自生成必須寫成 <name>/SKILL.md 才會被載入。
+const SkillFileName = "SKILL.md"
+
 // SkillSynthesizer 對一段已完成的任務軌跡反思，若存在可複用流程則寫成「提案技能」。
 type SkillSynthesizer struct {
 	provider    provider.LLMProvider
@@ -46,8 +50,16 @@ const reflectSystemPrompt = `你是一個負責「技能萃取」的反思者。
 - 只有當流程【具體、可重複、跨任務有價值】時才保存；一次性瑣事、與本任務資料強綁定的步驟不要保存。
 - 技能正文寫「怎麼做」的步驟指南，不要把這次的具體檔名/數值寫死。
 
+body 請依 agentskills.io 慣例分三段（markdown）：
+## When to use
+- 觸發情境（什麼任務該用這技能）
+## Steps
+1. 具體、命令層級的步驟（不要寫死本次的檔名/數值）
+## Examples
+- 真實範例：命令 + 預期輸出
+
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
-- 值得保存：{"worth_saving": true, "name": "<kebab-case 短名>", "description": "<一句話：何時該用這技能>", "body": "<markdown 步驟指南>"}
+- 值得保存：{"worth_saving": true, "name": "<kebab-case 短名，限 a-z0-9._->", "description": "<一句話：做什麼 + 何時用>", "body": "<上述三段式 markdown>"}
 - 不值得：{"worth_saving": false}`
 
 // Reflect 反思一段軌跡。回傳寫出的提案技能檔路徑；空字串表示判定不值得保存（非錯誤）。
@@ -76,20 +88,25 @@ func (s *SkillSynthesizer) Reflect(ctx context.Context, taskPrompt string, histo
 	return s.writeProposed(r, taskPrompt)
 }
 
-// writeProposed 把提案技能以 SKILL.md 格式寫進【暫存區】（不自動啟用）。
+// writeProposed 以 agentskills.io 的 folder-per-skill 結構寫進【暫存區】：<proposedDir>/<slug>/SKILL.md。
+// 這也是 SkillLoader 唯一認得的結構（它只載入名為 SKILL.md 的檔），故晉升後才真的會被 agent 用到。
 func (s *SkillSynthesizer) writeProposed(r reflection, taskPrompt string) (string, error) {
-	if err := os.MkdirAll(s.proposedDir, 0o755); err != nil {
+	skillDir := filepath.Join(s.proposedDir, slug(r.Name))
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return "", fmt.Errorf("建立提案技能目錄失敗: %w", err)
 	}
-	path := filepath.Join(s.proposedDir, slug(r.Name)+".md")
+	path := filepath.Join(skillDir, SkillFileName)
 
 	var b strings.Builder
+	// 標準 frontmatter（name/description + 可選 version；溯源放 metadata）。
 	b.WriteString("---\n")
-	b.WriteString("name: " + r.Name + "\n")
+	b.WriteString("name: " + slug(r.Name) + "\n")
 	b.WriteString("description: " + oneLine(r.Description) + "\n")
+	b.WriteString("version: 1\n")
+	fmt.Fprintf(&b, "generated_by: cogito-agent\ngenerated_at: %s\n", time.Now().Format(time.RFC3339))
 	b.WriteString("---\n")
-	b.WriteString(fmt.Sprintf("<!-- ⚠️ 自動生成的提案技能，需人工 review 後手動移到 .claw/skills/ 才會生效。生成於 %s。原任務：%s -->\n\n",
-		time.Now().Format(time.RFC3339), oneLine(taskPrompt)))
+	fmt.Fprintf(&b, "<!-- ⚠️ 自動生成的提案技能，需人工 review 後用 skillgate 晉升到 .claw/skills/ 才會生效。原任務：%s -->\n\n",
+		oneLine(taskPrompt))
 	b.WriteString(r.Body)
 	if !strings.HasSuffix(r.Body, "\n") {
 		b.WriteString("\n")

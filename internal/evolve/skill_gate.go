@@ -78,21 +78,22 @@ func scanDangerous(text string) []string {
 	return hits
 }
 
-// Promote 先過 Gate，通過才把提案技能從 proposedPath 移到 activeDir（生效）。不過則不移、回傳原因。
-func Promote(proposedPath, activeDir string) (GateResult, error) {
-	res, err := Gate(proposedPath)
+// Promote 把一個提案技能【資料夾】晉升到生效目錄（folder-per-skill）：先 Gate 其中的 SKILL.md，
+// 通過才把整個 <proposedSkillDir> 移到 <activeBaseDir>/<資料夾名>。不過則不移、回傳原因。
+func Promote(proposedSkillDir, activeBaseDir string) (GateResult, error) {
+	res, err := Gate(filepath.Join(proposedSkillDir, SkillFileName))
 	if err != nil {
 		return res, err
 	}
 	if !res.Passed {
 		return res, nil // 把關不過：不晉升，由呼叫方據 Issues 提示
 	}
-	if err := os.MkdirAll(activeDir, 0o755); err != nil {
+	if err := os.MkdirAll(activeBaseDir, 0o755); err != nil {
 		return res, fmt.Errorf("建立生效技能目錄失敗: %w", err)
 	}
-	dst := filepath.Join(activeDir, filepath.Base(proposedPath))
-	if err := os.Rename(proposedPath, dst); err != nil {
-		return res, fmt.Errorf("晉升（移動檔案）失敗: %w", err)
+	dst := filepath.Join(activeBaseDir, filepath.Base(proposedSkillDir))
+	if err := os.Rename(proposedSkillDir, dst); err != nil {
+		return res, fmt.Errorf("晉升（移動資料夾）失敗: %w", err)
 	}
 	return res, nil
 }

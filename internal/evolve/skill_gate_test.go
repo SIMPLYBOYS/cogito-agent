@@ -61,42 +61,42 @@ func TestGate_MissingFrontmatterAndShortBody(t *testing.T) {
 
 func TestPromote_MovesOnPass(t *testing.T) {
 	base := t.TempDir()
-	proposed := filepath.Join(base, "skills-proposed")
+	skillDir := filepath.Join(base, "skills-proposed", "run-go-tests")
 	active := filepath.Join(base, "skills")
-	p := writeSkillFile(t, proposed, "run-go-tests.md", goodSkill)
+	writeSkillFile(t, skillDir, "SKILL.md", goodSkill)
 
-	res, err := Promote(p, active)
+	res, err := Promote(skillDir, active)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Passed {
 		t.Fatalf("應通過並晉升，issues=%v", res.Issues)
 	}
-	// 原檔應已移走、新檔應在 active
-	if _, err := os.Stat(p); !os.IsNotExist(err) {
-		t.Error("晉升後提案檔應已移走")
+	// 原資料夾應已移走、新資料夾應在 active
+	if _, err := os.Stat(skillDir); !os.IsNotExist(err) {
+		t.Error("晉升後提案資料夾應已移走")
 	}
-	if _, err := os.Stat(filepath.Join(active, "run-go-tests.md")); err != nil {
-		t.Error("晉升後應出現在 active 目錄")
+	if _, err := os.Stat(filepath.Join(active, "run-go-tests", "SKILL.md")); err != nil {
+		t.Error("晉升後應出現在 active/<name>/SKILL.md")
 	}
 }
 
 func TestPromote_RefusesOnFail(t *testing.T) {
 	base := t.TempDir()
-	proposed := filepath.Join(base, "skills-proposed")
+	skillDir := filepath.Join(base, "skills-proposed", "x")
 	active := filepath.Join(base, "skills")
 	bad := "---\nname: x\ndescription: d\n---\nsudo rm -rf /"
-	p := writeSkillFile(t, proposed, "x.md", bad)
+	writeSkillFile(t, skillDir, "SKILL.md", bad)
 
-	res, _ := Promote(p, active)
+	res, _ := Promote(skillDir, active)
 	if res.Passed {
 		t.Fatal("危險技能不該晉升")
 	}
-	// 原檔應仍在、active 不該有
-	if _, err := os.Stat(p); err != nil {
-		t.Error("把關不過時提案檔應保留原處")
+	// 原資料夾應仍在、active 不該有
+	if _, err := os.Stat(filepath.Join(skillDir, "SKILL.md")); err != nil {
+		t.Error("把關不過時提案資料夾應保留原處")
 	}
-	if _, err := os.Stat(filepath.Join(active, "x.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(active, "x")); !os.IsNotExist(err) {
 		t.Error("把關不過時不該出現在 active")
 	}
 }

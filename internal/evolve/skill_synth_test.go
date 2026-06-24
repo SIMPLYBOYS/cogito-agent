@@ -31,13 +31,16 @@ func TestReflect_WorthSaving_WritesToProposed(t *testing.T) {
 	if path == "" {
 		t.Fatal("應寫出提案技能檔")
 	}
-	// 檔名應為 slug
-	if filepath.Base(path) != "run-go-tests.md" {
-		t.Errorf("檔名應為 run-go-tests.md，got %s", filepath.Base(path))
+	// folder-per-skill：<slug>/SKILL.md
+	if filepath.Base(path) != "SKILL.md" {
+		t.Errorf("檔名應為 SKILL.md，got %s", filepath.Base(path))
+	}
+	if filepath.Base(filepath.Dir(path)) != "run-go-tests" {
+		t.Errorf("技能資料夾名應為 run-go-tests，got %s", filepath.Base(filepath.Dir(path)))
 	}
 	data, _ := os.ReadFile(path)
 	body := string(data)
-	for _, want := range []string{"name: Run Go Tests", "description: 當需要驗證 Go 變更時", "go test ./...", "需人工 review"} {
+	for _, want := range []string{"name: run-go-tests", "description: 當需要驗證 Go 變更時", "version: 1", "go test ./...", "需人工 review"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("提案技能檔應含 %q\n---\n%s", want, body)
 		}

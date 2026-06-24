@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 )
@@ -19,7 +18,7 @@ import (
 func main() {
 	proposed := flag.String("proposed", "./workspace/.claw/"+evolve.ProposedSkillsDirName, "提案技能目錄")
 	active := flag.String("active", "./workspace/.claw/"+evolve.ActiveSkillsDirName, "生效技能目錄（晉升目標）")
-	promote := flag.String("promote", "", "要晉升的提案技能檔名（把關通過才移到生效目錄）")
+	promote := flag.String("promote", "", "要晉升的提案技能【名稱】（資料夾名；把關通過才移到生效目錄）")
 	flag.Parse()
 
 	if *promote != "" {
@@ -38,11 +37,16 @@ func doReport(proposedDir string) {
 	count := 0
 	fmt.Printf("=== 提案技能把關報告（%s）===\n", proposedDir)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+		// folder-per-skill：每個提案技能是一個含 SKILL.md 的子資料夾。
+		if !e.IsDir() {
 			continue
 		}
+		skillMd := filepath.Join(proposedDir, e.Name(), evolve.SkillFileName)
+		if _, statErr := os.Stat(skillMd); statErr != nil {
+			continue // 沒有 SKILL.md 的資料夾略過
+		}
 		count++
-		res, err := evolve.Gate(filepath.Join(proposedDir, e.Name()))
+		res, err := evolve.Gate(skillMd)
 		if err != nil {
 			fmt.Printf("• %s  ⚠️ 讀取失敗: %v\n", e.Name(), err)
 			continue
