@@ -8,11 +8,9 @@
 
 ## Demo
 
-<!-- 在 github.com 網頁編輯本 README，把 brag-output/brag.mp4 拖進編輯框，
-     GitHub 會自動上傳並插入一段 https://github.com/user-attachments/assets/... 的 URL，
-     就會渲染成內嵌播放器。把下面這行佔位換成那段 URL（單獨一行即可）： -->
+[![cogito-agent — 19 秒 demo（點開播放）](docs/brag-poster.png)](docs/brag.mp4)
 
-https://github.com/user-attachments/assets/REPLACE_WITH_UPLOADED_URL
+▶ [19 秒 demo](docs/brag.mp4)：危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
 ## Features
 
