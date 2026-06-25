@@ -65,3 +65,7 @@ skills-proposed/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Hyperframes / brag 產物（工具 scaffold，非源碼）
+/.agents/
+/brag-output/
