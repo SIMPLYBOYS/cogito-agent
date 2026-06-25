@@ -8,9 +8,9 @@
 
 ## Demo
 
-[![cogito-agent — 19 秒 demo（點開播放）](docs/brag-poster.png)](docs/brag.mp4)
+<video src="https://github.com/SIMPLYBOYS/cogito-agent/raw/main/docs/brag.mp4" poster="https://github.com/SIMPLYBOYS/cogito-agent/raw/main/docs/brag-poster.png" controls muted width="900"></video>
 
-▶ [19 秒 demo](docs/brag.mp4)：危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
+> 若上方播放器未顯示（部分 Markdown 檢視器不支援 `<video>`）：[▶ 19 秒 demo](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
 ## Features
 
