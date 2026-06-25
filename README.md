@@ -6,6 +6,14 @@
 
 > 這個專案是什麼、不是什麼，以及它的差異化與發展優先序，見 [POSITIONING.md](POSITIONING.md)。
 
+## Demo
+
+<!-- 在 github.com 網頁編輯本 README，把 brag-output/brag.mp4 拖進編輯框，
+     GitHub 會自動上傳並插入一段 https://github.com/user-attachments/assets/... 的 URL，
+     就會渲染成內嵌播放器。把下面這行佔位換成那段 URL（單獨一行即可）： -->
+
+https://github.com/user-attachments/assets/REPLACE_WITH_UPLOADED_URL
+
 ## Features
 
 **核心引擎**
