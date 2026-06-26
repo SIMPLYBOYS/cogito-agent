@@ -108,26 +108,63 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 	return count
 }
 
+// bashDangerPatterns 是 bash（前景/背景）與 MCP 工具參數共用的危險指令黑名單。
+var bashDangerPatterns = []string{
+	`rm\s+-r`,      // 遞歸刪除
+	`sudo\s+`,      // 提權
+	`drop\s+`,      // SQL DROP
+	`>.*\.go`,      // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
+	`nginx\s+-s`,   // 重啟/停止 nginx（會中斷線上服務）
+	`systemctl\s+`, // 系統服務管理（start/stop/restart）
+	`kill\s+`,      // 殺進程
+}
+
+// mcpDangerVerbs 是遠端 MCP 工具名裡的「破壞性/高風險」動詞——語意未知時據此攔下要審批。
+var mcpDangerVerbs = []string{
+	"delete", "remove", "drop", "destroy", "truncate", "overwrite",
+	"rmdir", "unlink", "kill", "terminate", "shutdown", "reboot", "format",
+	"exec", "deploy", "install", "write", "upload",
+}
+
 // IsDangerousCommand 判斷工具調用是否命中高危黑名單，命中則觸發人工審批。
 //   - bash：命中危險指令模式（遞歸刪除/提權/重啟服務/殺進程/覆蓋源碼…）。
 //   - write_file / edit_file：寫入路徑試圖逃出工作區（絕對路徑 / .. 穿越）或觸及敏感目標
 //     （.env 機密、.git/.ssh/.aws 憑證、.claw 自身配置）。正常的工作區內源碼寫入不攔，保留 UX。
+//   - mcp_call_tool：遠端 MCP 工具語意未知，用啟發式——工具名像破壞性、或參數命中危險指令/
+//     憑證路徑 → 審批。讀類（query/list/get/search/read…）不攔，保留 UX。
 func IsDangerousCommand(toolName string, args string) bool {
 	switch toolName {
 	case "bash", "bash_background":
 		// 背景 bash 與前景 bash 走同一危險黑名單——否則 `bash_background` 會成為審批繞道
 		// （長駐的 rm -rf / kill 更危險）。對應 memory「拉起需審批」的重啟條件。
-		dangerousPatterns := []string{
-			`rm\s+-r`,      // 遞歸刪除
-			`sudo\s+`,      // 提權
-			`drop\s+`,      // SQL DROP
-			`>.*\.go`,      // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
-			`nginx\s+-s`,   // 重啟/停止 nginx（會中斷線上服務）
-			`systemctl\s+`, // 系統服務管理（start/stop/restart）
-			`kill\s+`,      // 殺進程
-		}
-		for _, p := range dangerousPatterns {
+		for _, p := range bashDangerPatterns {
 			if matched, _ := regexp.MatchString(p, args); matched {
+				return true
+			}
+		}
+	case "mcp_call_tool":
+		// gateway 以 {"name":<遠端工具>,"arguments":{...}} 調用遠端 MCP 工具。解析不出 → 保守審批。
+		var a struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		if json.Unmarshal([]byte(args), &a) != nil {
+			return true
+		}
+		lname := strings.ToLower(a.Name)
+		for _, verb := range mcpDangerVerbs {
+			if strings.Contains(lname, verb) {
+				return true
+			}
+		}
+		scan := lname + " " + strings.ToLower(string(a.Arguments))
+		for _, p := range bashDangerPatterns {
+			if matched, _ := regexp.MatchString(p, scan); matched {
+				return true
+			}
+		}
+		for _, seg := range []string{".env", ".ssh", ".aws", "id_rsa", "/etc/passwd", "/etc/shadow"} {
+			if strings.Contains(scan, seg) {
 				return true
 			}
 		}

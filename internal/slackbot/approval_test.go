@@ -31,6 +31,15 @@ func TestIsDangerousCommand(t *testing.T) {
 		{"edit_file", `{"path":"config/.env.production"}`, true},  // 機密文件 .env.*
 		{"write_file", `{"path":".git/hooks/pre-commit"}`, true},  // 版控目錄
 		{"edit_file", `{"path":".claw/skills/x/SKILL.md"}`, true}, // 自身配置/技能目錄
+
+		// 遠端 MCP 工具（經 gateway 的 mcp_call_tool）
+		{"mcp_call_tool", `{"name":"filesystem__delete_file","arguments":{"path":"/x"}}`, true},   // 破壞性動詞
+		{"mcp_call_tool", `{"name":"fs__write_file","arguments":{"path":"a"}}`, true},             // write
+		{"mcp_call_tool", `{"name":"shell__run","arguments":{"cmd":"rm -rf /tmp"}}`, true},        // 參數命中 bash 危險模式
+		{"mcp_call_tool", `{"name":"server__get","arguments":{"path":"~/.ssh/id_rsa"}}`, true},    // 憑證路徑
+		{"mcp_call_tool", `{"name":"twinkle-hub__opendata_query","arguments":{"q":"房價"}}`, false}, // 讀類查詢，放行
+		{"mcp_call_tool", `{"name":"twtools__address_lookup","arguments":{"addr":"台北"}}`, false},  // 讀類，放行
+		{"mcp_describe_tool", `{"name":"filesystem__delete_file"}`, false},                        // 只查 schema，永遠放行
 	}
 	for _, c := range cases {
 		if got := IsDangerousCommand(c.tool, c.args); got != c.want {
