@@ -1,6 +1,6 @@
-// Package mcp 是一個極簡的 Model Context Protocol 客戶端：以 JSON-RPC 2.0 over stdio
-// （換行分隔的 JSON）連接外部 MCP 工具伺服器，做 initialize → tools/list → tools/call。
-// v1 只支援 tools（不含 resources/prompts），傳輸只支援 stdio（子進程）。
+// Package mcp 是一個極簡的 Model Context Protocol 客戶端：以 JSON-RPC 2.0 連接外部 MCP 工具
+// 伺服器，做 initialize → tools/list → tools/call。v1 只支援 tools（不含 resources/prompts）。
+// 傳輸有兩種：stdio（子進程，stdio_transport）與 Streamable HTTP（遠端，http_transport）。
 package mcp
 
 import (
@@ -40,126 +40,38 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
-// Client 是單一 MCP 伺服器的連線。背景 reader 讀取回應、按 id 路由到等待中的呼叫，
-// 因此可安全地併發呼叫（我們的工具是並行執行的）。
+// transport 抽象 JSON-RPC 的一次往返與通知傳送，讓 stdio / HTTP 共用上層的 initialize/list/call 邏輯。
+type transport interface {
+	call(ctx context.Context, method string, params any) (json.RawMessage, error)
+	notify(ctx context.Context, method string, params any) error
+	close() error
+}
+
+// Client 是單一 MCP 伺服器的連線（傳輸無關的外殼）。上層 initialize/listTools/callTool 走 transport。
 type Client struct {
 	Name string
-
-	w   io.Writer
-	cmd *exec.Cmd
-
-	mu      sync.Mutex // 保護 pending / nextID / closed
-	nextID  int
-	pending map[int]chan rpcResponse
-	closed  bool
-	closeCh chan struct{}
-
-	writeMu sync.Mutex // 序列化寫入；與 mu 分開，避免阻塞寫入時擋住 readLoop 路由（死鎖）
+	t    transport
 }
 
-// newClient 是低階建構子（傳入已接好的讀寫端），供測試以 in-process 假 server 注入。
+// newClient 以 stdio 傳輸建立 Client（傳入已接好的讀寫端）；供測試以 in-process 假 server 注入。
 func newClient(name string, w io.Writer, r io.Reader, cmd *exec.Cmd) *Client {
-	c := &Client{
-		Name:    name,
-		w:       w,
-		cmd:     cmd,
-		pending: make(map[int]chan rpcResponse),
-		closeCh: make(chan struct{}),
-	}
-	go c.readLoop(r)
-	return c
-}
-
-func (c *Client) readLoop(r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // 容納大型工具輸出
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var resp rpcResponse
-		if err := json.Unmarshal(line, &resp); err != nil || resp.ID == 0 {
-			continue // 非回應（通知/解析失敗）→ v1 忽略
-		}
-		c.mu.Lock()
-		ch, ok := c.pending[resp.ID]
-		delete(c.pending, resp.ID)
-		c.mu.Unlock()
-		if ok {
-			ch <- resp
-		}
-	}
-	// 讀取結束（EOF / 進程退出）：喚醒所有等待者並標記關閉。
-	c.mu.Lock()
-	c.closed = true
-	for id, ch := range c.pending {
-		close(ch)
-		delete(c.pending, id)
-	}
-	c.mu.Unlock()
-	close(c.closeCh)
+	return &Client{Name: name, t: newStdioTransport(name, w, r, cmd)}
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return nil, fmt.Errorf("mcp[%s]: 連線已關閉", c.Name)
-	}
-	c.nextID++
-	id := c.nextID
-	ch := make(chan rpcResponse, 1)
-	c.pending[id] = ch
-	c.mu.Unlock()
-
-	if err := c.write(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, err
-	}
-
-	select {
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, ctx.Err()
-	case resp, ok := <-ch:
-		if !ok {
-			return nil, fmt.Errorf("mcp[%s]: 連線在等待 %s 回應時關閉", c.Name, method)
-		}
-		if resp.Error != nil {
-			return nil, fmt.Errorf("mcp[%s] %s 錯誤 %d: %s", c.Name, method, resp.Error.Code, resp.Error.Message)
-		}
-		return resp.Result, nil
-	}
-}
-
-func (c *Client) write(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	b = append(b, '\n') // stdio 傳輸：換行分隔，訊息內不得含換行
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	_, err = c.w.Write(b)
-	return err
+	return c.t.call(ctx, method, params)
 }
 
 // initialize 完成 MCP 握手：initialize 請求 + notifications/initialized 通知。
 func (c *Client) initialize(ctx context.Context) error {
-	_, err := c.call(ctx, "initialize", map[string]any{
+	if _, err := c.t.call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "cogito-agent", "version": "0.1.0"},
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
-	return c.write(rpcNotification{JSONRPC: "2.0", Method: "notifications/initialized"})
+	return c.t.notify(ctx, "notifications/initialized", nil)
 }
 
 // toolSpec 是 tools/list 回傳的單個工具定義。
@@ -218,17 +130,18 @@ func (c *Client) callTool(ctx context.Context, name string, args map[string]any)
 	return text, nil
 }
 
-// Close 關閉連線：結束子進程（若有）。
-func (c *Client) Close() error {
-	if c.cmd != nil && c.cmd.Process != nil {
-		_ = c.cmd.Process.Kill()
-		_ = c.cmd.Wait()
+// Close 關閉連線（結束子進程 / 釋放 HTTP 資源）。
+func (c *Client) Close() error { return c.t.close() }
+
+// Dial 依設定建立連線並完成握手：有 url/type=http 走 Streamable HTTP，否則 stdio 子進程。
+func Dial(ctx context.Context, cfg ServerConfig) (*Client, error) {
+	if cfg.isHTTP() {
+		return dialHTTP(ctx, cfg)
 	}
-	return nil
+	return dialStdio(ctx, cfg)
 }
 
-// Dial 啟動一個 stdio MCP 伺服器子進程並完成握手。
-func Dial(ctx context.Context, cfg ServerConfig) (*Client, error) {
+func dialStdio(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Env = append(cmd.Environ(), cfg.envSlice()...)
 
@@ -261,4 +174,125 @@ func Dial(ctx context.Context, cfg ServerConfig) (*Client, error) {
 		return nil, fmt.Errorf("mcp[%s]: 握手失敗: %w", cfg.Name, err)
 	}
 	return c, nil
+}
+
+// ---- stdio 傳輸 ----
+
+// stdioTransport 走子進程 stdin/stdout（換行分隔 JSON）。背景 reader 讀回應、按 id 路由到等待中的
+// 呼叫，因此可安全併發。
+type stdioTransport struct {
+	name string
+	w    io.Writer
+	cmd  *exec.Cmd
+
+	mu      sync.Mutex // 保護 pending / nextID / closed
+	nextID  int
+	pending map[int]chan rpcResponse
+	closed  bool
+	closeCh chan struct{}
+
+	writeMu sync.Mutex // 序列化寫入；與 mu 分開，避免阻塞寫入時擋住 readLoop 路由（死鎖）
+}
+
+func newStdioTransport(name string, w io.Writer, r io.Reader, cmd *exec.Cmd) *stdioTransport {
+	t := &stdioTransport{
+		name:    name,
+		w:       w,
+		cmd:     cmd,
+		pending: make(map[int]chan rpcResponse),
+		closeCh: make(chan struct{}),
+	}
+	go t.readLoop(r)
+	return t
+}
+
+func (t *stdioTransport) readLoop(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // 容納大型工具輸出
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var resp rpcResponse
+		if err := json.Unmarshal(line, &resp); err != nil || resp.ID == 0 {
+			continue // 非回應（通知/解析失敗）→ v1 忽略
+		}
+		t.mu.Lock()
+		ch, ok := t.pending[resp.ID]
+		delete(t.pending, resp.ID)
+		t.mu.Unlock()
+		if ok {
+			ch <- resp
+		}
+	}
+	// 讀取結束（EOF / 進程退出）：喚醒所有等待者並標記關閉。
+	t.mu.Lock()
+	t.closed = true
+	for id, ch := range t.pending {
+		close(ch)
+		delete(t.pending, id)
+	}
+	t.mu.Unlock()
+	close(t.closeCh)
+}
+
+func (t *stdioTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil, fmt.Errorf("mcp[%s]: 連線已關閉", t.name)
+	}
+	t.nextID++
+	id := t.nextID
+	ch := make(chan rpcResponse, 1)
+	t.pending[id] = ch
+	t.mu.Unlock()
+
+	if err := t.write(rpcRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params}); err != nil {
+		t.mu.Lock()
+		delete(t.pending, id)
+		t.mu.Unlock()
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		t.mu.Lock()
+		delete(t.pending, id)
+		t.mu.Unlock()
+		return nil, ctx.Err()
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, fmt.Errorf("mcp[%s]: 連線在等待 %s 回應時關閉", t.name, method)
+		}
+		if resp.Error != nil {
+			return nil, fmt.Errorf("mcp[%s] %s 錯誤 %d: %s", t.name, method, resp.Error.Code, resp.Error.Message)
+		}
+		return resp.Result, nil
+	}
+}
+
+func (t *stdioTransport) notify(_ context.Context, method string, params any) error {
+	return t.write(rpcNotification{JSONRPC: "2.0", Method: method, Params: params})
+}
+
+func (t *stdioTransport) write(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n') // stdio 傳輸：換行分隔，訊息內不得含換行
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+	_, err = t.w.Write(b)
+	return err
+}
+
+func (t *stdioTransport) close() error {
+	if t.cmd != nil && t.cmd.Process != nil {
+		_ = t.cmd.Process.Kill()
+		_ = t.cmd.Wait()
+	}
+	return nil
 }

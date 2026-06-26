@@ -11,6 +11,11 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest", "--headless"]
+    },
+    "twinkle-hub": {
+      "type": "http",
+      "url": "https://api.twinkleai.tw/mcp/",
+      "headers": { "Authorization": "Bearer sk-你的token" }
     }
   }
 }
