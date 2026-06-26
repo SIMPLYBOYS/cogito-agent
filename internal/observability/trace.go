@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -42,7 +43,9 @@ func (s *Span) AddAttribute(key string, value interface{}) {
 func toAttr(key string, value interface{}) attribute.KeyValue {
 	switch v := value.(type) {
 	case string:
-		return attribute.String(key, v)
+		// 修：按位元組截斷的字串（如工具輸出含中文時 s[:100] 切到多位元組字元中間）會是非法 UTF-8，
+		// 讓 OTLP 匯出整批失敗。在設屬性的單一出口收斂成合法 UTF-8，無論上游怎麼截。
+		return attribute.String(key, strings.ToValidUTF8(v, ""))
 	case bool:
 		return attribute.Bool(key, v)
 	case int:
@@ -52,6 +55,6 @@ func toAttr(key string, value interface{}) attribute.KeyValue {
 	case float64:
 		return attribute.Float64(key, v)
 	default:
-		return attribute.String(key, fmt.Sprintf("%v", v))
+		return attribute.String(key, strings.ToValidUTF8(fmt.Sprintf("%v", v), ""))
 	}
 }
