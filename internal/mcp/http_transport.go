@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // httpTransport 走 MCP 的 Streamable HTTP 傳輸（spec 2025-03-26+）：每個 JSON-RPC 訊息是一個 POST，
@@ -65,10 +66,10 @@ func (h *httpTransport) doPost(ctx context.Context, payload any) (*http.Response
 	if sid != "" {
 		req.Header.Set("Mcp-Session-Id", sid)
 	}
-	if ver == "" {
-		ver = protocolVersion
+	// 只在 initialize 協商出版本後才帶（spec：此頭用於 initialize 之後的請求）。
+	if ver != "" {
+		req.Header.Set("MCP-Protocol-Version", ver)
 	}
-	req.Header.Set("MCP-Protocol-Version", ver)
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
@@ -96,7 +97,11 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("mcp[%s]: session 已過期 (HTTP 404)，需重新連線", h.name)
+		// session 過期：清掉，下次請求不帶舊 id（伺服器多會當新 session 處理）。
+		h.mu.Lock()
+		h.sessionID = ""
+		h.mu.Unlock()
+		return nil, fmt.Errorf("mcp[%s]: session 已過期 (HTTP 404)，已清除，請重試", h.name)
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -155,11 +160,17 @@ func (h *httpTransport) close() error {
 	if sid == "" {
 		return nil
 	}
-	req, err := http.NewRequest(http.MethodDelete, h.url, nil)
+	// 帶 timeout，避免關機路徑在無回應的 DELETE 上永久阻塞（httpClient 本身刻意無 timeout）。
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, h.url, nil)
 	if err != nil {
 		return nil
 	}
 	req.Header.Set("Mcp-Session-Id", sid)
+	if ver := h.negotiatedVersion; ver != "" {
+		req.Header.Set("MCP-Protocol-Version", ver)
+	}
 	for k, v := range h.headers {
 		req.Header.Set(k, v)
 	}
@@ -182,7 +193,7 @@ func readSSEResponse(r io.Reader, wantID int) (rpcResponse, error) {
 		payload := data.String()
 		data.Reset()
 		var rr rpcResponse
-		if json.Unmarshal([]byte(payload), &rr) == nil && rr.ID == wantID {
+		if json.Unmarshal([]byte(payload), &rr) == nil && idMatches(rr.ID, wantID) {
 			return rr, true
 		}
 		return rpcResponse{}, false

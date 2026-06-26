@@ -118,6 +118,84 @@ func TestHTTPTransport_DialListAndCall(t *testing.T) {
 	}
 }
 
+// 伺服器把 JSON-RPC id 回成【字串】（"3" 而非 3）——spec 允許,client 必須仍能比對到回應。
+func TestHTTPTransport_StringID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var msg struct {
+			ID     *int   `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		if msg.ID == nil { // 通知
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		switch msg.Method {
+		case "initialize":
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":"%d","result":{"protocolVersion":"2025-06-18"}}`, *msg.ID)
+		case "tools/call":
+			w.Header().Set("Content-Type", "text/event-stream")
+			// 關鍵：id 回成字串 "3"
+			fmt.Fprintf(w, "data: {\"jsonrpc\":\"2.0\",\"id\":\"%d\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok-str-id\"}]}}\n\n", *msg.ID)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), ServerConfig{Name: "t", URL: srv.URL})
+	if err != nil {
+		t.Fatalf("Dial 失敗（initialize 字串 id 也要能解）: %v", err)
+	}
+	defer c.Close()
+	out, err := c.callTool(context.Background(), "echo", nil)
+	if err != nil || out != "ok-str-id" {
+		t.Fatalf("字串型 id 的 SSE 回應應能比對,got out=%q err=%v", out, err)
+	}
+}
+
+// 收到 404 後必須清掉過期 session,否則後續永遠帶舊 id → 永久 404。
+func TestHTTPTransport_404ClearsSession(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var msg struct {
+			ID     *int   `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &msg)
+		if msg.Method == "initialize" {
+			w.Header().Set("Mcp-Session-Id", "s1")
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-06-18"}}`, *msg.ID)
+			return
+		}
+		if msg.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound) // 模擬 session 過期
+	}))
+	defer srv.Close()
+
+	c, err := Dial(context.Background(), ServerConfig{Name: "t", URL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ht := c.t.(*httpTransport)
+	if ht.sessionID != "s1" {
+		t.Fatalf("initialize 後應有 session,got %q", ht.sessionID)
+	}
+	if _, err := c.listTools(context.Background()); err == nil {
+		t.Fatal("404 應回 error")
+	}
+	if ht.sessionID != "" {
+		t.Errorf("404 後 sessionID 應被清空,got %q", ht.sessionID)
+	}
+}
+
 func TestHTTPTransport_ErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

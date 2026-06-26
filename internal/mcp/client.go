@@ -11,6 +11,8 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -35,9 +37,30 @@ type rpcError struct {
 }
 
 type rpcResponse struct {
-	ID     int             `json:"id"`
+	ID     json.RawMessage `json:"id"` // JSON-RPC id 可為數字或字串；用 RawMessage 容錯比對
 	Result json.RawMessage `json:"result"`
 	Error  *rpcError       `json:"error"`
+}
+
+// parseID 把 JSON-RPC 回應的 id（數字或字串型）正規化成 int。我們送出的 id 一律是遞增 int，
+// 但某些伺服器會回成字串（如 "5"）；兩種都接。空/null/非數字 → ok=false（通知或無 id）。
+func parseID(raw json.RawMessage) (int, bool) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return 0, false
+	}
+	s = strings.Trim(s, `"`) // 容忍字串型 id
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// idMatches 判斷回應 id 是否等於我們送出的請求 id（容忍數字/字串型）。
+func idMatches(raw json.RawMessage, want int) bool {
+	id, ok := parseID(raw)
+	return ok && id == want
 }
 
 // transport 抽象 JSON-RPC 的一次往返與通知傳送，讓 stdio / HTTP 共用上層的 initialize/list/call 邏輯。
@@ -215,12 +238,16 @@ func (t *stdioTransport) readLoop(r io.Reader) {
 			continue
 		}
 		var resp rpcResponse
-		if err := json.Unmarshal(line, &resp); err != nil || resp.ID == 0 {
-			continue // 非回應（通知/解析失敗）→ v1 忽略
+		if json.Unmarshal(line, &resp) != nil {
+			continue
+		}
+		id, hasID := parseID(resp.ID)
+		if !hasID {
+			continue // 非回應（通知/無 id/解析失敗）→ v1 忽略
 		}
 		t.mu.Lock()
-		ch, ok := t.pending[resp.ID]
-		delete(t.pending, resp.ID)
+		ch, ok := t.pending[id]
+		delete(t.pending, id)
 		t.mu.Unlock()
 		if ok {
 			ch <- resp
