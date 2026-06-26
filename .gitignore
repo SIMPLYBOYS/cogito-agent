@@ -69,3 +69,8 @@ Thumbs.db
 # Hyperframes / brag 產物（工具 scaffold，非源碼）
 /.agents/
 /brag-output/
+
+# 工具產生的本地產物（Claude Code 設定 / agent scaffold / skills lock），勿入庫
+/.claude/
+/agent/
+skills-lock.json
