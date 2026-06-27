@@ -15,37 +15,32 @@
 ## Features
 
 **核心引擎**
-- 🤖 **自主 Agent 循環**：Thinking（慢思考）→ Action（調用工具）→ Observation（觀察結果）的多輪 ReAct 循環，直到任務完成。
-- 🧠 **多 Provider（Claude / OpenAI 相容）**：統一 `LLMProvider` 接口（`Generate` + `MaxContextTokens` + `ModelName`）。預設 Claude（`anthropic-sdk-go`）；設 `COGITO_PROVIDER=openai` 改用**手寫的 OpenAI 相容 client**，`OPENAI_BASE_URL` 可指向 OpenAI / 本地 vLLM / Ollama / OpenRouter / Groq…——一招接上「200+ 模型」。含完整 tool-use 映射。
+- 🤖 **自主 Agent 循環**：Thinking → Action → Observation 的多輪 ReAct，跑到任務完成。
+- 🧠 **多 Provider**：統一 `LLMProvider` 接口，預設 Claude，可一鍵切到任何 OpenAI 相容端點（OpenAI / vLLM / Ollama / OpenRouter / Groq…）。
 
-**內置工具**（全部在鎖定的工作區內運行）
-- `read_file`（超長自動截斷至 8000 字節）、`write_file`（自動創建目錄）、`edit_file`（局部字符串替換，L4 模糊匹配會**自動對齊縮排**）、`bash`（任意命令，帶 30s 超時保護，合併 stdout/stderr）。
-- 🧭 **`spawn_subagent`**：把深度探索委派給受限的只讀子智能體（agent-as-tool），上下文隔離、可**並行派出多路偵察兵**；可選 `skill` 參數**綁定技能**，該技能正文只載入子智能體的隔離 context（主 context 不被汙染）。
-- ⏱️ **背景任務（`bash_background` / `task_output` / `task_kill` / `task_list`）**：長命命令（dev server、長建置/訓練）丟到背景跑，**不受一般 `bash` 的 30s 逾時限制**，可跨 Turn 查輸出/終止。session 級 `TaskManager`（每會話獨立）、**並發上限**、走同一危險審批、服務關閉時統一 kill；命令在與前景 bash **同一沙箱邊界**內執行。
-- 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即可註冊；`Registry.Use` 掛載環繞式中間件（審批 / 計時等）。
+**內置工具**（全在鎖定的工作區內運行）
+- `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四件極簡原語。
+- 🧭 **`spawn_subagent`**：把深度探索委派給只讀子智能體，上下文隔離、可並行派多路；可綁定技能進子 context。
+- ⏱️ **背景任務**：長命令（dev server、長建置/訓練）丟背景跑、跨輪查輸出/終止；每會話獨立、有並發上限、走同一危險審批。
+- 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
 
 **駕馭工程（失控控制）**
-- 🛡️ **HITL 危險指令審批**：命中黑名單（`rm -rf` / `sudo` / 覆蓋 `.go` / `kill` …）的調用會被掛起，把審批請求推回 Slack 頻道，回 `approve` / `reject` 才放行（含超時自動拒絕）。
-- 📦 **可插拔沙箱執行器（OS 級硬邊界）**：`bash` 命令經 `sandbox.Executor` 執行——預設 `HostExecutor`（宿主機直跑）；設 `COGITO_SANDBOX=docker` 改用 `DockerExecutor`，**每個 session 一個常駐容器**（首次啟動、之後 `docker exec`，省啟動延遲且容器內**套件/檔案/背景進程**跨呼叫持久）：只掛入該 session 的 workDir（`cd /` 也逃不出去）、`--network none` 斷網、限記憶體/CPU/PID。這是軟性防線之外唯一能真正擋住逃逸的硬隔離。
-- 🚦 **三道硬防線**：主循環**回合上限**（默認 40）、**死循環指紋探測**（參數正規化看穿尾空格/冗餘路徑微差 + 同工具雙閾值）、**per-task 成本熔斷**（默認 \$1）。
-- ⚡ **工具併發限流**：單輪多工具併發執行，由緩衝 channel 信號量限制同時在跑數（默認 5），避免打爆下游。
-- 🩹 **錯誤自愈**：工具報錯時由 `RecoveryManager` 注入「下一步怎麼做」的救援指南。
+- 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的調用掛起，推回 Slack 等 `approve` / `reject` 才放行。
+- 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
+- 🚦 **三道硬防線**：回合上限、死循環指紋探測、per-task 成本熔斷。
+- ⚡ **工具併發限流** ＋ 🩹 **錯誤自愈**：報錯時注入「下一步怎麼做」的救援指南。
 
 **上下文工程**
-- 🗜️ **自適應上下文壓縮**：壓縮水位按模型**真實上下文窗口**（token）設定，並用每次 API 回傳的真實 `PromptTokens` 自校準，自動適配不同窗口的模型。
-- 🪟 **滑動窗口 + System Prompt 組裝**：`PromptComposer` 組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`，可斷點續傳）與 **Skills**（`.claw/skills`，**漸進式載入**：System Prompt 只放索引，正文用 `read_skill` 載入自身 context，或經 `spawn_subagent` 綁定進子 context）。
-- 💾 **Session 持久化（可選）**：設 `COGITO_SESSION_DIR` 後，對話歷史/費用以「一 session 一 JSON 檔」write-through 落地磁碟（原子寫），**重啟後按 ID 復原**——讓 CLI 的 `-session` 斷點續傳跨重啟生效、Slack 各頻道記憶不因重啟丟失。未設則維持純記憶體。
-- 🧬 **技能自生成 + eval 把關（Tier 4 · 可選 · `COGITO_SKILL_SYNTH=1`）**：任務**成功後**反思軌跡，把可複用流程寫成 **folder-per-skill** 的 `<name>/SKILL.md`（對齊 [agentskills.io](https://agentskills.io/specification) 開放標準：標準 frontmatter + When to use/Steps/Examples 三段式，與 Hermes/Claude 技能生態互通；CLI 與 Slack 入口皆支援，Slack 還會回貼提案通知）。**安全鐵律**：只寫進**暫存區** `.claw/skills-proposed/`、**不自動啟用**（`SkillLoader` 只讀 `.claw/skills/`）。晉升須過 **`cmd/skillgate` 把關**（結構 + **危險指令/憑證黑名單**確定性掃描）才移到生效目錄——人選哪個、自動擋壞的，自我進化不繞過「失控控制」。
-- 🧠 **記憶自更新 + live Reflexion（Tier 4 · 可選 · `COGITO_MEMORY_SYNTH=1`）**：從**真實互動**學習——任務**成功**萃取耐久專案慣例/雷點，任務**失敗**（崩潰/達回合上限/成本熔斷）則 live Reflexion 萃取一條「下次怎麼判斷/做不同」的教訓。兩者經**去重 + 安全掃描**追加到**提案記憶** `.claw/AGENTS.proposed.md`（不自動套用），人工 review 後併入 `AGENTS.md` 才會在下次自動帶出。CLI 與 Slack 入口皆支援。
-- ♻️ **Reflexion 失敗反思重試（Tier 4 · eval · `bench -reflexion N`）**：用例失敗時，用軌跡 + 指標（回合/試錯）+ 失敗輸出**反思出一條教訓**，**回注**到下一次重試（嘗試→反思→帶教訓重試），量測 pass@1 vs pass@k。報告/儀表板顯示每例 `Attempts` 與歷次教訓。
-- 🎛️ **參數自調（Tier 4 · `bench -tune`）**：依跑分聚合指標（通過率/平均回合/工具報錯/觸頂率/最貴成本）**確定性**產出有界的調參提案（`MaxTurns`/`MaxConcurrentTools`/`MaxCostUSD`）。**安全鐵律**：只寫**提案** `.claw/config.proposed.json`、**不自動套用**；放寬安全旋鈕的提案標 `sensitive` 需特別審慎，且一律 clamp 在安全區間內。
+- 🗜️ **自適應壓縮**：壓縮水位按模型真實上下文窗口設定，並用每次回傳的 `PromptTokens` 自校準。
+- 🪟 **滑動窗口 + System Prompt 組裝**：組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`、可斷點續傳）與**漸進式技能載入**（只放索引、正文按需載入）。
+- 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原。
+- 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
 **接入與可觀測性**
-- 💬 **Slack 集成**：Events API（Webhook），支持頻道 @提及 與私聊（DM），自動校驗簽名、處理 URL 驗證挑戰、過濾自身消息；**每頻道工作區隔離 + per-WorkDir 鎖**（同目錄序列化、不同頻道並行）。
-- 📡 **實時進度回推**：`Reporter` 接口把思考 / 工具調用 / 成敗 / 最終回答（含子智能體進度）實時推到 Slack。
-- 💰 **成本追蹤**：`CostTracker` 裝飾器按會話累計 token 與 USD 費用。
-- 🔭 **OpenTelemetry 鏈路追蹤**：span 經 OTel SDK 匯出（OTLP → Jaeger / Langfuse / Collector），LLM span 帶 `gen_ai.*` 語意約定；未配置端點時為零成本 no-op。
-- 🧩 **MCP 集成（stdio + Streamable HTTP）**：透過 `COGITO_MCP_CONFIG` 載入 `.mcp.json`，連接外部 [Model Context Protocol](https://modelcontextprotocol.io) 工具伺服器——本地 **stdio**（`command`/`args`）或遠端 **Streamable HTTP**（`url` + `headers`，如 Twinkle Hub 等託管 MCP）。外部工具經 **gateway 漸進式暴露**（`mcp_call_tool` + `mcp_describe_tool` + 輕量目錄），避免把 N 個完整 schema 塞進每輪 context。
+- 💬 **Slack 集成**：Events API，支援 @提及 與私聊；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
+- 📡 **實時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答實時推到 Slack，並按會話累計 token 與 USD。
+- 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
+- 🧩 **MCP 集成（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 
 ## Architecture
 
@@ -160,7 +155,7 @@ cmd/
 ├── claw-cli/             通用命令行入口（-prompt / -dir / -session / -plan）
 ├── bench/                自動化評測 runner（-out 輸出 JSON 報告、-min-pass-rate CI 門檻）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
-├── skillgate/            提案技能把關/晉升（Tier 4 安全閘：結構+危險黑名單，過了才生效）
+├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
 └── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
 internal/
 ├── engine/                  Agent 核心引擎
@@ -197,7 +192,7 @@ internal/
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
 │   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
 ├── eval/                    評測框架（benchmark）
-├── evolve/                  自我進化（Tier 4）：SkillSynthesizer 技能自生成（寫提案技能、不自動啟用）
+├── evolve/                  自我進化：SkillSynthesizer 技能自生成（寫提案技能、不自動啟用）
 └── schema/                 消息與工具的通用數據結構
 ```
 
@@ -354,7 +349,7 @@ export OPENAI_MODEL=gpt-4o-mini
 go run ./cmd/claw-cli -prompt "..."
 ```
 
-### 技能自生成 + 把關（Tier 4）
+### 技能自生成 + 把關
 
 ```bash
 # 1) 開啟自生成（技能 + 專案記憶）：產物只進暫存區、不自動生效
