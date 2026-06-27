@@ -104,6 +104,54 @@ flowchart TB
   OTEL --> BACKEND
 ```
 
+### 上下文工程：一輪 prompt 怎麼組起來的
+
+每次發 LLM 前，context 層把 prompt 組成 **靜態系統層 + 動態滑動窗口**，過三道防線後送出；工具 schema 走帶外通道；回應寫回 history 供下一輪。
+
+```mermaid
+flowchart TB
+  subgraph SRC["來源"]
+    HIST[("session.history<br/>完整歷史（持久化）")]
+    AGENTS["AGENTS.md 專案指南"]
+    SKILLS[".claw/skills 技能"]
+  end
+
+  subgraph STATIC["靜態系統層（每個 Execute 只建一次）"]
+    COMPOSER["PromptComposer.Build()"]
+    SYS["systemMsg：單一 system 訊息<br/>身份+紀律 ▸ Plan Mode ▸ AGENTS.md ▸ Skills 索引"]
+  end
+
+  subgraph DYN["動態層（每輪）"]
+    WIN["GetWorkingMemory(20)<br/>末 20 條 ▸ 剝孤兒 tool_result ▸ 首條補 user"]
+  end
+
+  ASSEMBLE["contextHistory = systemMsg ＋ workingMemory"]
+  COMPACT["Compactor.Compact()<br/>達 75% 窗口水位才折疊<br/>system 全留 ▸ 末 6 條保護 ▸ 早期 tool_result/思考折疊"]
+  TOOLS["availableTools（不入 messages，走 tools 參數）"]
+  LLM["provider.Generate(context, tools)"]
+  CAL["Compactor.Calibrate()<br/>用真實 PromptTokens 校準 byte/token"]
+  WB["session.Append → 回寫 history<br/>thinking+action 併一條 ▸ tool 結果 ▸ 死循環提醒"]
+
+  AGENTS --> COMPOSER
+  SKILLS -->|漸進式：只放索引，正文按需載入| COMPOSER
+  COMPOSER --> SYS
+  HIST --> WIN
+  SYS --> ASSEMBLE
+  WIN --> ASSEMBLE
+  ASSEMBLE --> COMPACT
+  COMPACT --> LLM
+  TOOLS -.帶外.-> LLM
+  LLM -->|Usage.PromptTokens| CAL
+  CAL -.回饋.-> COMPACT
+  LLM --> WB
+  WB --> HIST
+```
+
+- **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引（漸進式，只放目錄不放正文）——整個 Execute 只建一次。
+- **動態層**（[session.go](internal/context/session.go) `GetWorkingMemory`）：取末 20 條，剝孤兒 `tool_result`、首條補 `user` 以滿足 Anthropic 嚴格交替。
+- **三道防線**：Compactor 防總量（[75% 水位](internal/context/compactor.go)）、滑動窗口防條數、剝離/補位防協議；皆只動發出去的副本，不毀 `history`。
+- **自校準回饋**：每輪用真實 `PromptTokens` 修正 byte/token 比，估算隨 tokenizer 收斂，自動適配不同窗口的模型。
+
 目錄結構：
 
 ```
