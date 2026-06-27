@@ -122,6 +122,30 @@ func TestRun_CostBreakerIsPerTask(t *testing.T) {
 	}
 }
 
+// 軟著陸：花費跨過 80% 軟水位時，注入一次「停工具、立刻交付」提醒，讓模型在硬上限懸崖前落地。
+// costPer=0.3、上限 1.0：第 4 輪頂部 spent=0.9>0.8 觸發提醒（僅一次），第 5 輪頂部 1.2>1.0 才硬斷。
+func TestRun_CostSoftLanding(t *testing.T) {
+	sess := ctxpkg.NewSession("softland", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+
+	fp := &fakeProvider{costPer: 0.3, sess: sess}
+	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
+	eng.MaxTurns = 100
+	eng.MaxCostUSD = 1.0
+
+	_ = eng.Run(context.Background(), sess, nil) // 最終仍撞硬上限返回 error，這裡只看軟著陸提醒
+
+	n := 0
+	for _, m := range sess.GetWorkingMemory(1000) {
+		if strings.Contains(m.Content, "預算即將用盡") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("軟著陸提醒應恰好注入一次，實際=%d", n)
+	}
+}
+
 // concProbe 記錄「同時在 Execute 中」的工具峰值，用來驗證併發上限。
 type concProbe struct {
 	mu       sync.Mutex

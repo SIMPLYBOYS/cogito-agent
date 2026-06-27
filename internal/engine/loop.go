@@ -20,6 +20,7 @@ const (
 	defaultMaxTurns           = 40  // 單次 Run 的最大回合數
 	defaultMaxCostUSD         = 1.0 // 單次 Run 的成本熔斷上限（USD）
 	defaultMaxConcurrentTools = 5   // 單輪內工具的最大同時併發數
+	costSoftLandingRatio      = 0.8 // 成本軟著陸水位：花費達上限此比例即提醒模型停工具、立刻交付
 )
 
 // 引擎對 workspace 無狀態（workspace 跟著 Session 走）。
@@ -89,6 +90,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	// 跨多則訊息只增不減；用累計值會讓頻道用久後每則新任務在第 1 回合就被永久鎖死）。
 	startCostUSD := session.CostUSD()
 
+	softLanded := false // 成本軟著陸提醒只注入一次，避免每輪重複刷屏
 	turnCount := 0
 	for {
 		turnCount++
@@ -106,12 +108,22 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// 【硬防線③】per-task 成本熔斷：只看本次任務的增量 (現值 − 進入時基準)，超預算即斷路。
 		// 把 CostTracker 從「只記帳」升級為「斷路器」，控制單一任務盲目重試的金錢失控。
 		if e.MaxCostUSD > 0 {
-			if spent := session.CostUSD() - startCostUSD; spent > e.MaxCostUSD {
+			spent := session.CostUSD() - startCostUSD
+			if spent > e.MaxCostUSD {
 				msg := fmt.Sprintf("⚠️ 本次任務已花費 $%.4f，超過單任務預算上限 $%.2f，為控制成本已強制中止。", spent, e.MaxCostUSD)
 				if reporter != nil {
 					reporter.OnMessage(ctx, msg)
 				}
 				return fmt.Errorf("達到單任務成本上限 $%.2f（本次已花費 $%.4f），強制終止", e.MaxCostUSD, spent)
+			}
+			// 軟著陸：跨過軟水位（預算 80%）就提醒模型「別再用工具、立刻交付」，讓它在硬上限懸崖前
+			// 把現有成果交出去——否則常見到「錢花了、東西做好了、卻在交付前一刻被硬砍」。只注入一次。
+			if !softLanded && spent > e.MaxCostUSD*costSoftLandingRatio {
+				softLanded = true
+				session.Append(schema.Message{
+					Role:    schema.RoleUser,
+					Content: fmt.Sprintf("[系統提醒] 本次任務預算即將用盡（已花 $%.2f / 上限 $%.2f）。請【立即停止呼叫任何工具】，根據目前已完成的成果，直接給出最終交付（含產物路徑/網址/關鍵結論）。不要再做額外驗證或探索，否則會在交付前被強制中止。", spent, e.MaxCostUSD),
+				})
 			}
 		}
 
