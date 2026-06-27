@@ -99,8 +99,8 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 				IsError:    true,
 			}
 		}
-		// 只截前 100 字符放進 Trace，防止 trace 文件膨脹
-		span.AddAttribute("output_preview", truncate(output, 100))
+		// 截前 N 字符放進 Trace 預覽，防止 trace 膨脹（過小會讓 Langfuse 看到一堆 ...）
+		span.AddAttribute("output_preview", truncate(output, maxPreviewChars))
 		return schema.ToolResult{
 			ToolCallID: call.ID,
 			Output:     output,
@@ -124,15 +124,21 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 	if !executed {
 		log.Printf("[Registry] ⚠️ 工具 %s 被 middleware 短路攔截\n", call.Name)
 		span.AddAttribute("intercepted", true)
-		span.AddAttribute("reject_reason", truncate(result.Output, 100))
+		span.AddAttribute("reject_reason", truncate(result.Output, maxPreviewChars))
 	}
 
 	return result
 }
 
+// maxPreviewChars 是放進 trace 預覽屬性的字符上限（rune，非 byte）。100 太小會讓 Langfuse
+// 滿屏 ...；放大到 2000 仍遠小於工具原始輸出，避免 span 膨脹。
+const maxPreviewChars = 2000
+
+// truncate 按 rune 截斷（非 byte），避免切到中文多位元組字元中間。
 func truncate(s string, max int) string {
-	if len(s) > max {
-		return s[:max] + "..."
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max]) + "..."
 	}
 	return s
 }

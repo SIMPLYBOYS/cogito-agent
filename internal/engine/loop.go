@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -178,10 +179,21 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		actSpan.AddAttribute("gen_ai.operation.name", "chat")
 		actSpan.AddAttribute("gen_ai.system", "anthropic")
 		actSpan.AddAttribute("gen_ai.request.model", e.provider.ModelName())
+		actSpan.AddAttribute("langfuse.observation.type", "generation")
+		// 送出的完整 messages → Langfuse 的 Input（之前只有 token 數，看不到實際提示）
+		actSpan.AddAttribute("langfuse.observation.input", jsonStr(compactedContext))
 		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
-		if actionResp != nil && actionResp.Usage != nil {
-			actSpan.AddAttribute("gen_ai.usage.input_tokens", actionResp.Usage.PromptTokens)
-			actSpan.AddAttribute("gen_ai.usage.output_tokens", actionResp.Usage.CompletionTokens)
+		if actionResp != nil {
+			if actionResp.Usage != nil {
+				actSpan.AddAttribute("gen_ai.usage.input_tokens", actionResp.Usage.PromptTokens)
+				actSpan.AddAttribute("gen_ai.usage.output_tokens", actionResp.Usage.CompletionTokens)
+			}
+			// 模型本輪實際輸出（文字 + tool_calls）→ Langfuse 的 Output 顯示完整內容，
+			// 不再只是 trace 樹裡那條被砍到 N 字的工具 output_preview。
+			actSpan.AddAttribute("langfuse.observation.output", jsonStr(map[string]any{
+				"content":    actionResp.Content,
+				"tool_calls": actionResp.ToolCalls,
+			}))
 		}
 		actSpan.EndSpan()
 		if err != nil {
@@ -407,4 +419,13 @@ func (s toolSemaphore) release() {
 	if s.ch != nil {
 		<-s.ch
 	}
+}
+
+// jsonStr 把任意值序列化成字串供 span 屬性用；失敗回空字串（trace 不該因序列化錯誤而中斷）。
+func jsonStr(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
