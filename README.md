@@ -33,6 +33,7 @@
 **上下文工程**
 - 🗜️ **自適應壓縮**：壓縮水位按模型真實上下文窗口設定，並用每次回傳的 `PromptTokens` 自校準。
 - 🪟 **滑動窗口 + System Prompt 組裝**：組裝身份/紀律/`AGENTS.md`/技能；支持 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`、可斷點續傳）與**漸進式技能載入**（只放索引、正文按需載入）。
+- 🧠 **可檢索長期記憶**：記憶存成離散記錄、System Prompt 只常駐索引（封頂），相關時用 `recall` 按需取正文（中文 bigram 檢索）；命中更新 LRU、超量自動歸檔（可復原非刪除）——取代「`AGENTS.md` 整檔全載」。對齊 CoALA 四型記憶的長期語意層。
 - 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原。
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
@@ -109,11 +110,12 @@ flowchart TB
     HIST[("session.history<br/>完整歷史（持久化）")]
     AGENTS["AGENTS.md 專案指南"]
     SKILLS[".claw/skills 技能"]
+    MEM[(".claw/memory<br/>長期記憶（離散記錄）")]
   end
 
   subgraph STATIC["靜態系統層（每個 Execute 只建一次）"]
     COMPOSER["PromptComposer.Build()"]
-    SYS["systemMsg：單一 system 訊息<br/>身份+紀律 ▸ Plan Mode ▸ AGENTS.md ▸ Skills 索引"]
+    SYS["systemMsg：單一 system 訊息<br/>身份+紀律 ▸ Plan Mode ▸ AGENTS.md ▸ Skills 索引 ▸ 記憶索引"]
   end
 
   subgraph DYN["動態層（每輪）"]
@@ -129,6 +131,7 @@ flowchart TB
 
   AGENTS --> COMPOSER
   SKILLS -->|漸進式：只放索引，正文按需載入| COMPOSER
+  MEM -->|索引常駐（封頂），正文按需| COMPOSER
   COMPOSER --> SYS
   HIST --> WIN
   SYS --> ASSEMBLE
@@ -140,9 +143,11 @@ flowchart TB
   CAL -.回饋.-> COMPACT
   LLM --> WB
   WB --> HIST
+  LLM -.recall 按需取正文（命中更新 LRU）.-> MEM
 ```
 
-- **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引（漸進式，只放目錄不放正文）——整個 Execute 只建一次。
+- **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引、記憶索引（皆漸進式，只放目錄不放正文）——整個 Execute 只建一次。
+- **長期記憶**（[memory.go](internal/context/memory.go)）：離散記錄存 `.claw/memory/`，索引常駐封頂、`recall` 工具按需取正文（中文 bigram）；命中更新 LRU、超量歸檔到 `.claw/memory-archive/`（可復原）。取代「`AGENTS.md` 整檔全載」。
 - **動態層**（[session.go](internal/context/session.go) `GetWorkingMemory`）：取末 20 條，剝孤兒 `tool_result`、首條補 `user` 以滿足 Anthropic 嚴格交替。
 - **三道防線**：Compactor 防總量（[75% 水位](internal/context/compactor.go)）、滑動窗口防條數、剝離/補位防協議；皆只動發出去的副本，不毀 `history`。
 - **自校準回饋**：每輪用真實 `PromptTokens` 修正 byte/token 比，估算隨 tokenizer 收斂，自動適配不同窗口的模型。
@@ -167,6 +172,7 @@ internal/
 ├── context/                 上下文工程
 │   ├── composer.go          System Prompt 組裝（身份/紀律/Plan Mode/AGENTS.md/Skills）
 │   ├── skill.go             .claw/skills 技能漸進式載入（LoadIndex 索引 / ReadSkill 正文）
+│   ├── memory.go            可檢索長期記憶（LoadIndex 索引封頂 / Recall 關鍵字檢索 / LRU + 歸檔遺忘）
 │   ├── compactor.go         自適應上下文壓縮（按真實窗口 + PromptTokens 自校準）
 │   ├── recovery.go          工具錯誤自愈（救援指南注入）
 │   ├── session.go           會話歷史 + 滑動窗口 + 成本記帳（store 非 nil 時 write-through 持久化）
