@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
@@ -26,10 +27,25 @@ func main() {
 	reviewEdges := flag.Bool("review-edges", false, "印出待審的提案邊")
 	applyEdges := flag.Bool("apply-edges", false, "提案邊過 gate 後併入 edges.jsonl")
 	embed := flag.Bool("embed", false, "為 root 內節點建向量快取(.claw/kg/embeddings.jsonl)，供 recall 語意選種子（需 COGITO_EMBED_MODEL + 端點）")
+	recall := flag.String("recall", "", "（測試用）以記憶圖檢索並印出 query 的連通子圖；有 embedding 設定則語意選種子")
+	hops := flag.Int("hops", 1, "recall 沿關係擴張的跳數")
 	model := flag.String("model", "claude-haiku-4-5", "LLM 抽取用的模型")
 	flag.Parse()
 
 	switch {
+	case *recall != "":
+		_ = godotenv.Load()
+		var emb ctxpkg.Embedder
+		if e := provider.EmbedderFromEnv(); e != nil {
+			emb = e
+		}
+		out := ctxpkg.NewMemoryLoader(*root).RecallGraph(*recall, *hops, emb)
+		if out == "" {
+			log.Printf("（記憶中沒有與 %q 相關的內容）", *recall)
+			return
+		}
+		fmt.Println(out)
+
 	case *embed:
 		_ = godotenv.Load()
 		e := provider.EmbedderFromEnv()
