@@ -31,7 +31,8 @@
 ### 3. 長期記憶
 - **決定**：對齊 CoALA 四型記憶。離散記錄（`.claw/memory/<slug>.md`）+ **索引常駐封頂 + `recall` 按需檢索**（[memory.go](internal/context/memory.go)，關鍵字評分、中文 bigram、零依賴）+ **LRU（檔案 mtime）+ 超量歸檔（可復原非刪除）**。寫入走 synth→提案→人工放行。
 - **對照**：Hermes 有三層記憶 + 跨 session 用戶模型；cogito 的記憶是**檔案式、關鍵字檢索、無 embedding**（scoped），但**可審計、可手改、git 友善**，且遺忘用歸檔（接「失控控制」——記憶操作是新的失控面）。
-- **scoped**：無向量/embedding 檢索、無 knowledge graph（介面已留，換 score/tokenize 即可升級）。記憶其實已是半個圖（記錄=節點、`[[links]]`=邊、`tags`=label）；往 KG 演進（多文件 ingest + 多跳關係推理）的分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
+- **KG（已做 Stage 1）**：記錄=節點、`[[links]]`=邊、`tags`=label；`recall` 回的是**連通子圖**（種子 + k 跳鄰域 + 它們之間的明確關係，[graph.go](internal/context/graph.go)），讓模型做 RAG 做不到的多跳關係推理。
+- **scoped**：種子選擇仍是關鍵字（無 embedding）；多文件 ingest + LLM typed 關係抽取是 Stage 2。分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
 
 ### 4. 工具系統與安全
 - **決定**：可插拔註冊表 + 環繞式中間件（[registry.go](internal/tools/registry.go)）。安全是**多層**：HITL 危險指令審批（[approval.go](internal/slackbot/approval.go)，黑名單含 bash / write 路徑逃逸 / **遠端 MCP 工具**）推回 Slack 等 `approve`；OS 級 **Docker 沙箱**（[sandbox/](internal/sandbox/)，per-session 容器、只掛 workDir、`--network none`、限 mem/cpu/pid）是軟防線之外唯一擋得住逃逸的硬隔離。
@@ -69,7 +70,7 @@
 |---|---|---|---|---|
 | 控制流硬防線 | ✅ 回合/成本/死迴圈/軟著陸 | ◐ 限制 | ◐ 限制 | ◐ |
 | 上下文壓縮 | ✅ 機械+自校準 | ✅ LLM 摘要 | ✅ | ✅ |
-| 長期記憶檢索 | ◐ 關鍵字+LRU（無 embedding） | ◐ | ◐ | ✅ 多層+RL |
+| 長期記憶檢索 | ◐ 圖子圖+關鍵字+LRU（無 embedding） | ◐ | ◐ | ✅ 多層+RL |
 | HITL + OS 沙箱 | ✅✅ Slack 審批 + Docker 隔離 | ◐ 權限提示 | ✅ 沙箱 | ◐ |
 | 多 agent | ◐ 只讀子 agent | ✅ 可寫子 agent | ◐ | ✅ |
 | 自我進化 | ◐ prompt/技能/記憶層 + gated | ✗ | ✗ | ✅✅ RL 飛輪 |

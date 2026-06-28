@@ -1,6 +1,6 @@
 # Spec：知識圖譜記憶（Knowledge-Graph Memory）
 
-> **狀態**：設計中、未實作。本文是可迭代的前瞻設計。Stage 1 待開工；Stage 2/3 有明確觸發條件才做。
+> **狀態**：**Stage 1 已實作**（`[[links]]` 建圖 + 子圖 recall，見 [internal/context/graph.go](../internal/context/graph.go)）。Stage 2（多文件 ingest + LLM 關係抽取）、Stage 3（embedding 種子 + 持久化）有明確觸發條件才做。本文是可迭代的設計。
 > 背景與取捨見 [DESIGN.md](../DESIGN.md) 的「長期記憶」維度；現有記憶實作見 [internal/context/memory.go](../internal/context/memory.go)。
 
 ## 目標

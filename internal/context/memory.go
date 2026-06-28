@@ -174,6 +174,24 @@ func (m *MemoryLoader) Prune(keep int) []string {
 	return archived
 }
 
+// RecallGraph 是 KG 檢索：種子→k 跳子圖→序列化；命中節點觸碰 mtime（LRU）。回傳空字串＝無命中。
+// 取代「平面 top-k」：回傳的是連通鄰域 + 明確關係，讓 LLM 能做多跳關係推理（RAG 做不到）。
+func (m *MemoryLoader) RecallGraph(query string, hops int) string {
+	if hops <= 0 {
+		hops = 1
+	}
+	g := m.Graph()
+	seeds := g.Seeds(query, recallSeeds)
+	if len(seeds) == 0 {
+		return ""
+	}
+	nodes, edges := g.Subgraph(seeds, hops, recallBudget)
+	for _, n := range nodes {
+		m.touch(n.Path) // stub 節點 Path="" → touch 無動作
+	}
+	return RenderSubgraph(nodes, edges)
+}
+
 // scoreRecord：tags > name > description > body 加權的關鍵字命中加總。
 func scoreRecord(r MemoryRecord, terms []string) int {
 	tagStr := strings.ToLower(strings.Join(r.Tags, " "))
