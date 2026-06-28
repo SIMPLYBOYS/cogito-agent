@@ -47,18 +47,32 @@ func (e *RelationExtractor) Extract(ctx context.Context) (int, error) {
 		return 0, nil // 不足兩節點無關係可抽
 	}
 
-	ids := map[string]bool{}
+	// norm：容錯 id 對應——LLM 常不逐字回傳 id（可能加 .md、改大小寫、只給 basename），
+	// 用正規化表把它對回正規 id；對不上的才視為幻覺丟棄。
+	norm := map[string]string{}
+	addNorm := func(key, canonical string) {
+		if k := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(key), ".md")); k != "" {
+			norm[k] = canonical
+		}
+	}
 	var b strings.Builder
 	for i, r := range recs {
 		if i >= maxExtractNodes {
 			break
 		}
-		ids[r.Name] = true
+		addNorm(r.Name, r.Name)
+		if i := strings.LastIndex(r.Name, "/"); i >= 0 {
+			addNorm(r.Name[i+1:], r.Name) // basename 也對得上
+		}
 		body := oneLine(r.Body)
-		if rn := []rune(body); len(rn) > 240 {
-			body = string(rn[:240])
+		if rn := []rune(body); len(rn) > 600 {
+			body = string(rn[:600])
 		}
 		fmt.Fprintf(&b, "- id: %s\n  摘要: %s\n  內容: %s\n", r.Name, r.Description, body)
+	}
+	resolve := func(s string) (string, bool) {
+		c, ok := norm[strings.ToLower(strings.TrimSuffix(strings.TrimSpace(s), ".md"))]
+		return c, ok
 	}
 
 	msgs := []schema.Message{
@@ -78,8 +92,10 @@ func (e *RelationExtractor) Extract(ctx context.Context) (int, error) {
 
 	var keep []ctxpkg.StoredEdge
 	for _, ed := range out.Edges {
-		if ids[ed.From] && ids[ed.To] && ed.From != ed.To { // 端點須為提供的真實節點
-			ed.Source = "llm-extract"
+		from, ok1 := resolve(ed.From)
+		to, ok2 := resolve(ed.To)
+		if ok1 && ok2 && from != to { // 端點須能對回真實節點（容錯後仍對不上＝幻覺，丟棄）
+			ed.From, ed.To, ed.Source = from, to, "llm-extract"
 			keep = append(keep, ed)
 		}
 	}
