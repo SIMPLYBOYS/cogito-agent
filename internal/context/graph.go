@@ -95,12 +95,22 @@ type StoredEdge struct {
 }
 
 func readEdgesFile(path string) []Edge {
+	stored := readStoredEdges(path)
+	out := make([]Edge, 0, len(stored))
+	for _, se := range stored {
+		out = append(out, Edge{From: se.From, To: se.To, Type: se.Type})
+	}
+	return out
+}
+
+// readStoredEdges 讀 edges jsonl 的完整 StoredEdge（含 confidence/source，供 gate 用）。
+func readStoredEdges(path string) []StoredEdge {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
-	var out []Edge
+	var out []StoredEdge
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -110,7 +120,7 @@ func readEdgesFile(path string) []Edge {
 		}
 		var se StoredEdge
 		if json.Unmarshal([]byte(line), &se) == nil && se.From != "" && se.To != "" {
-			out = append(out, Edge{From: se.From, To: se.To, Type: se.Type})
+			out = append(out, se)
 		}
 	}
 	return out
