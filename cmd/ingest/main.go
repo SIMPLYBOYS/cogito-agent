@@ -15,6 +15,7 @@ import (
 	"log"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/joho/godotenv"
@@ -29,10 +30,25 @@ func main() {
 	embed := flag.Bool("embed", false, "為 root 內節點建向量快取(.claw/kg/embeddings.jsonl)，供 recall 語意選種子（需 COGITO_EMBED_MODEL + 端點）")
 	recall := flag.String("recall", "", "（測試用）以記憶圖檢索並印出 query 的連通子圖；有 embedding 設定則語意選種子")
 	hops := flag.Int("hops", 1, "recall 沿關係擴張的跳數")
+	evalLabels := flag.String("eval", "", "（記憶檢索評測）以標註集 JSONL（{query,expected}）跑 hit@k/MRR 三模式對照")
+	k := flag.Int("k", 3, "評測 top-k")
 	model := flag.String("model", "claude-haiku-4-5", "LLM 抽取用的模型")
 	flag.Parse()
 
 	switch {
+	case *evalLabels != "":
+		_ = godotenv.Load()
+		cases, err := eval.LoadMemLabels(*evalLabels)
+		if err != nil {
+			log.Fatalf("讀標註集失敗: %v", err)
+		}
+		var emb ctxpkg.Embedder
+		if e := provider.EmbedderFromEnv(); e != nil {
+			emb = e
+		}
+		rep := eval.RunMemEval(ctxpkg.NewMemoryLoader(*root), cases, emb, *k, *hops)
+		fmt.Print(rep.Render())
+
 	case *recall != "":
 		_ = godotenv.Load()
 		var emb ctxpkg.Embedder

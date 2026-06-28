@@ -177,6 +177,9 @@ func (m *MemoryLoader) Prune(keep int) []string {
 // Records 回傳所有記憶記錄（供 evolve 的 LLM 關係抽取等外部使用）。
 func (m *MemoryLoader) Records() []MemoryRecord { return m.loadAll() }
 
+// Vectors 回傳節點向量快取（供記憶檢索評測等外部使用）；無快取則為空 map。
+func (m *MemoryLoader) Vectors() map[string][]float32 { return readVectors(EmbedCachePath(m.workDir)) }
+
 // RecallGraph 是 KG 檢索：種子→k 跳子圖→序列化；命中節點觸碰 mtime（LRU）。回傳空字串＝無命中。
 // 取代「平面 top-k」：回傳的是連通鄰域 + 明確關係，讓 LLM 能做多跳關係推理（RAG 做不到）。
 // emb 非 nil 且有向量快取時用 embedding 語意選種子（混合）；否則退回關鍵字（emb=nil 為預設、零依賴）。
