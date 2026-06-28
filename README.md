@@ -163,6 +163,7 @@ cmd/
 ├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-dry-run）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 ├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
+├── ingest/               把 markdown 目錄結構式 ingest 成知識圖譜節點+邊（-src/-root，確定性不花錢）
 └── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
 internal/
 ├── engine/                  Agent 核心引擎

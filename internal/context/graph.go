@@ -1,7 +1,11 @@
 package context
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -59,17 +63,57 @@ func (m *MemoryLoader) Graph() *Graph {
 	for _, r := range recs {
 		for _, e := range parseLinks(r.Body) {
 			e.From = r.Name
-			if e.To == e.From {
-				continue // 略過自環
-			}
-			g.out[e.From] = append(g.out[e.From], e)
-			g.in[e.To] = append(g.in[e.To], e)
-			if _, ok := g.nodes[e.To]; !ok {
-				g.nodes[e.To] = MemoryRecord{Name: e.To, Description: "（尚未撰寫，被引用）", Tags: []string{"dangling"}}
-			}
+			g.addEdge(e)
 		}
 	}
+	// 合併外部/typed 邊（.claw/kg/edges.jsonl）：md ingest 的結構邊與 LLM 抽取的 typed 邊都存這裡。
+	for _, e := range readEdgesFile(filepath.Join(m.workDir, ".claw", "kg", "edges.jsonl")) {
+		g.addEdge(e)
+	}
 	return g
+}
+
+// addEdge 加一條邊到鄰接表；自環略過、指向不存在節點則建 dangling stub。
+func (g *Graph) addEdge(e Edge) {
+	if e.From == "" || e.To == "" || e.From == e.To {
+		return
+	}
+	g.out[e.From] = append(g.out[e.From], e)
+	g.in[e.To] = append(g.in[e.To], e)
+	if _, ok := g.nodes[e.To]; !ok {
+		g.nodes[e.To] = MemoryRecord{Name: e.To, Description: "（尚未撰寫，被引用）", Tags: []string{"dangling"}}
+	}
+}
+
+// StoredEdge 是 edges.jsonl 的一行：帶 type/confidence/source（供 ingest 與 gated LLM 抽取共用、可審計）。
+type StoredEdge struct {
+	From       string  `json:"from"`
+	To         string  `json:"to"`
+	Type       string  `json:"type,omitempty"`
+	Confidence float64 `json:"confidence,omitempty"`
+	Source     string  `json:"source,omitempty"`
+}
+
+func readEdgesFile(path string) []Edge {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var out []Edge
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var se StoredEdge
+		if json.Unmarshal([]byte(line), &se) == nil && se.From != "" && se.To != "" {
+			out = append(out, Edge{From: se.From, To: se.To, Type: se.Type})
+		}
+	}
+	return out
 }
 
 // Seeds 用關鍵字評分挑種子節點（排除 stub）。複用 memory.go 的 tokenize/scoreRecord。
