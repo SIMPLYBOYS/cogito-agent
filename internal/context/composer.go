@@ -9,16 +9,18 @@ import (
 )
 
 type PromptComposer struct {
-	workDir     string
-	planMode    bool // Plan Mode 開關（狀態外部化強制規範）
-	skillLoader *SkillLoader
+	workDir      string
+	planMode     bool // Plan Mode 開關（狀態外部化強制規範）
+	skillLoader  *SkillLoader
+	memoryLoader *MemoryLoader
 }
 
 func NewPromptComposer(workDir string, planMode bool) *PromptComposer {
 	return &PromptComposer{
-		workDir:     workDir,
-		planMode:    planMode,
-		skillLoader: NewSkillLoader(workDir),
+		workDir:      workDir,
+		planMode:     planMode,
+		skillLoader:  NewSkillLoader(workDir),
+		memoryLoader: NewMemoryLoader(workDir),
 	}
 }
 
@@ -76,6 +78,11 @@ func (c *PromptComposer) Build() schema.Message {
 	skillsContent := c.skillLoader.LoadIndex()
 	if skillsContent != "" {
 		promptBuilder.WriteString(skillsContent)
+	}
+
+	memoryContent := c.memoryLoader.LoadIndex()
+	if memoryContent != "" {
+		promptBuilder.WriteString(memoryContent)
 	}
 
 	return schema.Message{

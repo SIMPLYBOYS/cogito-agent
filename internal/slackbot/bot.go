@@ -94,7 +94,8 @@ func (b *SlackBot) SetPostRunHook(h PostRunHook) { b.postRun = h }
 func (b *SlackBot) SetPostFailureHook(h PostFailureHook) { b.postFailure = h }
 
 // tryMemoryCommand 攔截「apply memory / reject memory」口令——自我進化的【閘】在 Slack 內一鍵放行/丟棄：
-// apply 把提案記憶併入 AGENTS.md（生效），reject 丟棄。命中即消費（return true）。閘仍在：人點頭才套用。
+// apply 把提案記憶放行為可檢索的長期記憶記錄（.claw/memory/，由 recall 按需取），reject 丟棄。
+// 命中即消費（return true）。閘仍在：人點頭才套用。
 func (b *SlackBot) tryMemoryCommand(channelID, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "apply memory", "approve memory":
@@ -105,12 +106,12 @@ func (b *SlackBot) tryMemoryCommand(channelID, text string) bool {
 		case applied == "":
 			b.SendMessage(channelID, "ℹ️ 目前沒有提案記憶。")
 		default:
-			b.SendMessage(channelID, "✅ 已把提案記憶併入 AGENTS.md，下次任務起生效。")
+			b.SendMessage(channelID, "✅ 已把提案記憶放行為可檢索的長期記憶（recall 可取），下次任務起生效。")
 		}
 		return true
 	case "reject memory", "discard memory":
 		if had, _ := evolve.DiscardProposedMemory(b.workDir); had {
-			b.SendMessage(channelID, "🗑️ 已丟棄提案記憶（未併入 AGENTS.md）。")
+			b.SendMessage(channelID, "🗑️ 已丟棄提案記憶（未放行）。")
 		} else {
 			b.SendMessage(channelID, "ℹ️ 目前沒有提案記憶。")
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,28 +153,69 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 	return nil
 }
 
-// ApplyProposedMemory 把提案記憶併入生效的 AGENTS.md（人工 review 後手動觸發），併入後清掉提案檔。
-// 回傳併入的內容（空字串表示當前沒有提案）。這就是「閘」的放行端：人點頭才生效。
+// ApplyProposedMemory 把提案記憶放行為【離散的可檢索記錄】（.claw/memory/<slug>.md），而非
+// append 進 AGENTS.md——後者會讓常駐 System Prompt 無限膨脹。每條學習落成一筆記錄，由 recall 工具
+// 按需檢索。人工 review 後手動觸發；放行後清掉提案檔。回傳放行的內容（空字串＝當前沒有提案）。
 func ApplyProposedMemory(root string) (string, error) {
 	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
 	proposed := strings.TrimSpace(stripComments(readFileIgnore(proposedPath)))
 	if proposed == "" {
 		return "", nil
 	}
-	agentsPath := filepath.Join(root, "AGENTS.md")
-	f, err := os.OpenFile(agentsPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return "", fmt.Errorf("開啟 AGENTS.md 失敗: %w", err)
+	memDir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		return "", fmt.Errorf("建立記憶目錄失敗: %w", err)
 	}
-	if _, err := fmt.Fprintf(f, "\n%s\n", proposed); err != nil {
-		f.Close()
-		return "", fmt.Errorf("併入 AGENTS.md 失敗: %w", err)
+	kind, task := "記憶", ""
+	for _, line := range strings.Split(proposed, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "## "):
+			kind, task = parseProposedHeader(line)
+		case strings.HasPrefix(line, "- "):
+			learning := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+			if learning == "" {
+				continue
+			}
+			if err := writeMemoryRecord(memDir, kind, task, learning); err != nil {
+				return "", err
+			}
+		}
 	}
-	f.Close()
 	if err := os.Remove(proposedPath); err != nil {
 		return proposed, fmt.Errorf("清除提案檔失敗: %w", err)
 	}
 	return proposed, nil
+}
+
+// writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。
+func writeMemoryRecord(memDir, kind, task, learning string) error {
+	learning = oneLine(learning)
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(learning))
+	slug := fmt.Sprintf("mem-%08x", h.Sum32())
+
+	title := learning // name 取短標題，過長截前 24 字（rune 安全）
+	if r := []rune(learning); len(r) > 24 {
+		title = string(r[:24])
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\ntags: [%s]\n---\n%s\n\n（來源：任務「%s」）\n",
+		title, learning, kind, learning, oneLine(task))
+	return os.WriteFile(filepath.Join(memDir, slug+".md"), []byte(body), 0o644)
+}
+
+// parseProposedHeader 從提案區塊標題「## [慣例] 來自任務「X」（ts）」抽出分類與任務，作記錄的 tag/溯源。
+func parseProposedHeader(line string) (kind, task string) {
+	kind, task = "記憶", ""
+	if i, j := strings.Index(line, "["), strings.Index(line, "]"); i >= 0 && j > i {
+		kind = line[i+1 : j]
+	}
+	if i := strings.Index(line, "「"); i >= 0 {
+		if j := strings.Index(line, "」"); j > i {
+			task = line[i+len("「") : j]
+		}
+	}
+	return kind, task
 }
 
 // DiscardProposedMemory 丟棄提案記憶。had 表示原本是否有提案。

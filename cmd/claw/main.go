@@ -128,6 +128,7 @@ func main() {
 		registry.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
 		registry.Register(tools.NewEditFileTool(sess.WorkDir))
 		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
+		registry.Register(tools.NewRecallTool(rootDir))    // 長期記憶按需檢索：與記憶索引同源（根 workspace）
 		if mcpGateway != nil {                             // 外部 MCP 工具經 gateway 漸進式暴露（2 個工具 + 輕量目錄）
 			for _, gt := range mcpGateway.Tools() {
 				registry.Register(gt)

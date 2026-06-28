@@ -86,22 +86,30 @@ func TestApplyAndDiscardProposedMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// apply → 併入 AGENTS.md、清掉提案檔
+	// apply → 落成 .claw/memory 的可檢索記錄、清掉提案檔（不再 append 進 AGENTS.md）
 	applied, err := ApplyProposedMemory(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(applied, "pnpm") {
-		t.Errorf("應回傳併入內容，got %q", applied)
+		t.Errorf("應回傳放行內容，got %q", applied)
 	}
-	if !strings.Contains(readFileIgnore(filepath.Join(root, "AGENTS.md")), "pnpm") {
-		t.Error("AGENTS.md 應含併入的內容")
+	memDir := filepath.Join(root, ".claw", "memory")
+	entries, _ := os.ReadDir(memDir)
+	foundPnpm := false
+	for _, e := range entries {
+		if strings.Contains(readFileIgnore(filepath.Join(memDir, e.Name())), "pnpm") {
+			foundPnpm = true
+		}
 	}
-	if strings.Contains(readFileIgnore(filepath.Join(root, "AGENTS.md")), "<!--") {
-		t.Error("併入後不該帶提案檔的警告註解")
+	if !foundPnpm {
+		t.Error(".claw/memory 應有含 pnpm 的記錄")
+	}
+	if strings.Contains(readFileIgnore(filepath.Join(root, "AGENTS.md")), "pnpm") {
+		t.Error("放行後不應再 append 進 AGENTS.md（改走離散記錄）")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
-		t.Error("併入後提案檔應已清除")
+		t.Error("放行後提案檔應已清除")
 	}
 
 	// 沒提案時 apply → 空、不報錯
