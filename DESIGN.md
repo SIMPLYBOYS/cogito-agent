@@ -34,7 +34,8 @@
 - **KG（已做 Stage 1）**：記錄=節點、`[[links]]`=邊、`tags`=label；`recall` 回的是**連通子圖**（種子 + k 跳鄰域 + 它們之間的明確關係，[graph.go](internal/context/graph.go)），讓模型做 RAG 做不到的多跳關係推理。
 - **多文件 ingest（Stage 2a 已做）**：`cmd/ingest` 把 md 目錄結構式 ingest 成節點 + `edges.jsonl`（[ingest.go](internal/context/ingest.go)，確定性、不花錢），ingested 文件即進同一張圖供 recall 跨檔多跳。
 - **typed 關係抽取（Stage 2b 已做）**：LLM 從節點文字抽 typed 關係（depends-on/part-of…，[evolve/kg_extract.go](internal/evolve/kg_extract.go)）→ 提案 → **gate**（信心門檻/幻覺端點丟棄/去重/每節點封頂，[kg_gate.go](internal/context/kg_gate.go)）→ 併入 `edges.jsonl`。完全走 propose→gate→apply，與自我進化同一安全鐵律——這是 KG 勝 RAG 的來源，且不繞過控制。
-- **scoped**：種子選擇仍是關鍵字（無 embedding，Stage 3）。分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
+- **混合選種子（Stage 3a 已做，opt-in）**：設了 `COGITO_EMBED_MODEL`（OpenAI 相容 `/embeddings`，雲端或本地）時，`recall` 用 embedding 語意選種子（[embed.go](internal/context/embed.go)，暴力 cosine + sidecar 向量檔），未配置則零依賴退回關鍵字。Anthropic 無 embeddings 端點，故語意檢索一律經 OpenAI 相容端點——與多 Provider DNA 一致。
+- **scoped**：持久化 / ANN 索引（Stage 3b）待巨量才做。分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
 
 ### 4. 工具系統與安全
 - **決定**：可插拔註冊表 + 環繞式中間件（[registry.go](internal/tools/registry.go)）。安全是**多層**：HITL 危險指令審批（[approval.go](internal/slackbot/approval.go)，黑名單含 bash / write 路徑逃逸 / **遠端 MCP 工具**）推回 Slack 等 `approve`；OS 級 **Docker 沙箱**（[sandbox/](internal/sandbox/)，per-session 容器、只掛 workDir、`--network none`、限 mem/cpu/pid）是軟防線之外唯一擋得住逃逸的硬隔離。
@@ -72,7 +73,7 @@
 |---|---|---|---|---|
 | 控制流硬防線 | ✅ 回合/成本/死迴圈/軟著陸 | ◐ 限制 | ◐ 限制 | ◐ |
 | 上下文壓縮 | ✅ 機械+自校準 | ✅ LLM 摘要 | ✅ | ✅ |
-| 長期記憶檢索 | ◐ 圖子圖+關鍵字+LRU（無 embedding） | ◐ | ◐ | ✅ 多層+RL |
+| 長期記憶檢索 | ◐ 圖子圖+混合(關鍵字/embedding)+LRU | ◐ | ◐ | ✅ 多層+RL |
 | HITL + OS 沙箱 | ✅✅ Slack 審批 + Docker 隔離 | ◐ 權限提示 | ✅ 沙箱 | ◐ |
 | 多 agent | ◐ 只讀子 agent | ✅ 可寫子 agent | ◐ | ✅ |
 | 自我進化 | ◐ prompt/技能/記憶層 + gated | ✗ | ✗ | ✅✅ RL 飛輪 |

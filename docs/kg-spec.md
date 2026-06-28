@@ -1,6 +1,6 @@
 # Spec：知識圖譜記憶（Knowledge-Graph Memory）
 
-> **狀態**：**Stage 1 + Stage 2 已實作** —— Stage 1（`[[links]]` 建圖 + 子圖 recall，[graph.go](../internal/context/graph.go)）；Stage 2a（多文件 md **結構式 ingest** → 節點 + `edges.jsonl`，[ingest.go](../internal/context/ingest.go)）；Stage 2b（**gated LLM typed 關係抽取**：[evolve/kg_extract.go](../internal/evolve/kg_extract.go) 抽 → [context/kg_gate.go](../internal/context/kg_gate.go) 把關 → 併入，入口 `cmd/ingest -llm / -review-edges / -apply-edges`）。**Stage 3**（embedding 種子 + 持久化）待做。本文是可迭代的設計。
+> **狀態**：**Stage 1 + Stage 2 已實作** —— Stage 1（`[[links]]` 建圖 + 子圖 recall，[graph.go](../internal/context/graph.go)）；Stage 2a（多文件 md **結構式 ingest** → 節點 + `edges.jsonl`，[ingest.go](../internal/context/ingest.go)）；Stage 2b（**gated LLM typed 關係抽取**：[evolve/kg_extract.go](../internal/evolve/kg_extract.go) 抽 → [context/kg_gate.go](../internal/context/kg_gate.go) 把關 → 併入，入口 `cmd/ingest -llm / -review-edges / -apply-edges`）；Stage 3a（**embedding 混合選種子**，opt-in：[embed.go](../internal/context/embed.go) + [provider/embedding.go](../internal/provider/embedding.go)，`cmd/ingest -embed` 建向量快取，未配置則退回關鍵字）。**Stage 3b**（持久化 / ANN 索引）待做——巨量才需，觸發未到。本文是可迭代的設計。
 > 背景與取捨見 [DESIGN.md](../DESIGN.md) 的「長期記憶」維度；現有記憶實作見 [internal/context/memory.go](../internal/context/memory.go)。
 
 ## 目標

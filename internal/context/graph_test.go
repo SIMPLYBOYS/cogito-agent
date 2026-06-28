@@ -95,14 +95,14 @@ func TestGraph_SubgraphBudgetCap(t *testing.T) {
 }
 
 func TestRecallGraph_RendersSubgraphWithRelations(t *testing.T) {
-	out := setupGraph(t).RecallGraph("widgets", 1)
+	out := setupGraph(t).RecallGraph("widgets", 1, nil)
 	if !strings.Contains(out, "## alpha") || !strings.Contains(out, "## gamma") {
 		t.Errorf("應渲染子圖節點:\n%s", out)
 	}
 	if !strings.Contains(out, "### 關係") || !strings.Contains(out, "alpha → beta") {
 		t.Errorf("應渲染關係段:\n%s", out)
 	}
-	if strings.TrimSpace(setupGraph(t).RecallGraph("完全無關鯨魚", 1)) != "" {
+	if strings.TrimSpace(setupGraph(t).RecallGraph("完全無關鯨魚", 1, nil)) != "" {
 		t.Error("無命中應回空字串")
 	}
 }

@@ -179,12 +179,23 @@ func (m *MemoryLoader) Records() []MemoryRecord { return m.loadAll() }
 
 // RecallGraph 是 KG 檢索：種子→k 跳子圖→序列化；命中節點觸碰 mtime（LRU）。回傳空字串＝無命中。
 // 取代「平面 top-k」：回傳的是連通鄰域 + 明確關係，讓 LLM 能做多跳關係推理（RAG 做不到）。
-func (m *MemoryLoader) RecallGraph(query string, hops int) string {
+// emb 非 nil 且有向量快取時用 embedding 語意選種子（混合）；否則退回關鍵字（emb=nil 為預設、零依賴）。
+func (m *MemoryLoader) RecallGraph(query string, hops int, emb Embedder) string {
 	if hops <= 0 {
 		hops = 1
 	}
 	g := m.Graph()
-	seeds := g.Seeds(query, recallSeeds)
+	var seeds []string
+	if emb != nil {
+		if cache := readVectors(EmbedCachePath(m.workDir)); len(cache) > 0 {
+			if qv, err := emb.EmbedQuery(query); err == nil {
+				seeds = g.SeedsEmbed(qv, cache, recallSeeds)
+			}
+		}
+	}
+	if len(seeds) == 0 {
+		seeds = g.Seeds(query, recallSeeds) // 退回關鍵字（embedding 未配置/失敗/快取缺）
+	}
 	if len(seeds) == 0 {
 		return ""
 	}

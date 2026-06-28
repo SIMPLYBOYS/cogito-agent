@@ -25,10 +25,37 @@ func main() {
 	llm := flag.Bool("llm", false, "對 root 內記憶節點跑 LLM typed 關係抽取 → 寫提案邊（需 ANTHROPIC_API_KEY）")
 	reviewEdges := flag.Bool("review-edges", false, "印出待審的提案邊")
 	applyEdges := flag.Bool("apply-edges", false, "提案邊過 gate 後併入 edges.jsonl")
+	embed := flag.Bool("embed", false, "為 root 內節點建向量快取(.claw/kg/embeddings.jsonl)，供 recall 語意選種子（需 COGITO_EMBED_MODEL + 端點）")
 	model := flag.String("model", "claude-haiku-4-5", "LLM 抽取用的模型")
 	flag.Parse()
 
 	switch {
+	case *embed:
+		_ = godotenv.Load()
+		e := provider.EmbedderFromEnv()
+		if e == nil {
+			log.Fatal("請設 COGITO_EMBED_MODEL（+ COGITO_EMBED_BASE_URL/OPENAI_BASE_URL 與 API key）以啟用 embedding")
+		}
+		recs := ctxpkg.NewMemoryLoader(*root).Records()
+		texts := make([]string, len(recs))
+		for i, r := range recs {
+			texts[i] = r.Name + "\n" + r.Description + "\n" + r.Body
+		}
+		vecs, err := e.Embed(texts)
+		if err != nil {
+			log.Fatalf("建立向量失敗: %v", err)
+		}
+		cache := make(map[string][]float32, len(recs))
+		for i, r := range recs {
+			if i < len(vecs) {
+				cache[r.Name] = vecs[i]
+			}
+		}
+		if err := ctxpkg.WriteVectors(ctxpkg.EmbedCachePath(*root), cache); err != nil {
+			log.Fatalf("寫入向量快取失敗: %v", err)
+		}
+		log.Printf("✅ 已為 %d 個節點建向量快取 → %s（recall 將改用語意選種子）", len(cache), ctxpkg.EmbedCachePath(*root))
+
 	case *reviewEdges:
 		edges := ctxpkg.ReadProposedEdges(*root)
 		if len(edges) == 0 {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -54,7 +55,12 @@ func (t *RecallTool) Execute(ctx context.Context, args json.RawMessage) (string,
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
-	out := t.loader.RecallGraph(in.Query, in.Hops)
+	// embedding 未配置（COGITO_EMBED_MODEL 未設）時 emb 為 nil → recall 退回關鍵字種子。
+	var emb ctxpkg.Embedder
+	if e := provider.EmbedderFromEnv(); e != nil {
+		emb = e
+	}
+	out := t.loader.RecallGraph(in.Query, in.Hops, emb)
 	if out == "" {
 		// 找不到不是錯誤——回觀察讓模型據此繼續（error-as-observation）。
 		return fmt.Sprintf("（長期記憶中沒有與 %q 相關的內容）", in.Query), nil
