@@ -29,10 +29,12 @@ func main() {
 	swebench := flag.String("swebench", "", "SWE-bench 資料檔(JSONL/JSON)路徑；設了就改跑 SWE-bench 實例而非內建用例")
 	limit := flag.Int("limit", 0, "只取前 N 個 SWE-bench 實例（0=全部）")
 	sweEnvSetup := flag.String("swe-env-setup", "", "每個 SWE-bench 實例的環境安裝 bash（各 repo 不同；正式跑常用官方 Docker 映像，依賴已備時可留空）")
+	sweRepoPrefix := flag.String("swe-repo-prefix", "", "clone 來源前綴，覆蓋預設 https://github.com/（可指向本地鏡像快取或本地 repo 加速/離線）")
+	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	flag.Parse()
 
-	testcases, err := loadTestCases(*swebench, *sweEnvSetup, *limit)
+	testcases, err := loadTestCases(*swebench, *sweEnvSetup, *sweRepoPrefix, *sweTestRunner, *limit)
 	if err != nil {
 		log.Fatalf("載入測試用例失敗: %v", err)
 	}
@@ -73,7 +75,7 @@ func main() {
 }
 
 // loadTestCases 回傳要跑的用例：未指定 -swebench 時用內建煙霧用例；指定時載入 SWE-bench 實例並轉換。
-func loadTestCases(swebenchPath, envSetup string, limit int) ([]eval.TestCase, error) {
+func loadTestCases(swebenchPath, envSetup, repoPrefix, testRunner string, limit int) ([]eval.TestCase, error) {
 	if swebenchPath == "" {
 		return builtinTestCases(), nil
 	}
@@ -81,7 +83,7 @@ func loadTestCases(swebenchPath, envSetup string, limit int) ([]eval.TestCase, e
 	if err != nil {
 		return nil, err
 	}
-	cases := eval.SWEToTestCases(instances, eval.SWEOptions{EnvSetup: envSetup}, limit)
+	cases := eval.SWEToTestCases(instances, eval.SWEOptions{EnvSetup: envSetup, RepoURLPrefix: repoPrefix, TestRunner: testRunner}, limit)
 	log.Printf("[bench] 已從 %s 載入 %d 個 SWE-bench 實例（取 %d 個）", swebenchPath, len(instances), len(cases))
 	return cases, nil
 }
