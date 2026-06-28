@@ -158,7 +158,7 @@ flowchart TB
 cmd/
 ├── claw/                 Slack 服務端入口（生產用）：裝配 Provider/Registry/Engine/SlackBot + OTel，啟動 HTTP
 ├── claw-cli/             通用命令行入口（-prompt / -dir / -session / -plan）
-├── bench/                自動化評測 runner（-out 輸出 JSON 報告、-min-pass-rate CI 門檻）
+├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-dry-run）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 ├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
 └── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
@@ -197,7 +197,7 @@ internal/
 ├── observability/           可觀測性
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
 │   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
-├── eval/                    評測框架（benchmark）
+├── eval/                    評測框架（benchmark）：三段式 TestCase / RunSuite / Reflexion / swebench.go（SWE-bench 接入）
 ├── evolve/                  自我進化：SkillSynthesizer 技能自生成（寫提案技能、不自動啟用）
 └── schema/                 消息與工具的通用數據結構
 ```
@@ -328,6 +328,26 @@ go run ./cmd/bench -tune -out ./bench-reports
 # 2) 視覺化：讀報告目錄、開儀表板（成功率 / 逐用例回合·試錯·成本·耗時 / 歷次趨勢）
 go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
 ```
+
+### SWE-bench（公認 agentic coding benchmark）
+
+同一套評測框架可直接跑 [SWE-bench](https://www.swebench.com/)：每個實例是一個真實 GitHub issue → 修補。loader 把實例映射到既有三段式 `TestCase`，**評測方法論對齊官方、且防作弊**：
+
+| 階段 | 對應 | 防作弊關鍵 |
+|---|---|---|
+| **Setup** | `clone` 到 `base_commit`，**不含** `test_patch` | agent 解題時看不到驗證測試 |
+| **Task** | 只給 `problem_statement`（issue） | 黃金 `patch` / 測試**不進** prompt，無從照抄 |
+| **Validate** | **跑完才** `git apply test_patch` → 跑 `FAIL_TO_PASS`(+`PASS_TO_PASS`) | 測試在 agent 之後才套，改不到 |
+
+```bash
+# 離線 dry-run：印出每個實例的 Setup/Task/Validate 計畫——不呼叫 LLM、不 clone、不花錢
+go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -dry-run
+
+# 真跑（需 ANTHROPIC_API_KEY；會 clone repo + 跑測試，逐題計成本）
+go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
+```
+
+> 各 repo 的 Python 環境差異大，正式跑建議在官方 SWE-bench Docker 映像內執行（依賴已備）；`-swe-env-setup '<bash>'` 可覆蓋每個實例的環境安裝步驟。agent 只用 `read_file`/`write_file`/`edit_file`/`bash` 解題（無 SWE-bench 專用工具）。
 
 ### Loop Engineering（goal 循環 + 心跳）
 
