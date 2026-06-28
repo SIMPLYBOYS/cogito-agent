@@ -48,7 +48,8 @@
 - **scoped（已知缺口）**：無並行**寫**子 agent / git worktree 隔離——並行修改會衝突，目前不支援。
 
 ### 6. 自我進化
-- **決定**：四件套（[evolve/](internal/evolve/)）——技能自生成、AGENTS.md 記憶自更新、失敗 Reflexion、參數自調。**全部走安全閘**：只寫暫存提案（`skills-proposed/` / `AGENTS.proposed.md` / `config.proposed.json`）→ 確定性把關（結構 + 危險指令/憑證掃描）或人工 review → 才生效。技能對齊 [agentskills.io](https://agentskills.io) 開放標準。
+- **決定**：四件套（[evolve/](internal/evolve/)）——技能自生成、AGENTS.md 記憶自更新、失敗 Reflexion、參數自調。**全部走安全閘**：只寫暫存提案（`skills-proposed/` / `AGENTS.proposed.md` / `config.proposed.json` / `kg/edges.proposed.jsonl`）→ 確定性把關（結構 + 危險指令/憑證掃描）或人工 review → 才生效。技能對齊 [agentskills.io](https://agentskills.io) 開放標準。
+- **兩種觸發（harness 兜底 + agent 自主）**：任務結束時 **post-task hook 由 harness 保證觸發**，反思出技能/記憶/KG 關係（可靠，不指望 agent 記得）；同時暴露 `consolidate` 工具讓 **agent 判斷有可複用價值時自己提前沉澱**（自主）。兩者產物同樣 gated。這就是「框架強制觸發 + 模型判斷內容」落在自我進化上的體現。
 - **對照**：Hermes 走到 **RL 微調（改模型權重）** 的飛輪；cogito 只在 **prompt/技能/記憶層**進化、**永不改權重**、**永遠 gated**。誠實說：進化較淺，但**安全、可審計、可回退**。
 - **教訓（真實踩過）**：曾把一條過度擬合的爛慣例 `apply` 進 live AGENTS.md，污染了後續所有任務——閘只跟「人有沒有認真 review」一樣可靠。這強化了「提案而非自動生效」的設計。
 

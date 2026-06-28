@@ -96,6 +96,9 @@ func main() {
 	registry.Register(tools.NewEditFileTool(workDir))
 	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
 	registry.Register(tools.NewRecallTool(workDir))    // 長期記憶按需檢索（CLI 工作區即記憶來源）
+	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
+		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, sess)) // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
+	}
 
 	// 背景任務工具：長命命令（dev server / 長建置）不受 bash 30s 逾時限制。退出時統一收掉。
 	taskMgr := tools.NewTaskManager(executor, workDir)
