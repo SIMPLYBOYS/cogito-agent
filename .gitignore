@@ -74,3 +74,6 @@ Thumbs.db
 /.claude/
 /agent/
 skills-lock.json
+
+# Playwright / demo 截圖殘留（非源碼）
+/preview.png
