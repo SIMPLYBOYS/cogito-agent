@@ -90,14 +90,30 @@ func (e *RelationExtractor) Extract(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("關係抽取輸出非合法 JSON（%q）: %w", resp.Content, err)
 	}
 
+	// 去重基準：已生效的邊 + 已提案的邊——讓 post-task 反覆抽取不會重提同一條（idempotent）。
+	key := func(f, typ, t string) string { return f + "\x00" + typ + "\x00" + t }
+	seen := map[string]bool{}
+	for _, x := range ctxpkg.ExistingEdges(e.root) {
+		seen[key(x.From, x.Type, x.To)] = true
+	}
+	for _, x := range ctxpkg.ReadProposedEdges(e.root) {
+		seen[key(x.From, x.Type, x.To)] = true
+	}
+
 	var keep []ctxpkg.StoredEdge
 	for _, ed := range out.Edges {
 		from, ok1 := resolve(ed.From)
 		to, ok2 := resolve(ed.To)
-		if ok1 && ok2 && from != to { // 端點須能對回真實節點（容錯後仍對不上＝幻覺，丟棄）
-			ed.From, ed.To, ed.Source = from, to, "llm-extract"
-			keep = append(keep, ed)
+		if !ok1 || !ok2 || from == to { // 端點須能對回真實節點（容錯後仍對不上＝幻覺，丟棄）
+			continue
 		}
+		k := key(from, ed.Type, to)
+		if seen[k] {
+			continue // 已存在/已提案，不重複
+		}
+		seen[k] = true
+		ed.From, ed.To, ed.Source = from, to, "llm-extract"
+		keep = append(keep, ed)
 	}
 	if len(keep) == 0 {
 		return 0, nil

@@ -156,6 +156,15 @@ func main() {
 		}
 	}
 
+	// KG 關係抽取（opt-in）：任務後從記憶節點抽 typed 關係 → 提案邊（需 apply-edges 過 gate；每次任務多一次 LLM 呼叫）。
+	if os.Getenv("COGITO_KG_SYNTH") == "1" {
+		if n, err := evolve.NewRelationExtractor(trackedProvider, workDir).Extract(context.Background()); err != nil {
+			log.Printf("[evolve] KG 關係抽取失敗（不影響任務結果）: %v", err)
+		} else if n > 0 {
+			log.Printf("[evolve] 🔗 新增 %d 條提案關係到 .claw/kg/edges.proposed.jsonl（需 apply-edges 過 gate）", n)
+		}
+	}
+
 	flush() // 顯式 flush（log.Fatal 走 os.Exit 會略過 defer；defer 仍涵蓋正常返回，once 去重）
 
 	if runErr != nil {

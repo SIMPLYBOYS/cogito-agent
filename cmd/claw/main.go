@@ -183,7 +183,12 @@ func main() {
 		memSynth = evolve.NewMemorySynthesizer(llmProvider, rootDir)
 		log.Printf("[evolve] 記憶自更新已啟用（寫入 .claw/%s，需人工併入 AGENTS.md）", evolve.ProposedMemoryFileName)
 	}
-	if skillSynth != nil || memSynth != nil {
+	var kgExtract *evolve.RelationExtractor
+	if os.Getenv("COGITO_KG_SYNTH") == "1" {
+		kgExtract = evolve.NewRelationExtractor(llmProvider, rootDir)
+		log.Printf("[evolve] KG 關係抽取已啟用（任務後抽 typed 關係 → .claw/kg/edges.proposed.jsonl，需 apply-edges 過 gate；每次任務多一次 LLM 呼叫）")
+	}
+	if skillSynth != nil || memSynth != nil || kgExtract != nil {
 		bot.SetPostRunHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt string) {
 			history := session.GetWorkingMemory(0)
 			if skillSynth != nil {
@@ -200,6 +205,14 @@ func main() {
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
 					bot.SendMessage(session.ID, memoryProposalMsg("慣例", added))
+				}
+			}
+			if kgExtract != nil {
+				if n, err := kgExtract.Extract(ctx); err != nil {
+					log.Printf("[evolve] KG 關係抽取失敗（不影響任務）: %v", err)
+				} else if n > 0 {
+					log.Printf("[evolve] 🔗 新增 %d 條提案關係", n)
+					bot.SendMessage(session.ID, fmt.Sprintf("🔗 我從記憶中抽出 *%d 條提案關係*，存到暫存區，需 review（`apply-edges` 過 gate 才生效，不會自動套用）。", n))
 				}
 			}
 		})

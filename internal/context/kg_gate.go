@@ -20,6 +20,9 @@ func proposedEdgesPath(r string) string { return filepath.Join(kgDir(r), Propose
 // ReadProposedEdges 讀提案邊（供 review）。
 func ReadProposedEdges(root string) []StoredEdge { return readStoredEdges(proposedEdgesPath(root)) }
 
+// ExistingEdges 讀生效中的邊（edges.jsonl），供外部（如 LLM 抽取去重）參考。
+func ExistingEdges(root string) []StoredEdge { return readStoredEdges(edgesPath(root)) }
+
 // ApplyProposedEdges 把提案的 typed 關係邊過 gate 後併入生效的 edges.jsonl：
 //   - 丟棄信心 < 門檻、或端點不是真實節點（LLM 幻覺保護）、或重複、或超出每節點出邊上限的邊
 //   - 倖存者寫進 edges.jsonl（appendEdges 再去重）；清掉提案檔
