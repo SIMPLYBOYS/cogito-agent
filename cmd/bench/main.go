@@ -26,28 +26,25 @@ func main() {
 	minPassRate := flag.Float64("min-pass-rate", 0, "通過率門檻 0..1；低於則以非 0 退出碼結束（CI 用，0＝不檢查）")
 	reflexion := flag.Int("reflexion", 1, "Reflexion 重試上限：>1 時用例失敗會反思出教訓、帶教訓重試（每次重試多花 API）")
 	tune := flag.Bool("tune", false, "依跑分結果產出調參提案（寫入 workspace/.claw/config.proposed.json，不自動套用）")
+	swebench := flag.String("swebench", "", "SWE-bench 資料檔(JSONL/JSON)路徑；設了就改跑 SWE-bench 實例而非內建用例")
+	limit := flag.Int("limit", 0, "只取前 N 個 SWE-bench 實例（0=全部）")
+	sweEnvSetup := flag.String("swe-env-setup", "", "每個 SWE-bench 實例的環境安裝 bash（各 repo 不同；正式跑常用官方 Docker 映像，依賴已備時可留空）")
+	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	flag.Parse()
+
+	testcases, err := loadTestCases(*swebench, *sweEnvSetup, *limit)
+	if err != nil {
+		log.Fatalf("載入測試用例失敗: %v", err)
+	}
+
+	// dry-run：離線檢視 harness 接線（不需 API key、不 clone、不花錢）。
+	if *dryRun {
+		printPlan(testcases)
+		return
+	}
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
 		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY 進行跑分測試")
-	}
-
-	testcases := []eval.TestCase{
-		{
-			ID:             "test_001_edit",
-			Name:           "測試模糊替換工具的準確性",
-			SetupScript:    `echo '{"name": "tiny-claw", "version": "v1.0.0"}' > config.json`,
-			TaskPrompt:     `當前目錄下有一個 config.json。請你使用 edit_file 工具，將其中的 version 從 v1.0.0 改為 v2.0.0。不要做其他多餘操作。`,
-			ValidateScript: `grep '"version": "v2.0.0"' config.json`,
-		},
-		{
-			ID:   "test_002_code_gen",
-			Name: "測試代碼閱讀與創建新文件的綜合能力",
-			// 用 printf 而非 echo：macOS 的 bash echo 默認不解釋 \n，會寫出字面量導致 math.go 損壞
-			SetupScript:    `printf 'package math\n\nfunc Multiply(a, b int) int {\n\treturn a * b\n}\n' > math.go`,
-			TaskPrompt:     `當前目錄下有一個 math.go。請你仔細閱讀它，然後在同級目錄下，幫我寫一個規範的單元測試文件 math_test.go，用來測試 Multiply 函數。請務必包含正常的測試用例。`,
-			ValidateScript: `go mod init bench && go test -v ./...`,
-		},
 	}
 
 	// 跑分是真實 API 調用、要花錢：默認選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
@@ -73,6 +70,59 @@ func main() {
 		log.Printf("[bench] ❌ 通過率 %.2f%% 低於門檻 %.2f%%", report.PassRate*100, *minPassRate*100)
 		os.Exit(1)
 	}
+}
+
+// loadTestCases 回傳要跑的用例：未指定 -swebench 時用內建煙霧用例；指定時載入 SWE-bench 實例並轉換。
+func loadTestCases(swebenchPath, envSetup string, limit int) ([]eval.TestCase, error) {
+	if swebenchPath == "" {
+		return builtinTestCases(), nil
+	}
+	instances, err := eval.LoadSWEBench(swebenchPath)
+	if err != nil {
+		return nil, err
+	}
+	cases := eval.SWEToTestCases(instances, eval.SWEOptions{EnvSetup: envSetup}, limit)
+	log.Printf("[bench] 已從 %s 載入 %d 個 SWE-bench 實例（取 %d 個）", swebenchPath, len(instances), len(cases))
+	return cases, nil
+}
+
+// builtinTestCases 是不指定 -swebench 時的內建煙霧測試（驗工具/代碼生成的基本能力）。
+func builtinTestCases() []eval.TestCase {
+	return []eval.TestCase{
+		{
+			ID:             "test_001_edit",
+			Name:           "測試模糊替換工具的準確性",
+			SetupScript:    `echo '{"name": "tiny-claw", "version": "v1.0.0"}' > config.json`,
+			TaskPrompt:     `當前目錄下有一個 config.json。請你使用 edit_file 工具，將其中的 version 從 v1.0.0 改為 v2.0.0。不要做其他多餘操作。`,
+			ValidateScript: `grep '"version": "v2.0.0"' config.json`,
+		},
+		{
+			ID:   "test_002_code_gen",
+			Name: "測試代碼閱讀與創建新文件的綜合能力",
+			// 用 printf 而非 echo：macOS 的 bash echo 默認不解釋 \n，會寫出字面量導致 math.go 損壞
+			SetupScript:    `printf 'package math\n\nfunc Multiply(a, b int) int {\n\treturn a * b\n}\n' > math.go`,
+			TaskPrompt:     `當前目錄下有一個 math.go。請你仔細閱讀它，然後在同級目錄下，幫我寫一個規範的單元測試文件 math_test.go，用來測試 Multiply 函數。請務必包含正常的測試用例。`,
+			ValidateScript: `go mod init bench && go test -v ./...`,
+		},
+	}
+}
+
+// printPlan 離線印出每個用例的三段式計畫，供檢視 harness 接線（不執行、不花錢）。
+func printPlan(cases []eval.TestCase) {
+	fmt.Printf("== Dry-run：%d 個用例（不呼叫 LLM、不 clone、不花錢）==\n", len(cases))
+	for i, tc := range cases {
+		fmt.Printf("\n[%d] %s — %s\n", i+1, tc.ID, tc.Name)
+		fmt.Printf("--- Setup ---\n%s\n", tc.SetupScript)
+		fmt.Printf("--- Task（前 400 字）---\n%s\n", truncatePlan(tc.TaskPrompt, 400))
+		fmt.Printf("--- Validate ---\n%s\n", tc.ValidateScript)
+	}
+}
+
+func truncatePlan(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
 }
 
 // emitTuningProposals 從跑分報告算出聚合指標，產出有界的調參提案到暫存區（不自動套用）。
