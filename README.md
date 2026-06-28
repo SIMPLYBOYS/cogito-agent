@@ -45,6 +45,8 @@
 
 ## Architecture
 
+> 各設計維度的取捨、scoped 決定與對照主流 agent（Claude Code / Codex / Hermes），見 [DESIGN.md](DESIGN.md)；競品定位見 [POSITIONING.md](POSITIONING.md)。
+
 ```mermaid
 flowchart TB
   HUMAN["人類開發者與運維"]
