@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -185,8 +186,13 @@ func ApplyProposedMemory(root string) (string, error) {
 	if err := os.Remove(proposedPath); err != nil {
 		return proposed, fmt.Errorf("清除提案檔失敗: %w", err)
 	}
+	// 放行後順手淘汰：超過上限的最久未用記錄歸檔（可復原），避免記憶庫無限長。
+	ctxpkg.NewMemoryLoader(root).Prune(maxMemoryRecords)
 	return proposed, nil
 }
+
+// maxMemoryRecords 是長期記憶庫的記錄上限；超量時 Prune 把最久未用的歸檔到 .claw/memory-archive/。
+const maxMemoryRecords = 200
 
 // writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。
 func writeMemoryRecord(memDir, kind, task, learning string) error {

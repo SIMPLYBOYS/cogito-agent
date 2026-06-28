@@ -7,8 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
+
+// maxIndexEntries 是 System Prompt 常駐記憶索引的條數上限（依最近使用排序取前 N）；其餘記憶不列入
+// 索引，但仍可被 recall 檢索到——避免記憶一多連「索引」本身都把上下文撐爆。
+const maxIndexEntries = 30
 
 // MemoryRecord 是一筆離散的長期記憶（.claw/memory/<slug>.md）：frontmatter 帶 name/description/tags，
 // body 是正文。與技能（SKILL.md）同構——差別在「記憶」是沉澱的事實/慣例/教訓，「技能」是操作流程。
@@ -17,6 +22,9 @@ type MemoryRecord struct {
 	Description string
 	Tags        []string
 	Body        string
+
+	Path  string    // 記錄檔路徑（供 recall 觸碰 mtime、Prune 歸檔）
+	mtime time.Time // 檔案修改時間＝最近一次使用（LRU 依據）
 }
 
 // MemoryLoader 是長期記憶的漸進式載入端（對齊 SkillLoader）：System Prompt 只放索引（名稱+描述+標籤），
@@ -47,6 +55,10 @@ func (m *MemoryLoader) loadAll() []MemoryRecord {
 				if rec.Name == "" {
 					rec.Name = strings.TrimSuffix(d.Name(), ".md") // 無 frontmatter name 時退回檔名
 				}
+				rec.Path = path
+				if info, e := d.Info(); e == nil {
+					rec.mtime = info.ModTime()
+				}
 				recs = append(recs, rec)
 			}
 		}
@@ -61,15 +73,25 @@ func (m *MemoryLoader) LoadIndex() string {
 	if len(recs) == 0 {
 		return ""
 	}
+	// 依最近使用（mtime）排序，索引只常駐前 maxIndexEntries 條；其餘仍可被 recall 檢索到。
+	sort.SliceStable(recs, func(i, j int) bool { return recs[i].mtime.After(recs[j].mtime) })
+	hidden := 0
+	if len(recs) > maxIndexEntries {
+		hidden = len(recs) - maxIndexEntries
+		recs = recs[:maxIndexEntries]
+	}
 	var b strings.Builder
 	b.WriteString("\n### 長期記憶索引 (Long-term Memory)\n")
-	b.WriteString("以下是你過往沉澱的長期記憶【索引】（僅標題與摘要）。當前任務若與某條相關，先用 `recall` 工具按關鍵字取回正文再參考，不要憑空臆測。\n")
+	b.WriteString("以下是你過往沉澱的長期記憶【索引】（僅標題與摘要，依最近使用排序）。當前任務若與某條相關，先用 `recall` 工具按關鍵字取回正文再參考，不要憑空臆測。\n")
 	for _, r := range recs {
 		tag := ""
 		if len(r.Tags) > 0 {
 			tag = " [" + strings.Join(r.Tags, ", ") + "]"
 		}
-		b.WriteString(fmt.Sprintf("- **%s**：%s%s\n", r.Name, r.Description, tag))
+		fmt.Fprintf(&b, "- **%s**：%s%s\n", r.Name, r.Description, tag)
+	}
+	if hidden > 0 {
+		fmt.Fprintf(&b, "- …（另有 %d 條未列於索引，需要時直接用 `recall` 關鍵字檢索）\n", hidden)
 	}
 	return b.String()
 }
@@ -99,8 +121,57 @@ func (m *MemoryLoader) Recall(query string, k int) []MemoryRecord {
 	out := make([]MemoryRecord, len(ranked))
 	for i, s := range ranked {
 		out[i] = s.rec
+		m.touch(s.rec.Path) // 命中即更新「最近使用」（LRU），讓常用記憶留在索引、冷門的被淘汰
 	}
 	return out
+}
+
+// touch 把記錄檔的 mtime 更新為現在＝標記「剛被用到」（LRU 依據）。
+// ponytail: 用檔案 mtime 當 last-used；若日後要命中次數/時間衰減，再加 sidecar 使用帳本。
+func (m *MemoryLoader) touch(path string) {
+	if path == "" {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+}
+
+// Prune 把超過 keep 上限的「最久未用」記錄歸檔到 .claw/memory-archive/（可復原，非刪除——記憶操作
+// 是新的失控控制面，寧可歸檔不硬刪）。回傳被歸檔的檔名。keep<=0 或未超量則不動。
+func (m *MemoryLoader) Prune(keep int) []string {
+	base := m.dir()
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil
+	}
+	type rec struct {
+		name  string
+		mtime time.Time
+	}
+	var files []rec
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if info, ierr := e.Info(); ierr == nil {
+			files = append(files, rec{e.Name(), info.ModTime()})
+		}
+	}
+	if keep <= 0 || len(files) <= keep {
+		return nil
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mtime.After(files[j].mtime) }) // 新→舊
+	archiveDir := filepath.Join(m.workDir, ".claw", "memory-archive")
+	if os.MkdirAll(archiveDir, 0o755) != nil {
+		return nil
+	}
+	var archived []string
+	for _, old := range files[keep:] { // 超出 keep 的最舊者
+		if os.Rename(filepath.Join(base, old.name), filepath.Join(archiveDir, old.name)) == nil {
+			archived = append(archived, old.name)
+		}
+	}
+	return archived
 }
 
 // scoreRecord：tags > name > description > body 加權的關鍵字命中加總。
