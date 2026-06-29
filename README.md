@@ -281,6 +281,16 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    - 在頻道中 **@機器人** 並描述任務；
    - 或直接給機器人發 **私聊（DM）** 消息。
 
+   除了任務，機器人也聽以下**內建口令**（即「失控控制 / 自我進化」的人工閘，皆會回覆確認；不佔用任務鎖）：
+
+   | 口令 | 作用 |
+   |---|---|
+   | `approve` / `reject`（可帶 taskID） | 放行 / 拒絕被危險指令審批攔下的工具調用 |
+   | `apply memory` / `reject memory` | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄） |
+   | `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
+
+   （`apply memory` / `apply edges` 需啟用對應的 `COGITO_*_SYNTH`；提案產生時機器人會主動通知。）
+
 機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度實時回覆到對應會話。
 
 > ⚠️ **安全提示**：預設（`HostExecutor`）下 `bash` 會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改文件——請僅在隔離/受控環境中運行。**生產建議啟用 Docker 沙箱**取得 OS 級硬邊界：
