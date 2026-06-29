@@ -5,7 +5,13 @@
 > 機器需求：**x86_64**（Intel/AMD）。官方映像是 x86_64，Apple Silicon 要 emulation、不建議。需 Docker daemon 運行；磁碟每實例 ~1–2GB（子集 10–20 題 ≈ 20–40GB）。
 
 ## 0. 取得資料集
-官方 Lite 在 HuggingFace `princeton-nlp/SWE-bench_Lite`。下載成 JSONL（或用 datasets 匯出），例如取前 N 筆存 `lite.jsonl`，每行一個含 `instance_id/repo/base_commit/problem_statement/test_patch/FAIL_TO_PASS/PASS_TO_PASS` 的物件。
+用內附腳本（stdlib，無需 pip install datasets）抓官方 `princeton-nlp/SWE-bench_Lite` 子集：
+```bash
+python3 scripts/fetch_swebench_lite.py -n 10 -o lite.jsonl
+# 取某段（資料按 instance_id 字母排序，如 psf/requests 在中段）：
+python3 scripts/fetch_swebench_lite.py -n 5 --offset 150 -o requests.jsonl
+```
+先不花錢檢視管線：`go run ./cmd/bench -swebench lite.jsonl -limit 3 -dry-run`。
 
 ## 1. 生成 predictions（cogito，需 ANTHROPIC_API_KEY）
 ```bash
