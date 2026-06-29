@@ -33,7 +33,41 @@ func main() {
 	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
+	predictions := flag.String("predictions", "", "SWE-bench 生成模式：對 -swebench 的實例跑 agent → 輸出官方 predictions JSONL 到此路徑（交給官方 harness 評測）")
 	flag.Parse()
+
+	// SWE-bench 生成模式：產出官方 predictions（model_patch=agent 的 git diff），不自己評測。
+	if *predictions != "" {
+		if *swebench == "" {
+			log.Fatal("-predictions 需搭配 -swebench <資料檔>")
+		}
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			log.Fatal("生成 predictions 需 ANTHROPIC_API_KEY")
+		}
+		instances, err := eval.LoadSWEBench(*swebench)
+		if err != nil {
+			log.Fatalf("載入 SWE-bench 失敗: %v", err)
+		}
+		if *limit > 0 && *limit < len(instances) {
+			instances = instances[:*limit]
+		}
+		opts := eval.SWEOptions{RepoURLPrefix: *sweRepoPrefix}
+		var preds []eval.Prediction
+		for i, ins := range instances {
+			log.Printf("[swebench-gen] (%d/%d) 生成 %s …", i+1, len(instances), ins.InstanceID)
+			p, err := eval.GeneratePrediction(context.Background(), ins, opts, *model)
+			if err != nil {
+				log.Printf("[swebench-gen] %s 失敗（仍續）: %v", ins.InstanceID, err)
+				continue
+			}
+			preds = append(preds, p)
+		}
+		if err := eval.WritePredictions(*predictions, preds); err != nil {
+			log.Fatalf("寫 predictions 失敗: %v", err)
+		}
+		log.Printf("✅ 已生成 %d 筆 predictions → %s（交給官方 harness：見 docs/swebench-runbook.md）", len(preds), *predictions)
+		return
+	}
 
 	// 記憶 Level 2 A/B：用內建情境跑「無記憶 vs 有記憶」，量化記憶對任務的影響。
 	if *memAB {
