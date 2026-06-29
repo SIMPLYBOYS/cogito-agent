@@ -21,7 +21,7 @@
 ### 1. Agent 控制流
 - **決定**：ReAct（Thinking→Action→Observation）多輪迴圈（[engine/loop.go](internal/engine/loop.go)），但**三道硬防線由框架強制**：回合上限、per-task 成本熔斷、死迴圈指紋偵測（參數正規化看穿尾空格/路徑微差）。另加**成本軟著陸**——花費跨 80% 即提醒模型「停工具、立刻交付」，避免「錢花了、做好了、卻在交付前一刻被硬砍」。
 - **對照**：Claude Code/Codex 也有 turn/權限上限；cogito 把「失控控制」當**第一主題**，且軟著陸這種「優雅降級」是多數 harness 沒做的。
-- **scoped**：無動態重規劃（plan 改寫）；Plan Mode 靠把計畫外部化到 `PLAN.md`/`TODO.md`（狀態外部化）而非內存。
+- **scoped**：無動態重規劃（plan 改寫）；Plan Mode 靠把計畫外部化到 `PLAN.md`/`TODO.md`（狀態外部化）而非內存。其價值是**狀態durability、與模型 IQ 正交**：實測中斷一個 6 步任務後，重啟一個零對話記憶的新進程只說「繼續」，agent 仍能讀 `TODO.md` 從第 5 步續跑、零重工——再強的模型也贏不了「重啟後 context 歸零」，檔案化的計畫贏得了。預設關、`-plan` opt-in（短任務不需要）。
 
 ### 2. 上下文工程
 - **決定**：靜態系統層（[composer.go](internal/context/composer.go)）+ 滑動窗口（[session.go](internal/context/session.go)）+ **自校準壓縮器**（[compactor.go](internal/context/compactor.go)）。壓縮水位＝模型**真實上下文窗口 × 比例**，並用每次 API 回傳的真實 `PromptTokens` 反算 byte/token 比、EWMA 收斂——自動適配 Claude 200k / 本地 8k 等不同窗口。

@@ -362,6 +362,16 @@ go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 
 > 各 repo 的 Python 環境差異大，正式跑建議在官方 SWE-bench Docker 映像內執行（依賴已備）；`-swe-env-setup '<bash>'` 可覆蓋每個實例的環境安裝步驟。agent 只用 `read_file`/`write_file`/`edit_file`/`bash` 解題（無 SWE-bench 專用工具）。
 
+### Plan Mode（長程任務斷點續傳）
+
+長任務最大的敵人不是「不會規劃」，而是**上下文流失**（窗口壓縮、滑動窗口、進程重啟、被防線中斷）。Plan Mode 用**狀態外部化**對抗它：強制把計畫寫 `PLAN.md`、進度寫 `TODO.md`、做一步打勾一步；喚醒時先嗅探這兩個檔，從第一個未打勾項續跑。
+
+```bash
+go run ./cmd/claw-cli -plan -dir ./workspace/proj -prompt "<多步驟長任務>"
+```
+
+**實證（haiku）**：一個「依序建 6 檔」的任務，跑到第 4 步時用 SIGTERM 強制中斷 → 磁碟留下 `s1–s4` + `TODO.md` 前 4 項 `[x]`。**重啟一個全新進程（in-memory session 為空、零對話記憶）只說「繼續」** → agent 嗅探到 `PLAN.md`/`TODO.md`、讀出「已到第 4 步」、**只補做 s5/s6**（零重工）。計畫若只存在模型的 context 裡，重啟那刻就沒了；檔案化的計畫活了下來——**這個價值與模型多強無關**。預設關閉、`-plan` opt-in（短任務不需要）。
+
 ### Loop Engineering（goal 循環 + 心跳）
 
 ```bash
