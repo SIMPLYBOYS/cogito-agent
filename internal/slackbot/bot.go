@@ -120,6 +120,32 @@ func (b *SlackBot) tryMemoryCommand(channelID, text string) bool {
 	return false
 }
 
+// tryEdgesCommand 攔截「apply edges / reject edges」口令——KG typed 關係提案的 Slack 閘（對齊 memory）：
+// apply 把提案關係過 gate 併入知識圖譜，reject 丟棄。命中即消費。讓 post-task 抽出的關係能在 Slack 內放行。
+func (b *SlackBot) tryEdgesCommand(channelID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "apply edges", "approve edges":
+		applied, rejected, err := ctxpkg.ApplyProposedEdges(b.workDir)
+		switch {
+		case err != nil:
+			b.SendMessage(channelID, fmt.Sprintf("❌ 套用關係失敗: %v", err))
+		case applied == 0 && rejected == 0:
+			b.SendMessage(channelID, "ℹ️ 目前沒有提案關係。")
+		default:
+			b.SendMessage(channelID, fmt.Sprintf("✅ 已把 %d 條提案關係併入知識圖譜（gate 拒 %d 條），下次 recall 起生效。", applied, rejected))
+		}
+		return true
+	case "reject edges", "discard edges":
+		if had, _ := ctxpkg.DiscardProposedEdges(b.workDir); had {
+			b.SendMessage(channelID, "🗑️ 已丟棄提案關係（未放行）。")
+		} else {
+			b.SendMessage(channelID, "ℹ️ 目前沒有提案關係。")
+		}
+		return true
+	}
+	return false
+}
+
 // HandleEvent 是 Slack Events API 的 HTTP 回調入口
 func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
@@ -171,8 +197,8 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 			if b.tryResolveApproval(ev.Channel, prompt) {
 				break
 			}
-			// 自我進化的閘：apply/reject memory（不佔鎖、不當成新任務）
-			if b.tryMemoryCommand(ev.Channel, prompt) {
+			// 自我進化的閘：apply/reject memory|edges（不佔鎖、不當成新任務）
+			if b.tryMemoryCommand(ev.Channel, prompt) || b.tryEdgesCommand(ev.Channel, prompt) {
 				break
 			}
 			// 弱點修補②：會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session
@@ -193,7 +219,7 @@ func (b *SlackBot) HandleEvent(w http.ResponseWriter, r *http.Request) {
 				if b.tryResolveApproval(ev.Channel, text) {
 					break
 				}
-				if b.tryMemoryCommand(ev.Channel, text) {
+				if b.tryMemoryCommand(ev.Channel, text) || b.tryEdgesCommand(ev.Channel, text) {
 					break
 				}
 				if !b.tryAcquire(b.channelWorkDir(ev.Channel)) {

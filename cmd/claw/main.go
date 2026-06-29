@@ -215,7 +215,7 @@ func main() {
 					log.Printf("[evolve] KG 關係抽取失敗（不影響任務）: %v", err)
 				} else if n > 0 {
 					log.Printf("[evolve] 🔗 新增 %d 條提案關係", n)
-					bot.SendMessage(session.ID, fmt.Sprintf("🔗 我從記憶中抽出 *%d 條提案關係*，存到暫存區，需 review（`apply-edges` 過 gate 才生效，不會自動套用）。", n))
+					bot.SendMessage(session.ID, fmt.Sprintf("🔗 我從記憶中抽出 *%d 條提案關係*（尚未生效）。回覆 `apply edges` 過 gate 併入知識圖譜，或 `reject edges` 丟棄。", n))
 				}
 			}
 		})
