@@ -125,11 +125,12 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 					newMsg.Content = fmt.Sprintf("...[為了節省內存，早期的工具輸出已被系統強制清理。原始長度: %d 字節]...", len(msg.Content))
 				}
 			} else {
-				const maxKeep = 1000
-				if len(msg.Content) > maxKeep {
-					head := msg.Content[:500]
-					tail := msg.Content[len(msg.Content)-500:]
-					newMsg.Content = fmt.Sprintf("%s\n\n...[內容過長，中間 %d 字節已被系統截斷]...\n\n%s", head, len(msg.Content)-maxKeep, tail)
+				// rune 安全：按【字元】切頭尾，避免切到中文多位元組字元中間產生非法 UTF-8（送進 LLM）。
+				const headRunes, tailRunes = 500, 500
+				if r := []rune(msg.Content); len(r) > headRunes+tailRunes {
+					head := string(r[:headRunes])
+					tail := string(r[len(r)-tailRunes:])
+					newMsg.Content = fmt.Sprintf("%s\n\n...[內容過長，中間 %d 字已被系統截斷]...\n\n%s", head, len(r)-headRunes-tailRunes, tail)
 				}
 			}
 		} else if msg.Role == schema.RoleAssistant && msg.Content != "" {

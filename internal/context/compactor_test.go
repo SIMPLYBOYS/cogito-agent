@@ -3,6 +3,7 @@ package context
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -71,5 +72,27 @@ func TestCompactor_UnknownWindowNoCompaction(t *testing.T) {
 	out := c.Compact(msgs)
 	if len(out) != len(msgs) || c.estimateLength(out) != c.estimateLength(msgs) {
 		t.Error("窗口未知時不應壓縮")
+	}
+}
+
+// 近期 tool_result 含大量中文、需頭尾截斷時，結果必須是合法 UTF-8（不可切到多位元組字元中間）。
+func TestCompact_RecentToolResultRuneSafe(t *testing.T) {
+	big := strings.Repeat("中", 2000) // 2000 字 ≈ 6000 bytes
+	msgs := []schema.Message{
+		{Role: schema.RoleSystem, Content: "sys"},
+		{Role: schema.RoleUser, Content: "task"},
+		{Role: schema.RoleUser, ToolCallID: "x", Content: big}, // 末位＝保護區內 → 走頭尾截斷
+	}
+	c := NewCompactor(100, 0.75, 6) // 窗口小 → budget 低 → 必觸發
+	out := c.Compact(msgs)
+	got := out[len(out)-1].Content
+	if !utf8.ValidString(got) {
+		t.Errorf("截斷後應為合法 UTF-8（byte-slice 會切壞中文），got 前 80 byte: %q", got[:min(80, len(got))])
+	}
+	if utf8.RuneCountInString(got) >= 2000 {
+		t.Errorf("應被截斷，got %d 字", utf8.RuneCountInString(got))
+	}
+	if !strings.Contains(got, "中間") {
+		t.Error("應含截斷標記")
 	}
 }
