@@ -25,6 +25,12 @@ func TestRecoveryManager_AnalyzeAndInject(t *testing.T) {
 		{"bash 命令不存在", "bash", "bash: foo: command not found", true, "替代命令"},
 		{"bash 超時", "bash", "命令執行超時(30s)，已被系統強制終止", true, "nohup"},
 		{"bash 語法錯誤", "bash", "bash: -c: line 1: syntax error near unexpected token", true, "語法"},
+		{"Go 未使用 import", "bash", "./main.go:5:2: \"fmt\" imported and not used", true, "import"},
+		{"Go 未定義符號", "bash", "./x.go:10:6: undefined: Foo", true, "grep"},
+		{"Go 缺套件", "bash", "no required module provides package github.com/x/y", true, "go mod"},
+		{"Python 缺模組", "bash", "ModuleNotFoundError: No module named 'requests'", true, "pip install"},
+		{"MCP 參數驗證錯", "mcp_call_tool", "Error executing tool query_rows: 1 validation error", true, "mcp_describe_tool"},
+		{"MCP 一般錯不亂提示", "mcp_call_tool", "internal server error 500", false, ""},
 		{"未命中規則原樣返回", "edit_file", "某種我們沒見過的奇怪錯誤", false, ""},
 		{"未知工具原樣返回", "search_web", "open /x: no such file or directory", false, ""},
 	}
