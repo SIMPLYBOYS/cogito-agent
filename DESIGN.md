@@ -56,7 +56,7 @@
 ### 7. 可觀測性與評測
 - **決定**：OpenTelemetry → Jaeger/Langfuse（[observability/](internal/observability/)），LLM span 帶 `gen_ai.*` 語意約定 + `langfuse.observation.input/output`（看得到模型完整 I/O）；USD 成本追蹤（裝飾器）；**評測框架**（三段式 TestCase + RunSuite + Reflexion 重試 + 儀表板 + CI 門檻）+ **SWE-bench 相容管線**（[eval/swebench.go](internal/eval/swebench.go)）。
 - **對照**：多數同級 side-project **零評測**。cogito 能對自己跑分、上 CI 門檻，並有 SWE-bench 相容的評測（方法論防作弊：測試在 agent 跑完才套）——這是「serious vs toy」的分水嶺。
-- **記憶也有評測**：Level 1 檢索評測（[eval/memeval.go](internal/eval/memeval.go)，`cmd/ingest -eval <labels>`）對標註集算 hit@k / MRR，**三模式對照**（關鍵字 / embedding / 關鍵字+KG），可量化「embedding/KG 到底有沒有比關鍵字準」——不靠感覺。
+- **記憶也有評測**：Level 1 檢索評測（[eval/memeval.go](internal/eval/memeval.go)，`cmd/ingest -eval <labels>`）對標註集算 hit@k / MRR，**三模式對照**（關鍵字 / embedding / 關鍵字+KG）；Level 2 任務影響 A/B（[eval/memab.go](internal/eval/memab.go)，`cmd/bench -mem-ab`）同一任務在「無/有相關記憶」下各跑一次比回合/成本。**實測**：相關記憶讓同一任務從 8 回合→3、成本降 ~66%——記憶的價值有數字、不靠感覺。
 - **狀態**：SWE-bench 管線已端到端真跑驗證（真 agent 修真 bug、隱藏測試驗證通過）；官方 Lite 的 300 題數字需官方 Docker 環境，屬執行 infra。
 
 ### 8. Provider 抽象

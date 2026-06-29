@@ -32,7 +32,18 @@ func main() {
 	sweRepoPrefix := flag.String("swe-repo-prefix", "", "clone 來源前綴，覆蓋預設 https://github.com/（可指向本地鏡像快取或本地 repo 加速/離線）")
 	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
+	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
 	flag.Parse()
+
+	// 記憶 Level 2 A/B：用內建情境跑「無記憶 vs 有記憶」，量化記憶對任務的影響。
+	if *memAB {
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			log.Fatal("記憶 A/B 需 ANTHROPIC_API_KEY")
+		}
+		tc, mem := eval.MemoryABScenario()
+		fmt.Print(eval.RunMemoryAB(context.Background(), tc, mem, *model).Render())
+		return
+	}
 
 	testcases, err := loadTestCases(*swebench, *sweEnvSetup, *sweRepoPrefix, *sweTestRunner, *limit)
 	if err != nil {
