@@ -7,6 +7,14 @@ import (
 
 // RecoveryManager 在工具執行失敗時，按工具名 + 錯誤特徵匹配，給原始報錯拼接一段
 // 可執行的"救援指南"，把冰冷的錯誤字符串升級為"下一步該怎麼做"的指示。純規則、無狀態。
+//
+// 【架構邊界 —— 請勿無腦擴充】這是【有界的 first-aid】，不是恢復系統的全部，也【不該】持續長大：
+//   - 主模型本就讀得懂多數錯誤（error-as-observation 已回灌），rule 多為冗餘的輕推；
+//     故只收【模型沒提示就會做錯】的少數高價值 nudge（如 edit_file stale old_text → 先 read_file）。
+//   - 錯誤的【長尾】交給模型自己；不要為了覆蓋率往這個 switch 一直塞 rule（會變打地鼠、不收斂）。
+//   - 「恢復能力隨時間提升」這件事，正確的家是【自我進化層】：失敗 → Reflexion 萃取「遇到 X 做 Y」
+//     的教訓 → 進記憶/KG（gated）→ 下次 recall 自動帶出。那是會學習、零手動的 scalable 版本。
+//   - 巨型未知錯誤 dump 的 LLM 濃縮（parked：LLM-fallback recovery）是規則與學習之間的橋，條件未到。
 type RecoveryManager struct{}
 
 func NewRecoveryManager() *RecoveryManager {
