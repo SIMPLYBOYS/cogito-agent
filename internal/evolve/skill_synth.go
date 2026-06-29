@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -91,6 +92,8 @@ func (s *SkillSynthesizer) Reflect(ctx context.Context, taskPrompt string, histo
 // writeProposed 以 agentskills.io 的 folder-per-skill 結構寫進【暫存區】：<proposedDir>/<slug>/SKILL.md。
 // 這也是 SkillLoader 唯一認得的結構（它只載入名為 SKILL.md 的檔），故晉升後才真的會被 agent 用到。
 func (s *SkillSynthesizer) writeProposed(r reflection, taskPrompt string) (string, error) {
+	ctxpkg.LockKnowledge() // 只鎖檔案寫尾段（反思的 LLM 呼叫在外層、不持鎖）
+	defer ctxpkg.UnlockKnowledge()
 	skillDir := filepath.Join(s.proposedDir, slug(r.Name))
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return "", fmt.Errorf("建立提案技能目錄失敗: %w", err)

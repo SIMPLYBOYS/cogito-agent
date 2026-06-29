@@ -50,6 +50,8 @@ func readVectors(path string) map[string][]float32 {
 
 // WriteVectors 把節點向量寫成 embeddings.jsonl（穩定排序，便於 diff/審計）。
 func WriteVectors(path string, vecs map[string][]float32) error {
+	knowledgeMu.Lock()
+	defer knowledgeMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

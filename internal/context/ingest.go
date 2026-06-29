@@ -19,6 +19,8 @@ var mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+\.md)[^)]*\)`)
 //
 // 之後 recall 的子圖檢索（Stage 1）就能跨這些 ingested 文件做多跳關係檢索。LLM typed 關係抽取是 Stage 2b。
 func (m *MemoryLoader) IngestDir(srcDir string) (nodes, edges int, err error) {
+	knowledgeMu.Lock()
+	defer knowledgeMu.Unlock()
 	memDir := m.dir()
 	if e := os.MkdirAll(memDir, 0o755); e != nil {
 		return 0, 0, e

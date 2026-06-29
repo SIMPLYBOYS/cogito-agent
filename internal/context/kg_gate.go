@@ -29,6 +29,8 @@ func ExistingEdges(root string) []StoredEdge { return readStoredEdges(edgesPath(
 //
 // 回傳 (併入數, 拒絕數)。這是 KG 自我擴充的「閘」：機器抽、規則把關、可審計。
 func ApplyProposedEdges(root string) (applied, rejected int, err error) {
+	knowledgeMu.Lock()
+	defer knowledgeMu.Unlock()
 	proposed := readStoredEdges(proposedEdgesPath(root))
 	if len(proposed) == 0 {
 		return 0, 0, nil
@@ -80,6 +82,8 @@ func ApplyProposedEdges(root string) (applied, rejected int, err error) {
 
 // DiscardProposedEdges 丟棄提案邊。had 表示原本是否有提案。
 func DiscardProposedEdges(root string) (had bool, err error) {
+	knowledgeMu.Lock()
+	defer knowledgeMu.Unlock()
 	if len(readStoredEdges(proposedEdgesPath(root))) == 0 {
 		return false, nil
 	}

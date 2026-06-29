@@ -122,6 +122,8 @@ func (e *RelationExtractor) Extract(ctx context.Context) (int, error) {
 }
 
 func writeProposedEdges(root string, edges []ctxpkg.StoredEdge) (int, error) {
+	ctxpkg.LockKnowledge() // 只鎖檔案寫尾段（抽取的 LLM 呼叫在外層、不持鎖）
+	defer ctxpkg.UnlockKnowledge()
 	dir := filepath.Join(root, ".claw", "kg")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return 0, err

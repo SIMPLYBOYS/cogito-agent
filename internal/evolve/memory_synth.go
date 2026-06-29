@@ -131,6 +131,8 @@ func (m *MemorySynthesizer) proposeLearnings(taskPrompt string, candidates []str
 }
 
 func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string, kind string) error {
+	ctxpkg.LockKnowledge() // 只鎖檔案寫尾段（synth 的 LLM 呼叫已在更外層、不持鎖）
+	defer ctxpkg.UnlockKnowledge()
 	if err := os.MkdirAll(filepath.Dir(m.proposedPath), 0o755); err != nil {
 		return fmt.Errorf("建立提案記憶目錄失敗: %w", err)
 	}
@@ -158,6 +160,8 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 // append 進 AGENTS.md——後者會讓常駐 System Prompt 無限膨脹。每條學習落成一筆記錄，由 recall 工具
 // 按需檢索。人工 review 後手動觸發；放行後清掉提案檔。回傳放行的內容（空字串＝當前沒有提案）。
 func ApplyProposedMemory(root string) (string, error) {
+	ctxpkg.LockKnowledge() // 整個 read-proposed→寫記錄→刪 proposed→Prune 視為一個原子單元
+	defer ctxpkg.UnlockKnowledge()
 	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
 	proposed := strings.TrimSpace(stripComments(readFileIgnore(proposedPath)))
 	if proposed == "" {
@@ -226,6 +230,8 @@ func parseProposedHeader(line string) (kind, task string) {
 
 // DiscardProposedMemory 丟棄提案記憶。had 表示原本是否有提案。
 func DiscardProposedMemory(root string) (had bool, err error) {
+	ctxpkg.LockKnowledge()
+	defer ctxpkg.UnlockKnowledge()
 	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
 	if strings.TrimSpace(readFileIgnore(proposedPath)) == "" {
 		return false, nil
