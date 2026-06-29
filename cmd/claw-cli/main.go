@@ -135,7 +135,7 @@ func main() {
 	}
 
 	// Tier 4 記憶自更新（opt-in）：成功→萃取耐久慣例；失敗→live Reflexion 萃取教訓。皆追加到提案
-	// 記憶暫存區（不自動併入 AGENTS.md），這就是「從真實互動中持續優化判斷決策」的落點。
+	// 記憶暫存區（apply 後放行為 .claw/memory/ 記錄），這就是「從真實互動中持續優化判斷決策」的落點。
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
 		mSynth := evolve.NewMemorySynthesizer(trackedProvider, workDir)
 		var added []string
@@ -153,7 +153,7 @@ func main() {
 			if runErr != nil {
 				kind = "失敗教訓"
 			}
-			log.Printf("[evolve] 🧠 新增 %d 條提案記憶（%s）到 .claw/%s（需人工 review 後併入 AGENTS.md）", len(added), kind, evolve.ProposedMemoryFileName)
+			log.Printf("[evolve] 🧠 新增 %d 條提案記憶（%s）到 .claw/%s（需 apply 放行為長期記憶記錄才生效）", len(added), kind, evolve.ProposedMemoryFileName)
 		default:
 			log.Printf("[evolve] 本次未發現值得記入專案記憶的內容")
 		}

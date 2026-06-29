@@ -175,7 +175,7 @@ func main() {
 	bot = slackbot.NewSlackBot(factory, rootDir)
 
 	// Tier 4 自我進化（opt-in）：任務成功後反思軌跡。安全鐵律一致——產物只進【暫存區】、不自動生效，
-	// 須人工 review（技能用 skillgate 晉升；提案記憶須併入 AGENTS.md 才生效）。
+	// 須人工 review（技能用 skillgate 晉升；提案記憶 apply 後放行為 .claw/memory/ 記錄才生效）。
 	var skillSynth *evolve.SkillSynthesizer
 	var memSynth *evolve.MemorySynthesizer
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
@@ -184,7 +184,7 @@ func main() {
 	}
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
 		memSynth = evolve.NewMemorySynthesizer(llmProvider, rootDir)
-		log.Printf("[evolve] 記憶自更新已啟用（寫入 .claw/%s，需人工併入 AGENTS.md）", evolve.ProposedMemoryFileName)
+		log.Printf("[evolve] 記憶自更新已啟用（寫入 .claw/%s，apply 後放行為長期記憶記錄）", evolve.ProposedMemoryFileName)
 	}
 	var kgExtract *evolve.RelationExtractor
 	if os.Getenv("COGITO_KG_SYNTH") == "1" {
@@ -275,7 +275,7 @@ func memoryProposalMsg(kind string, added []string) string {
 	for _, l := range added {
 		b.WriteString("• " + l + "\n")
 	}
-	b.WriteString("回覆 `apply memory` 併入 AGENTS.md，或 `reject memory` 丟棄。")
+	b.WriteString("回覆 `apply memory` 放行為可檢索的長期記憶（存成記憶節點、recall 取用），或 `reject memory` 丟棄。")
 	return b.String()
 }
 
