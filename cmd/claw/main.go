@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
@@ -240,11 +238,7 @@ func main() {
 	bot.SetPostRunHook(postRun)
 	bot.SetPostFailureHook(postFailure)
 
-	http.HandleFunc("/webhook/event", bot.HandleEvent)
-
-	srv := &http.Server{Addr: ":48080"}
-
-	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停 HTTP，再 flush OTel span（否則 batch 緩衝可能丟失）。
+	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停傳輸層（websocket/長輪詢隨 ctx 取消），再 flush OTel span。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -257,20 +251,12 @@ func main() {
 		go tg.Start(ctx)
 	}
 
-	go func() {
-		log.Printf("🚀 cogito-agent Slack 服務端已啟動，正在監聽 %s 端口\n", srv.Addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("服務器啟動失敗: %v", err)
-		}
-	}()
+	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外端口，零基建。
+	go bot.Start(ctx)
 
 	<-ctx.Done()
 	log.Println("收到關閉信號，優雅關閉中...")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP 關閉異常: %v", err)
-	}
+	stop()  // 取消 ctx → Slack websocket / Telegram 長輪詢各自收線
 	flush() // flush OTel span（內部自帶 timeout + once 去重）
 	for _, cl := range mcpClients {
 		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留

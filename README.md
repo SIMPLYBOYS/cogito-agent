@@ -50,7 +50,7 @@
 ```mermaid
 flowchart TB
   HUMAN["人類開發者與運維"]
-  IM["Slack webhook 與 CLI"]
+  IM["Slack/Telegram 與 CLI"]
 
   subgraph ENGINE["cogito-agent 引擎"]
     LLM["LLM Provider<br/>Claude Anthropic SDK"]
@@ -196,7 +196,7 @@ internal/
 ├── chatbot/                 傳輸無關核心：指令閘/會話隔離/鎖/跑任務管線/進度回報 + HITL 審批 + 跨平台發送路由
 │   ├── core.go              Dispatch / handleAgentRun / 命名空間 / reporter
 │   └── approval.go          危險指令 HITL 審批（channel-based 單例）
-├── slackbot/                Slack 傳輸層：Events API webhook 解析 + 簽章驗證 + @提及剝離 → core.Dispatch
+├── slackbot/                Slack 傳輸層：Socket Mode（outbound websocket，免公開 URL）+ @提及剝離 → core.Dispatch
 ├── telegrambot/             Telegram 傳輸層：getUpdates 長輪詢（免公開 URL）→ core.Dispatch
 ├── cmdutil/                 各 cmd 入口共用啟動樣板（Bootstrap：載入 .env + 初始化 OTel + 回傳 flush）
 ├── observability/           可觀測性
@@ -233,7 +233,7 @@ cp .env.example .env
 |------|------|
 | `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，從 <https://console.anthropic.com> 獲取 |
 | `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history` |
-| `SLACK_SIGNING_SECRET` | Slack Signing Secret，用於校驗回調請求籤名 |
+| `SLACK_APP_TOKEN` | Slack App-Level Token（`xapp-` 開頭，scope `connections:write`），啟用 Socket Mode 後取得；走 outbound websocket 免公開 URL |
 | `TELEGRAM_BOT_TOKEN` | （選填，多平台）Telegram Bot Token，向 @BotFather 申請；設了就與 Slack 同進程跑 getUpdates 長輪詢 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
@@ -270,15 +270,9 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    go run ./cmd/claw
    ```
 
-   服務默認監聽 **48080** 端口，Slack Events 回調入口為 `/webhook/event`。
+   Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者都是 outbound 連線，**不開對外端口、不需要公開 URL／ngrok**。
 
-2. 在 Slack App 後臺的 **Event Subscriptions** 中，將 Request URL 配置為你的公網地址，例如：
-
-   ```
-   https://<your-domain>/webhook/event
-   ```
-
-   （本地開發可藉助 ngrok 等內網穿透工具暴露 48080 端口。）
+2. 在 Slack App 後臺啟用 **Socket Mode**（Settings → Socket Mode → Enable），產生一個 App-Level Token（`xapp-` 開頭，scope `connections:write`），填入 `SLACK_APP_TOKEN`；並在 **Event Subscriptions** 訂閱 `app_mention`、`message.im` 事件（Socket Mode 下無需填 Request URL）。
 
 3. 在 Slack 中與機器人交互：
    - 在頻道中 **@機器人** 並描述任務；
