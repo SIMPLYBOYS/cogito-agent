@@ -1,4 +1,4 @@
-package slackbot
+package chatbot
 
 import (
 	"strings"

@@ -38,7 +38,7 @@
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
 **接入與可觀測性**
-- 💬 **Slack 集成**：Events API，支援 @提及 與私聊；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
+- 💬 **多平台集成（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 Events API webhook、Telegram 走 getUpdates 長輪詢（免公開 URL）。可同進程同時跑，會話/工作目錄靠 `platform:` 前綴命名空間天然隔離；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
 - 📡 **實時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答實時推到 Slack，並按會話累計 token 與 USD。
 - 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
 - 🧩 **MCP 集成（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
@@ -193,9 +193,11 @@ internal/
 │   └── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
 ├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
 ├── mcp/                     MCP 客戶端（stdio + Streamable HTTP 兩種 transport）+ gateway（漸進式暴露）
-├── slackbot/                Slack 接入層
-│   ├── bot.go               Events API 回調、per-channel 工作區隔離與鎖、SlackReporter
-│   └── approval.go          危險指令 HITL 審批
+├── chatbot/                 傳輸無關核心：指令閘/會話隔離/鎖/跑任務管線/進度回報 + HITL 審批 + 跨平台發送路由
+│   ├── core.go              Dispatch / handleAgentRun / 命名空間 / reporter
+│   └── approval.go          危險指令 HITL 審批（channel-based 單例）
+├── slackbot/                Slack 傳輸層：Events API webhook 解析 + 簽章驗證 + @提及剝離 → core.Dispatch
+├── telegrambot/             Telegram 傳輸層：getUpdates 長輪詢（免公開 URL）→ core.Dispatch
 ├── cmdutil/                 各 cmd 入口共用啟動樣板（Bootstrap：載入 .env + 初始化 OTel + 回傳 flush）
 ├── observability/           可觀測性
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
@@ -232,6 +234,7 @@ cp .env.example .env
 | `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，從 <https://console.anthropic.com> 獲取 |
 | `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history` |
 | `SLACK_SIGNING_SECRET` | Slack Signing Secret，用於校驗回調請求籤名 |
+| `TELEGRAM_BOT_TOKEN` | （選填，多平台）Telegram Bot Token，向 @BotFather 申請；設了就與 Slack 同進程跑 getUpdates 長輪詢 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
 | `OTEL_TRACES_EXPORTER` | （選填）設為 `console` 時把 span 印到終端（本地除錯，不需後端） |

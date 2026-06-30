@@ -1,4 +1,4 @@
-package slackbot
+package chatbot
 
 import (
 	"path/filepath"
@@ -8,7 +8,7 @@ import (
 
 // per-channel 隔離：不同頻道得到不同目錄、同頻道穩定、都在 root 之下。
 func TestChannelWorkDir_PerChannelIsolation(t *testing.T) {
-	b := &SlackBot{workDir: "/srv/ws"}
+	b := &Core{workDir: "/srv/ws"}
 
 	a := b.channelWorkDir("C123")
 	c := b.channelWorkDir("C999")
@@ -26,7 +26,7 @@ func TestChannelWorkDir_PerChannelIsolation(t *testing.T) {
 
 // 安全：含路徑穿越的 channelID 必須被清理，不能逃出 root。
 func TestChannelWorkDir_SanitizesTraversal(t *testing.T) {
-	b := &SlackBot{workDir: "/srv/ws"}
+	b := &Core{workDir: "/srv/ws"}
 	got := b.channelWorkDir("../../etc")
 	if strings.Contains(got, "..") {
 		t.Errorf("不應含 .. 路徑穿越: %s", got)
@@ -53,7 +53,7 @@ func TestSanitizeSegment(t *testing.T) {
 
 // per-WorkDir 鎖：同一 key 互斥（序列化），不同 key 可並行；釋放後可再取得。
 func TestWorkspaceLock_PerKeyMutualExclusion(t *testing.T) {
-	b := &SlackBot{busy: make(map[string]bool)}
+	b := &Core{busy: make(map[string]bool)}
 	wdA := "/srv/ws/channels/A"
 	wdB := "/srv/ws/channels/B"
 

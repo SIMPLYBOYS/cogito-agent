@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
@@ -23,6 +24,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/slackbot"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/telegrambot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
@@ -98,12 +100,12 @@ func main() {
 	//（子 agent 的 bash 同樣要過審批，不留後門）。
 	approval := func(ctx context.Context, call schema.ToolCall, next tools.ToolHandler) schema.ToolResult {
 		args := string(call.Arguments)
-		if slackbot.IsDangerousCommand(call.Name, args) {
+		if chatbot.IsDangerousCommand(call.Name, args) {
 			channelID := ""
 			if s := engine.SessionFromContext(ctx); s != nil {
 				channelID = s.ID
 			}
-			allowed, reason := slackbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, args, func(text string) {
+			allowed, reason := chatbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, args, func(text string) {
 				if channelID != "" {
 					bot.SendMessage(channelID, text)
 				}
@@ -191,15 +193,19 @@ func main() {
 		kgExtract = evolve.NewRelationExtractor(llmProvider, rootDir)
 		log.Printf("[evolve] KG 關係抽取已啟用（任務後抽 typed 關係 → .claw/kg/edges.proposed.jsonl，需 apply-edges 過 gate；每次任務多一次 LLM 呼叫）")
 	}
+	// 自我進化的鉤子做成共用變數（與平台無關，用 chatbot.SendMessage 按 session.ID 路由回對的平台），
+	// 同一套同時掛給 Slack 與 Telegram，行為一致。未啟用任一 synth 時為 nil（核心會略過）。
+	var postRun chatbot.PostRunHook
+	var postFailure chatbot.PostFailureHook
 	if skillSynth != nil || memSynth != nil || kgExtract != nil {
-		bot.SetPostRunHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt string) {
+		postRun = func(ctx context.Context, session *ctxpkg.Session, taskPrompt string) {
 			history := session.GetWorkingMemory(0)
 			if skillSynth != nil {
 				if path, err := skillSynth.Reflect(ctx, taskPrompt, history); err != nil {
 					log.Printf("[evolve] 技能反思失敗（不影響任務）: %v", err)
 				} else if path != "" {
 					log.Printf("[evolve] 💡 提案技能：%s", path)
-					bot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
+					chatbot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
 				}
 			}
 			if memSynth != nil {
@@ -207,7 +213,7 @@ func main() {
 					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
-					bot.SendMessage(session.ID, memoryProposalMsg("慣例", added))
+					chatbot.SendMessage(session.ID, memoryProposalMsg("慣例", added))
 				}
 			}
 			if kgExtract != nil {
@@ -215,22 +221,24 @@ func main() {
 					log.Printf("[evolve] KG 關係抽取失敗（不影響任務）: %v", err)
 				} else if n > 0 {
 					log.Printf("[evolve] 🔗 新增 %d 條提案關係", n)
-					bot.SendMessage(session.ID, fmt.Sprintf("🔗 我從記憶中抽出 *%d 條提案關係*（尚未生效）。回覆 `apply edges` 過 gate 併入知識圖譜，或 `reject edges` 丟棄。", n))
+					chatbot.SendMessage(session.ID, fmt.Sprintf("🔗 我從記憶中抽出 *%d 條提案關係*（尚未生效）。回覆 `apply edges` 過 gate 併入知識圖譜，或 `reject edges` 丟棄。", n))
 				}
 			}
-		})
+		}
 		// live Reflexion：失敗的真實互動 → 萃取教訓進提案記憶（與成功路徑互補；同樣須人工併入）。
 		if memSynth != nil {
-			bot.SetPostFailureHook(func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string) {
+			postFailure = func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string) {
 				if added, err := memSynth.ReflectFailure(ctx, taskPrompt, session.GetWorkingMemory(0), failureMsg); err != nil {
 					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 從失敗萃取 %d 條教訓", len(added))
-					bot.SendMessage(session.ID, memoryProposalMsg("失敗教訓", added))
+					chatbot.SendMessage(session.ID, memoryProposalMsg("失敗教訓", added))
 				}
-			})
+			}
 		}
 	}
+	bot.SetPostRunHook(postRun)
+	bot.SetPostFailureHook(postFailure)
 
 	http.HandleFunc("/webhook/event", bot.HandleEvent)
 
@@ -239,6 +247,15 @@ func main() {
 	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停 HTTP，再 flush OTel span（否則 batch 緩衝可能丟失）。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// 多平台（opt-in）：設了 TELEGRAM_BOT_TOKEN 就同時開 Telegram 長輪詢，與 Slack 同進程、共用
+	// 同一 factory 與自我進化鉤子；會話/工作目錄靠 platform 前綴命名空間天然隔離（slack: vs telegram:）。
+	if os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
+		tg := telegrambot.NewTelegramBot(factory, rootDir)
+		tg.SetPostRunHook(postRun)
+		tg.SetPostFailureHook(postFailure)
+		go tg.Start(ctx)
+	}
 
 	go func() {
 		log.Printf("🚀 cogito-agent Slack 服務端已啟動，正在監聽 %s 端口\n", srv.Addr)
