@@ -18,6 +18,9 @@ type Session struct {
 	UpdatedAt time.Time
 
 	history []schema.Message
+	// summary 是「已逐出 history 的早期訊息」的滾動摘要（salience-aware）。搭配末 N 條逐字，
+	// 讓 history 有界（[摘要] + 末 N 逐字）又不失早期脈絡。由引擎的 summarizer 維護。
+	summary string
 	mu      sync.RWMutex
 
 	// 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
@@ -49,6 +52,7 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		CreatedAt:             created,
 		UpdatedAt:             updated,
 		history:               snap.History,
+		summary:               snap.Summary,
 		TotalPromptTokens:     snap.TotalPromptTokens,
 		TotalCompletionTokens: snap.TotalCompletionTokens,
 		TotalCostUSD:          snap.TotalCostUSD,
@@ -66,6 +70,7 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		CreatedAt:             s.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:             s.UpdatedAt.Format(time.RFC3339Nano),
 		History:               h,
+		Summary:               s.summary,
 		TotalPromptTokens:     s.TotalPromptTokens,
 		TotalCompletionTokens: s.TotalCompletionTokens,
 		TotalCostUSD:          s.TotalCostUSD,
@@ -119,6 +124,46 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	}
 
 	return res
+}
+
+// Summary 回傳目前的滾動摘要（已逐出 history 的早期訊息之 salience 壓縮）。
+func (s *Session) Summary() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.summary
+}
+
+// EvictablePrefix 回傳「超出逐字尾、應摺進摘要」的前綴【拷貝】：history 條數未達 trigger 時回 nil
+// （多數短對話不觸發、零成本）。刻意不變動 history——交給 CommitSummary 在摘要成功後才真正丟棄，
+// 確保摘要失敗不丟資料。
+func (s *Session) EvictablePrefix(keepTail, trigger int) []schema.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total := len(s.history)
+	if total <= trigger || total <= keepTail {
+		return nil
+	}
+	n := total - keepTail
+	out := make([]schema.Message, n)
+	copy(out, s.history[:n])
+	return out
+}
+
+// CommitSummary 在摘要成功後原子生效：設定新摘要 + 從 history 頭部真正丟棄 dropN 條，使 history
+// 有界（[摘要] + 末 N 逐字）。dropN 來自先前 EvictablePrefix 的長度；Append 只加尾部、前綴穩定，
+// 故按數量丟棄安全。重建 slice（非 reslice）讓舊底層陣列可被 GC 回收，記憶體真正收斂。
+func (s *Session) CommitSummary(newSummary string, dropN int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if dropN > len(s.history) {
+		dropN = len(s.history)
+	}
+	remaining := make([]schema.Message, len(s.history)-dropN)
+	copy(remaining, s.history[dropN:])
+	s.history = remaining
+	s.summary = newSummary
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
 }
 
 // SessionManager 併發安全地按 ID（如 Slack channelID）管理 session 池。

@@ -21,6 +21,7 @@ type SessionSnapshot struct {
 	CreatedAt             string           `json:"created_at"` // RFC3339
 	UpdatedAt             string           `json:"updated_at"`
 	History               []schema.Message `json:"history"`
+	Summary               string           `json:"summary,omitempty"`
 	TotalPromptTokens     int              `json:"total_prompt_tokens"`
 	TotalCompletionTokens int              `json:"total_completion_tokens"`
 	TotalCostUSD          float64          `json:"total_cost_usd"`

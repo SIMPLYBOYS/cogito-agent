@@ -41,9 +41,13 @@ type AgentEngine struct {
 	// 用於把「共享配置/技能」與「per-channel 工作產物目錄」解耦：Slack 多頻道時工具 rooted
 	// 在各頻道子目錄，但技能與 AGENTS.md 從根 workspace 共享讀取。
 	AssetsDir string
-	compactor *ctxpkg.Compactor
-	recovery  *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
-	injector  *ReminderInjector       // 死循環探測與強提醒注入
+	// EnableSummary 開啟「滾動摘要 + history 有界化」：長對話中把超出逐字尾的舊訊息 LLM 摺進
+	// session.summary 並真正逐出，兼顧跨逐出連貫性與記憶體收斂。預設關（bench/一次性任務要確定性）；
+	// 對話式入口（Slack/Telegram）由 cmd 開啟。見 summarizer.go。
+	EnableSummary bool
+	compactor     *ctxpkg.Compactor
+	recovery      *ctxpkg.RecoveryManager // 工具錯誤自愈（注入救援指南）
+	injector      *ReminderInjector       // 死循環探測與強提醒注入
 }
 
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
@@ -135,8 +139,12 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
 		defer turnSpan.EndSpan()
 
+		// 長對話維護：history 超過門檻時，把超出逐字尾的舊訊息摺進滾動摘要並真正逐出（history 有界）。
+		// 只在超門檻時付一次 LLM；EnableSummary 關則跳過。放在取窗口前，使本輪就吃到收斂後的 history。
+		e.maintainSummary(turnCtx, session)
+
 		availableTools := e.registry.GetAvailableTools()
-		workingMemory := session.GetWorkingMemory(20)
+		workingMemory := session.GetWorkingMemory(summaryTailMsgs)
 
 		// 滑動窗口截斷後，首條可能變成 Assistant（違反 Anthropic「首條須為 user」/嚴格交替）。
 		// 在頭部強行插入一條佔位 User 消息穩住協議。（與 GetWorkingMemory 的孤兒 tool_result
@@ -149,8 +157,16 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			workingMemory = append([]schema.Message{dummyUser}, workingMemory...)
 		}
 
+		// 有滾動摘要時，把它併進 system 訊息（而非另開 user 回合，避免破壞 user/assistant 交替）：
+		// 模型於是看到 [system + 早期摘要] + [末 N 逐字]，跨逐出仍連貫。
+		sysMsg := systemMsg
+		if sum := session.Summary(); sum != "" {
+			sysMsg = schema.Message{Role: schema.RoleSystem, Content: systemMsg.Content +
+				"\n\n## 先前對話摘要\n（早期歷史已摺疊；salience 保留決策/約束/使用者更正/未解事項）\n" + sum}
+		}
+
 		var contextHistory []schema.Message
-		contextHistory = append(contextHistory, systemMsg)
+		contextHistory = append(contextHistory, sysMsg)
 		contextHistory = append(contextHistory, workingMemory...)
 
 		// 【核心防線】發 LLM 前做字符級壓縮；只動發給 LLM 的副本，不損毀 session.history。

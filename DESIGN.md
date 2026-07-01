@@ -30,8 +30,10 @@
 
 ### 2. 上下文工程
 - **決定**：靜態系統層（[composer.go](internal/context/composer.go)）+ 滑動窗口（[session.go](internal/context/session.go)）+ **自校準壓縮器**（[compactor.go](internal/context/compactor.go)）。壓縮水位＝模型**真實上下文窗口 × 比例**，並用每次 API 回傳的真實 `PromptTokens` 反算 byte/token 比、EWMA 收斂——自動適配 Claude 200k / 本地 8k 等不同窗口。
-- **對照**：Claude Code 的 auto-compact 走 **LLM 摘要**（語意壓縮、較貴）；cogito 走**機械折疊 + 自校準**（確定性、零額外 API，但不做語意壓縮）。這是刻意的取捨：可預測 + 省錢，犧牲壓縮率。
-- **scoped**：不做 LLM 摘要式壓縮。
+- **對照**：Claude Code 的 auto-compact 走 **LLM 摘要**（語意壓縮、較貴）；cogito 的**機械折疊 + 自校準**是 always-on 的 **OOM 硬防線**（確定性、零額外 API）。
+- **滾動摘要 + history 有界化（對話式入口預設開）**：純滑動窗口有個真實產品缺陷——舊於窗口的訊息從上下文消失，長對話會失憶。故加**第二層**（[engine/summarizer.go](internal/engine/summarizer.go)）：history 超過門檻時，把超出逐字尾的舊訊息 **LLM 增量摺進滾動摘要**（salience 內建於 prompt：保留決策/約束/使用者更正/未解事項，丟例行成功/寒暄），並從 `session.history` **真正逐出**（重建 slice 讓 GC 回收）。於是 history 恆為 `[摘要] + 末 N 逐字`——**跨逐出連貫性與記憶體同時收斂**。只在超門檻時付一次 LLM（多數短對話零成本）；失敗保留原歷史下輪再試（不丟資料）。摘要併進 system 訊息不破壞 user/assistant 交替。
+- **兩層分工**：機械 Compactor 防「單輪窗口內爆量」（確定性、無 API）；滾動摘要防「跨逐出失憶 + RAM 無界」（語意、opt-in）。`COGITO_SUMMARY=off` 可關；bench/一次性任務預設關（`NewAgentEngine` 預設 false）保跑分確定性。
+- **scoped**：摘要觸發門檻/逐字尾長度目前寫死（tail 20 / trigger 40）；未做 per-session 動態調參。
 
 ### 3. 三層記憶（工作 / 會話 / 長期）
 記憶是**三層遞進**（窗口 ⊂ 全歷史 → 蒸餾記錄），各有獨立實作、明確壽命與持久化策略，不是同一 buffer 換名字：
@@ -40,8 +42,9 @@
 ① 工作記憶 Working  這一輪送進 LLM 的窗口
    GetWorkingMemory(20) 末 N 則滑動窗 + Compactor 字元級折疊  session.go:95 / loop.go:157
    壽命：單輪，每 turn 重取重折
-② 會話記憶 Session  這條對話的完整歷史
+② 會話記憶 Session  這條對話（滾動摘要 + 末 N 逐字，有界）
    Session.history（RWMutex）+ GlobalSessionMgr 按 convID 分池      session.go:14,139
+   長對話：舊訊息 LLM 摺進 session.summary 並逐出 → history 有界    engine/summarizer.go
    可持久化：SessionStore write-through 落盤（COGITO_SESSION_DIR）  session_store.go
    壽命：整段對話；設環境變數後跨重啟續傳（預設純記憶體）
 ③ 長期記憶 Long-term  跨會話/重啟/平台的蒸餾知識
