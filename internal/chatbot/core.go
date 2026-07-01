@@ -92,8 +92,8 @@ func (c *Core) Dispatch(channelID, text string) {
 	if c.tryResolveApproval(id, text) {
 		return
 	}
-	// 自我進化的閘：apply/reject memory|edges（不佔鎖、不當成新任務）。
-	if c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) {
+	// 自我進化的閘：apply/reject memory|edges，與 per-channel Plan Mode 切換（不佔鎖、不當成新任務）。
+	if c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryPlanCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
@@ -116,7 +116,7 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 		return
 	}
 
-	session := ctxpkg.GlobalSessionMgr.GetOrCreate(convID, workDir)
+	session := c.sessionFor(convID)
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	reporter := &reporter{convID: convID}
@@ -175,6 +175,34 @@ func isRecoverableErr(err error) bool {
 // resumeBackoff：指數退避 2s / 4s / 8s，給網路恢復留時間。
 func resumeBackoff(attempt int) time.Duration {
 	return time.Duration(int64(1)<<attempt) * time.Second
+}
+
+// sessionFor 取（或建）本頻道的持久 Session——指令閘與跑任務共用同一把 session。
+func (c *Core) sessionFor(convID string) *ctxpkg.Session {
+	return ctxpkg.GlobalSessionMgr.GetOrCreate(convID, c.channelWorkDir(convID))
+}
+
+// tryPlanCommand：per-channel Plan Mode 切換——`plan on`/`plan off`/`plan status`。狀態存在 Session
+// （隨之落盤），factory 建引擎時讀 session.PlanMode()。命中即消費。
+func (c *Core) tryPlanCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "plan on", "plan mode on":
+		c.sessionFor(convID).SetPlanMode(true)
+		SendMessage(convID, "🗺️ 已為本頻道開啟 Plan Mode：之後的任務會把計畫/進度外部化到 PLAN.md / TODO.md，並啟用『原始目標錨』與『確定性步驟跳過』。適合多步長任務、可斷點續跑。關閉打 `plan off`。")
+		return true
+	case "plan off", "plan mode off":
+		c.sessionFor(convID).SetPlanMode(false)
+		SendMessage(convID, "🗺️ 已關閉本頻道 Plan Mode，回一般對話模式（短任務/閒聊免計畫檔的儀式）。")
+		return true
+	case "plan status", "plan?", "plan":
+		if c.sessionFor(convID).PlanMode() {
+			SendMessage(convID, "🗺️ 本頻道 Plan Mode：**開**。打 `plan off` 關閉。")
+		} else {
+			SendMessage(convID, "🗺️ 本頻道 Plan Mode：**關**。打 `plan on` 開啟（多步長任務建議開）。")
+		}
+		return true
+	}
+	return false
 }
 
 // tryMemoryCommand：apply/reject memory 閘——人點頭才把提案記憶放行為可檢索長期記憶（.claw/memory/）。

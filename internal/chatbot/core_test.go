@@ -37,6 +37,28 @@ func TestIsRecoverableErr(t *testing.T) {
 	}
 }
 
+// per-channel Plan Mode 切換：指令改的是該頻道 Session 的狀態（factory 據此建引擎）。
+func TestTryPlanCommand_TogglesSession(t *testing.T) {
+	c := NewCore("planttest", t.TempDir(), nil, func(string, string) {})
+	conv := "planttest:chanA"
+
+	if !c.tryPlanCommand(conv, "plan on") {
+		t.Fatal("`plan on` 應被消費")
+	}
+	if !c.sessionFor(conv).PlanMode() {
+		t.Error("`plan on` 後該頻道應為開")
+	}
+	if !c.tryPlanCommand(conv, "PLAN OFF") { // 大小寫不敏感
+		t.Fatal("`plan off` 應被消費")
+	}
+	if c.sessionFor(conv).PlanMode() {
+		t.Error("`plan off` 後該頻道應為關")
+	}
+	if c.tryPlanCommand(conv, "幫我寫個 fizzbuzz") {
+		t.Error("一般任務文字不該被當成 plan 指令消費")
+	}
+}
+
 func TestResumeBackoff_Exponential(t *testing.T) {
 	for attempt, want := range map[int]time.Duration{1: 2 * time.Second, 2: 4 * time.Second, 3: 8 * time.Second} {
 		if got := resumeBackoff(attempt); got != want {

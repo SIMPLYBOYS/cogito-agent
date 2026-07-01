@@ -21,7 +21,10 @@ type Session struct {
 	// summary 是「已逐出 history 的早期訊息」的滾動摘要（salience-aware）。搭配末 N 條逐字，
 	// 讓 history 有界（[摘要] + 末 N 逐字）又不失早期脈絡。由引擎的 summarizer 維護。
 	summary string
-	mu      sync.RWMutex
+	// planMode 是本會話（頻道）是否走 Plan Mode——per-channel 切換（`plan on`/`plan off`），
+	// 預設關。開了則該頻道之後的任務外部化計畫到 PLAN.md/TODO.md，並啟用目標錨與確定性步驟跳過。
+	planMode bool
+	mu       sync.RWMutex
 
 	// 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
 	TotalPromptTokens     int
@@ -53,6 +56,7 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		UpdatedAt:             updated,
 		history:               snap.History,
 		summary:               snap.Summary,
+		planMode:              snap.PlanMode,
 		TotalPromptTokens:     snap.TotalPromptTokens,
 		TotalCompletionTokens: snap.TotalCompletionTokens,
 		TotalCostUSD:          snap.TotalCostUSD,
@@ -71,6 +75,7 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		UpdatedAt:             s.UpdatedAt.Format(time.RFC3339Nano),
 		History:               h,
 		Summary:               s.summary,
+		PlanMode:              s.planMode,
 		TotalPromptTokens:     s.TotalPromptTokens,
 		TotalCompletionTokens: s.TotalCompletionTokens,
 		TotalCostUSD:          s.TotalCostUSD,
@@ -131,6 +136,22 @@ func (s *Session) Summary() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.summary
+}
+
+// PlanMode 回傳本會話是否走 Plan Mode（per-channel 切換）。
+func (s *Session) PlanMode() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.planMode
+}
+
+// SetPlanMode 切換本會話的 Plan Mode 並落盤（`plan on`/`plan off` 指令用）。
+func (s *Session) SetPlanMode(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planMode = on
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
 }
 
 // EvictablePrefix 回傳「超出逐字尾、應摺進摘要」的前綴【拷貝】：history 條數未達 trigger 時回 nil
