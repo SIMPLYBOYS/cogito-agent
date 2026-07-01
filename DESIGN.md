@@ -58,6 +58,7 @@
 
 - **決定**：對齊 CoALA 四型記憶。離散記錄（`.claw/memory/<slug>.md`）+ **索引常駐封頂 + `recall` 按需檢索**（[memory.go](internal/context/memory.go)，關鍵字評分、中文 bigram、零依賴）+ **LRU（檔案 mtime）+ 超量歸檔（可復原非刪除）**。寫入走 synth→提案→人工放行。
 - **對照**：Hermes 有三層記憶 + 跨 session 用戶模型；cogito 的記憶是**檔案式、關鍵字檢索、無 embedding**（scoped），但**可審計、可手改、git 友善**，且遺忘用歸檔（接「失控控制」——記憶操作是新的失控面）。
+- **抗幻覺記憶（Hallucinated Memory）**：兩道防線——① **來源標註（provenance）**：放行的記錄自帶 `recorded:` 時間戳 + body 的「由誰/何時/從哪個任務沉澱」（[memory_synth.go](internal/evolve/memory_synth.go)），recall 時渲染給模型看，讓「真實檢索到的記憶」可溯源、與模型自產內容區分；② **強制不確定性聲明**：recall 查無時明確回「我沒有相關的長期記憶、切勿杜撰來源/時間/內容」（[recall.go](internal/tools/recall.go)），而非回空讓模型腦補。另加結構性防線：recall 是 tool_result（**檢索**）與模型**生成**天然分離；記憶即磁碟檔本身（無「索引 vs 原文」分岔，故 hash 交叉驗證 N/A）。
 - **KG（已做 Stage 1）**：記錄=節點、`[[links]]`=邊、`tags`=label；`recall` 回的是**連通子圖**（種子 + k 跳鄰域 + 它們之間的明確關係，[graph.go](internal/context/graph.go)），讓模型做 RAG 做不到的多跳關係推理。
 - **多文件 ingest（Stage 2a 已做）**：`cmd/ingest` 把 md 目錄結構式 ingest 成節點 + `edges.jsonl`（[ingest.go](internal/context/ingest.go)，確定性、不花錢），ingested 文件即進同一張圖供 recall 跨檔多跳。
 - **typed 關係抽取（Stage 2b 已做）**：LLM 從節點文字抽 typed 關係（depends-on/part-of…，[evolve/kg_extract.go](internal/evolve/kg_extract.go)）→ 提案 → **gate**（信心門檻/幻覺端點丟棄/去重/每節點封頂，[kg_gate.go](internal/context/kg_gate.go)）→ 併入 `edges.jsonl`。完全走 propose→gate→apply，與自我進化同一安全鐵律——這是 KG 勝 RAG 的來源，且不繞過控制。

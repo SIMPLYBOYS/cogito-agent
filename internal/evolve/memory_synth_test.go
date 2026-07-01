@@ -7,6 +7,25 @@ import (
 	"testing"
 )
 
+// 放行的記憶記錄要自帶來源標註（provenance）：時間戳 + 由誰/從哪個任務沉澱——對抗幻覺記憶、可溯源。
+func TestWriteMemoryRecord_StampsProvenance(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeMemoryRecord(dir, "教訓", "把 CSV 轉月報表", "遇到編碼錯先設 UTF-8"); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "mem-*.md"))
+	if len(files) != 1 {
+		t.Fatalf("應寫出 1 筆記錄，got %d", len(files))
+	}
+	b, _ := os.ReadFile(files[0])
+	s := string(b)
+	for _, want := range []string{"recorded:", "provenance", "教訓", "把 CSV 轉月報表", "遇到編碼錯先設 UTF-8"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("記錄應含 %q：\n%s", want, s)
+		}
+	}
+}
+
 func TestMemoryReflect_AppendsNewLearnings(t *testing.T) {
 	root := t.TempDir()
 	fp := &fakeProvider{content: `{"learnings": ["本專案用 pnpm 而非 npm", "測試前需設 DATABASE_URL"]}`}

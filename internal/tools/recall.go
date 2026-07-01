@@ -62,8 +62,10 @@ func (t *RecallTool) Execute(ctx context.Context, args json.RawMessage) (string,
 	}
 	out := t.loader.RecallGraph(in.Query, in.Hops, emb)
 	if out == "" {
-		// 找不到不是錯誤——回觀察讓模型據此繼續（error-as-observation）。
-		return fmt.Sprintf("（長期記憶中沒有與 %q 相關的內容）", in.Query), nil
+		// 找不到不是錯誤——回觀察讓模型據此繼續（error-as-observation）。並【強制不確定性聲明】：
+		// 對抗「幻覺記憶」（把模型自產內容誤當真實記憶）——查無時明說「沒有」，禁止杜撰。
+		return fmt.Sprintf("（長期記憶中查無與 %q 相關的內容。請勿據此編造記憶：若使用者問的是需要記憶佐證的事實，"+
+			"請明確回答「我沒有相關的長期記憶」，切勿杜撰來源、時間或內容。）", in.Query), nil
 	}
 	return out, nil
 }

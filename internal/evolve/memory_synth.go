@@ -209,8 +209,12 @@ func writeMemoryRecord(memDir, kind, task, learning string) error {
 	if r := []rune(learning); len(r) > 24 {
 		title = string(r[:24])
 	}
-	body := fmt.Sprintf("---\nname: %s\ndescription: %s\ntags: [%s]\n---\n%s\n\n（來源：任務「%s」）\n",
-		title, learning, kind, learning, oneLine(task))
+	// 來源標註（provenance，對抗幻覺記憶）：frontmatter 記時間戳、body 記完整來源；body 會在 recall
+	// 時渲染給模型看，讓「檢索到的真實記憶」自帶「由誰、何時、從哪個任務沉澱」——可溯源、可稽核、
+	// 和模型自產內容區分。時間戳同時作為 last-recorded（同一條學習重複放行＝重新確認）。
+	ts := time.Now().Format(time.RFC3339)
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\ntags: [%s]\nrecorded: %s\n---\n%s\n\n〔來源 provenance〕由「%s」反思、於 %s 從任務「%s」沉澱。\n",
+		title, learning, kind, ts, learning, kind, ts, oneLine(task))
 	return os.WriteFile(filepath.Join(memDir, slug+".md"), []byte(body), 0o644)
 }
 
