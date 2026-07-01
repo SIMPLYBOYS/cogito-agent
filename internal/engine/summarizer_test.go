@@ -124,6 +124,9 @@ func TestRun_PlanModeInjectsDeterministicNextStep(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "TODO.md"), []byte(todo), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(work, "PLAN.md"), []byte("# 計畫\n目標：產出季度營收儀表板 GOAL_MARKER。\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	cp := &captureProvider{}
 	eng := NewAgentEngine(cp, newTestRegistry(), false, true) // planMode=true
@@ -139,6 +142,9 @@ func TestRun_PlanModeInjectsDeterministicNextStep(t *testing.T) {
 	}
 	if strings.Contains(cp.system, "待辦的步驟D") {
 		t.Error("只應點出第一個未完成步驟，不該把之後的也塞進錨")
+	}
+	if !strings.Contains(cp.system, "原始目標錨") || !strings.Contains(cp.system, "GOAL_MARKER") {
+		t.Errorf("system 應含每輪注入的原始目標錨（抗漂移）:\n%s", cp.system)
 	}
 }
 

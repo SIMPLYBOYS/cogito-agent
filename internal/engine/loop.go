@@ -162,6 +162,9 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		// 讓斷點續跑跳過已完成步驟不再靠模型重讀猜測。摘要：早期歷史摺疊後仍連貫。
 		sysExtra := ""
 		if e.PlanMode {
+			if goal, ok := ctxpkg.ReadPlanGoal(session.WorkDir); ok {
+				sysExtra += planGoalNote(goal) // 目標錨在前（抗漂移，最優先）
+			}
 			if prog, ok := ctxpkg.ReadTodoProgress(session.WorkDir); ok {
 				sysExtra += planProgressNote(prog)
 			}

@@ -3,6 +3,7 @@ package context
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,6 +51,48 @@ func TestReadTodoProgress_NoLedger(t *testing.T) {
 	dir := writeTodo(t, "# 只有散文，沒有 checkbox\n一些說明。\n")
 	if _, ok := ReadTodoProgress(dir); ok {
 		t.Error("無 checkbox 應回 false（不注入進度錨）")
+	}
+}
+
+func TestReadPlanGoal(t *testing.T) {
+	dir := t.TempDir()
+	// 去標題行、留實質目標。
+	if err := os.WriteFile(filepath.Join(dir, "PLAN.md"), []byte("# 專案計畫\n目標：把使用者上傳的 CSV 轉成月報表並寄出。\n技術選型：Go + gomail。\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goal, ok := ReadPlanGoal(dir)
+	if !ok {
+		t.Fatal("應讀到目標")
+	}
+	if strings.HasPrefix(goal, "#") {
+		t.Errorf("應去掉開頭標題行，got %q", goal)
+	}
+	if !strings.Contains(goal, "月報表") {
+		t.Errorf("應含實質目標，got %q", goal)
+	}
+}
+
+func TestReadPlanGoal_MissingOrEmpty(t *testing.T) {
+	if _, ok := ReadPlanGoal(t.TempDir()); ok {
+		t.Error("無 PLAN.md 應回 false")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "PLAN.md"), []byte("# 只有標題\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ReadPlanGoal(dir); ok {
+		t.Error("只有標題無內容應回 false")
+	}
+}
+
+func TestReadPlanGoal_Clamps(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "PLAN.md"), []byte(strings.Repeat("目標很長", 500)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goal, ok := ReadPlanGoal(dir)
+	if !ok || !strings.Contains(goal, "截斷") {
+		t.Errorf("超長應截斷，got ok=%v len=%d", ok, len([]rune(goal)))
 	}
 }
 

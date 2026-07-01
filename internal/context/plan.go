@@ -46,6 +46,35 @@ func ReadTodoProgress(workDir string) (TodoProgress, bool) {
 	return p, true
 }
 
+// planGoalRuneCap 是目標錨每輪注入的字數上限：取 PLAN.md 開頭（＝目標/理解），避免整份架構每輪灌爆。
+const planGoalRuneCap = 800
+
+// ReadPlanGoal 讀 workDir/PLAN.md 的開頭當「原始目標」錨（去掉單行 markdown 標題、rune 安全截斷）。
+// bool 表示 PLAN.md 存在且有實質內容。讓框架每輪把原始目標釘進 system 訊息，對抗多輪目標漂移
+// （Context Drift）——一切步驟都必須服務這個目標。
+func ReadPlanGoal(workDir string) (string, bool) {
+	b, err := os.ReadFile(filepath.Join(workDir, "PLAN.md"))
+	if err != nil {
+		return "", false
+	}
+	s := strings.TrimSpace(string(b))
+	// 去掉開頭單一 markdown 標題行（如 "# 計畫"），留實質目標內容。
+	if strings.HasPrefix(s, "#") {
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = strings.TrimSpace(s[i+1:])
+		} else {
+			s = ""
+		}
+	}
+	if s == "" {
+		return "", false
+	}
+	if r := []rune(s); len(r) > planGoalRuneCap {
+		s = string(r[:planGoalRuneCap]) + " …[目標錨截斷]…"
+	}
+	return s, true
+}
+
 // parseCheckbox 認 "- [ ] 文字" / "- [x] 文字"（x 不分大小寫，允許 - 或 * 作項目符號）。
 func parseCheckbox(line string) (done bool, text string, ok bool) {
 	if len(line) < 4 || (line[0] != '-' && line[0] != '*') {

@@ -89,6 +89,12 @@ func renderTranscript(msgs []schema.Message) string {
 	return b.String()
 }
 
+// planGoalNote 把框架每輪自 PLAN.md 讀到的原始目標，組成注入 system 訊息的「目標錨」——
+// 抗多輪目標漂移（Context Drift）：多輪後行動一旦偏離就靠它拉回。
+func planGoalNote(goal string) string {
+	return "\n\n## 原始目標錨（框架自 PLAN.md 每輪固定注入，抗漂移）\n以下是本任務的原始目標與理解。多輪之後，若你的行動開始偏離它，立即拉回——每一步都必須服務這個目標：\n" + goal
+}
+
 // planProgressNote 把框架對 TODO.md 的確定性解讀，組成注入 system 訊息的「進度帳本錨」：
 // 直接指出下一個未完成步驟，讓斷點續跑跳過已完成步驟由框架權威指定，而非模型重讀猜測。
 func planProgressNote(p ctxpkg.TodoProgress) string {
