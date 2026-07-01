@@ -66,8 +66,8 @@
 - **scoped**：持久化 / ANN 索引（Stage 3b）待巨量才做。分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
 
 ### 4. 工具系統與安全
-- **決定**：可插拔註冊表 + 環繞式中間件（[registry.go](internal/tools/registry.go)）。安全是**多層**：HITL 危險指令審批（[approval.go](internal/slackbot/approval.go)，黑名單含 bash / write 路徑逃逸 / **遠端 MCP 工具**）推回 Slack 等 `approve`；OS 級 **Docker 沙箱**（[sandbox/](internal/sandbox/)，per-session 容器、只掛 workDir、`--network none`、限 mem/cpu/pid）是軟防線之外唯一擋得住逃逸的硬隔離。
-- **對照**：Claude Code 用權限提示 + 工作目錄邊界；Codex 有沙箱與審批模式。cogito 把審批接到 **Slack HITL**（遠端可控）並提供**真正的 OS 級隔離**——這是本專案的招牌強項。
+- **決定**：可插拔註冊表 + 環繞式中間件（[registry.go](internal/tools/registry.go)）。安全是**多層**：HITL 危險指令審批（[approval.go](internal/chatbot/approval.go)，傳輸無關、黑名單含 bash / write 路徑逃逸 / **遠端 MCP 工具**）推回 Slack / Telegram 等 `approve`；OS 級 **Docker 沙箱**（[sandbox/](internal/sandbox/)，per-session 容器、只掛 workDir、`--network none`、限 mem/cpu/pid）是軟防線之外唯一擋得住逃逸的硬隔離。
+- **對照**：Claude Code 用權限提示 + 工作目錄邊界；Codex 有沙箱與審批模式。cogito 把審批接到 **Slack / Telegram HITL**（遠端可控、傳輸無關）並提供**真正的 OS 級隔離**——這是本專案的招牌強項。
 - **scoped**：沙箱是 Docker，未做更細的 seccomp/gVisor。
 
 ### 5. 多 agent 編排
@@ -76,7 +76,7 @@
 - **scoped（已知缺口）**：無並行**寫**子 agent / git worktree 隔離——並行修改會衝突，目前不支援。
 
 ### 6. 自我進化
-- **決定**：四件套（[evolve/](internal/evolve/)）——技能自生成、AGENTS.md 記憶自更新、失敗 Reflexion、參數自調。**全部走安全閘**：只寫暫存提案（`skills-proposed/` / `AGENTS.proposed.md` / `config.proposed.json` / `kg/edges.proposed.jsonl`）→ 確定性把關（結構 + 危險指令/憑證掃描）或人工 review → 才生效。技能對齊 [agentskills.io](https://agentskills.io) 開放標準。
+- **決定**：四件套（[evolve/](internal/evolve/)）——技能自生成、記憶自更新（提案 → apply 後**放行為 `.claw/memory` 記錄**，非併回 AGENTS.md）、失敗 Reflexion、參數自調。**全部走安全閘**：只寫暫存提案（`skills-proposed/` / `AGENTS.proposed.md`（提案暫存檔）/ `config.proposed.json` / `kg/edges.proposed.jsonl`）→ 確定性把關（結構 + 危險指令/憑證掃描）或人工 review → 才生效。技能對齊 [agentskills.io](https://agentskills.io) 開放標準。
 - **兩種觸發（harness 兜底 + agent 自主）**：任務結束時 **post-task hook 由 harness 保證觸發**，反思出技能/記憶/KG 關係（可靠，不指望 agent 記得）；同時暴露 `consolidate` 工具讓 **agent 判斷有可複用價值時自己提前沉澱**（自主）。兩者產物同樣 gated。這就是「框架強制觸發 + 模型判斷內容」落在自我進化上的體現。
 - **對照**：Hermes 走到 **RL 微調（改模型權重）** 的飛輪；cogito 只在 **prompt/技能/記憶層**進化、**永不改權重**、**永遠 gated**。誠實說：進化較淺，但**安全、可審計、可回退**。
 - **教訓（真實踩過）**：曾把一條過度擬合的爛慣例 `apply` 進 live AGENTS.md，污染了後續所有任務——閘只跟「人有沒有認真 review」一樣可靠。這強化了「提案而非自動生效」的設計。
@@ -104,11 +104,11 @@
 | 控制流硬防線 | ✅ 回合/成本/死迴圈/軟著陸 | ◐ 限制 | ◐ 限制 | ◐ |
 | 上下文壓縮 | ✅ 機械+自校準 | ✅ LLM 摘要 | ✅ | ✅ |
 | 長期記憶檢索 | ◐ 圖子圖+混合(關鍵字/embedding)+LRU | ◐ | ◐ | ✅ 多層+RL |
-| HITL + OS 沙箱 | ✅✅ Slack 審批 + Docker 隔離 | ◐ 權限提示 | ✅ 沙箱 | ◐ |
+| HITL + OS 沙箱 | ✅✅ Slack/Telegram 審批 + Docker 隔離 | ◐ 權限提示 | ✅ 沙箱 | ◐ |
 | 多 agent | ◐ 只讀子 agent | ✅ 可寫子 agent | ◐ | ✅ |
 | 自我進化 | ◐ prompt/技能/記憶層 + gated | ✗ | ✗ | ✅✅ RL 飛輪 |
 | 可觀測 + 評測 | ✅✅ OTel + 跑分 + CI + SWE-bench | ◐ | ◐ | ◐ |
-| 模型/平台廣度 | ◐ 多 Provider / Slack | ✅ 產品級 | ✅ | ✅✅ 200+/多平台 |
+| 模型/平台廣度 | ◐ 多 Provider / 多平台（Slack+Telegram） | ✅ 產品級 | ✅ | ✅✅ 200+/多平台 |
 | 部署形態 | ✅ 單 Go binary 自託管 | 產品 | 產品 | Python 框架 |
 
 （✅✅=招牌強項，✅=做得好，◐=有但收斂，✗=未做。對其他 agent 僅就公開可知的設計特性概述。）
@@ -118,12 +118,16 @@
 ## 刻意不做的（YAGNI / scoped，及理由）
 
 - **RL 微調飛輪**：要資料/算力/模型血統，非單人專案可達；且改權重與「可審計、可回退」的安全主題相悖。
-- **向量/embedding 記憶、knowledge graph**：現階段關鍵字檢索夠用；`recall` 介面已留好升級點。
-- **並行寫子 agent / worktree**：併發寫衝突複雜，需求未到。
-- **多即時通訊平台**：先把 Slack 一條做深，廣度是之後的事。
+- **並行寫子 agent / worktree**：併發寫衝突複雜，需求未到（子 agent 目前只讀）。
 - **200+ 模型原生**：OpenAI 相容端點已間接覆蓋大半，不為廣度而廣度。
+- **狀態管理的 Event Sourcing / FSM**（§1）：只落 Checkpoint-Resume。事件溯源的稽核/回放我們已由 OTel 追蹤 + append 導向 history 拿到大半，重建成事件日誌是過度設計；顯式 FSM 會扼殺 ReAct 彈性，「異常可攔截」已由護欄達成。
+- **記憶多租戶命名空間隔離**：長期記憶刻意是**跨頻道共享的一顆腦**（[klock.go](internal/context/klock.go) 全域鎖）。單人 portfolio 這是特性；多租戶才需按 user/task 命名空間隔離——需求未到。
+- **記憶召回 hash 交叉驗證**（抗幻覺 §3）：記憶即磁碟檔本身，無「索引 vs 原文」分岔，故 N/A；改用 provenance 標註 + 強制不確定性聲明。
+- **mid-tool 檢查點**：斷點續跑粒度是**回合**；一個跑到一半的長 bash 被中斷不可續（整回合重來）。token/工具級檢查點 ROI 低。
 
-**敢標 scoped、並講清楚 why，本身就是設計判斷**——比假裝全能可信。
+**已從此清單畢業**（曾標 scoped、後來做了）：KG（Stage 1/2a/2b/3a）+ embedding 混合選種子（§3）、多即時通訊平台（Telegram + Socket Mode，傳輸無關核心 `internal/chatbot`，見 README 集成段）、滾動摘要式壓縮（§2，原「不做 LLM 摘要」已按成熟產品思維修正）。
+
+**敢標 scoped、並講清楚 why，本身就是設計判斷**——比假裝全能可信；而「畢業」清單則誠實記錄哪些取捨隨需求變了。
 
 ---
 
