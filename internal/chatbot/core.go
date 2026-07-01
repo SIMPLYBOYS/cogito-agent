@@ -6,18 +6,27 @@ package chatbot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
+
+// 自動斷點續跑（opt-in，COGITO_AUTO_RESUME=1）：任務因【暫時性】錯誤中止時最多自動續跑幾次。
+const maxAutoResume = 3
+
+// resumeNudge 是續跑時補進歷史的系統提示（走 RoleUser，與成本軟著陸等系統提醒一致）。
+const resumeNudge = "[系統] 先前因暫時性錯誤（如網路中斷）使任務未完成；連線現已恢復。請檢視目前進度，從中斷處接續完成，不要重做已完成的步驟。"
 
 // EngineFactory 為每個會話動態組裝引擎（掛該頻道專屬 CostTracker；reporter 接給子智能體串流進度）。
 type EngineFactory func(session *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine
@@ -51,6 +60,8 @@ type Core struct {
 	postRun     PostRunHook
 	postFailure PostFailureHook
 
+	autoResume bool // 暫時性中斷後自動續跑（COGITO_AUTO_RESUME=1 開）
+
 	busy   map[string]bool // per-WorkDir 鎖：同目錄序列化、不同頻道並行
 	busyMu sync.Mutex
 }
@@ -58,7 +69,13 @@ type Core struct {
 // NewCore 建核心並向全域 senders 註冊本平台的原生發送，使 SendMessage 路由可達。
 func NewCore(platform, workDir string, factory EngineFactory, rawSend func(channelID, text string)) *Core {
 	senders.Store(platform, rawSend)
-	return &Core{platform: platform, workDir: workDir, factory: factory, busy: make(map[string]bool)}
+	return &Core{
+		platform:   platform,
+		workDir:    workDir,
+		factory:    factory,
+		autoResume: os.Getenv("COGITO_AUTO_RESUME") == "1",
+		busy:       make(map[string]bool),
+	}
 }
 
 func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
@@ -104,16 +121,60 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 
 	reporter := &reporter{convID: convID}
 	eng := c.factory(session, reporter)
-	if err := eng.Run(context.Background(), session, reporter); err != nil {
+
+	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
+	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。
+	for attempt := 0; ; {
+		err := eng.Run(context.Background(), session, reporter)
+		if err == nil {
+			if c.postRun != nil {
+				c.postRun(context.Background(), session, prompt)
+			}
+			return
+		}
+		if c.autoResume && attempt < maxAutoResume && isRecoverableErr(err) {
+			attempt++
+			delay := resumeBackoff(attempt)
+			SendMessage(convID, fmt.Sprintf("🔌 偵測到暫時性中斷（%v）。%.0f 秒後自動從斷點續跑（第 %d/%d 次）…", err, delay.Seconds(), attempt, maxAutoResume))
+			time.Sleep(delay) // 退避＝等網路恢復；下一次 Run 的 API 呼叫即是探測
+			session.Append(schema.Message{Role: schema.RoleUser, Content: resumeNudge})
+			continue
+		}
 		SendMessage(convID, fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
 		if c.postFailure != nil {
 			c.postFailure(context.Background(), session, prompt, err.Error())
 		}
 		return
 	}
-	if c.postRun != nil {
-		c.postRun(context.Background(), session, prompt)
+}
+
+// isRecoverableErr 判斷任務中止是否屬「暫時性/可恢復」（網路類），值得等恢復後自動續跑。
+// 採白名單（網路訊號）：net.Error，或錯誤鏈訊息含連線/逾時/5xx/429/overloaded 等徵兆。
+// 回合/成本熔斷等【終局】錯誤不含這些徵兆，自然落到終局路徑——不會被誤判成可續跑而無限重試燒錢。
+func isRecoverableErr(err error) bool {
+	if err == nil {
+		return false
 	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, sig := range []string{
+		"connection", "timeout", "deadline exceeded", "eof", "reset by peer",
+		"no such host", "dial tcp", "i/o timeout", "temporarily", "broken pipe",
+		"overloaded", "502", "503", "504", "429", "rate limit",
+	} {
+		if strings.Contains(s, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// resumeBackoff：指數退避 2s / 4s / 8s，給網路恢復留時間。
+func resumeBackoff(attempt int) time.Duration {
+	return time.Duration(int64(1)<<attempt) * time.Second
 }
 
 // tryMemoryCommand：apply/reject memory 閘——人點頭才把提案記憶放行為可檢索長期記憶（.claw/memory/）。

@@ -1,10 +1,49 @@
 package chatbot
 
 import (
+	"errors"
+	"fmt"
+	"net"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// isRecoverableErr 是自動續跑的閘：把終局錯誤誤判成可續跑 → 無限重試燒錢，故釘死分類。
+func TestIsRecoverableErr(t *testing.T) {
+	recoverable := []error{
+		&net.OpError{Op: "dial", Err: errors.New("connection refused")},
+		fmt.Errorf("Action 階段失敗: %w", errors.New("dial tcp: i/o timeout")),
+		errors.New("anthropic: 529 overloaded_error"),
+		errors.New("rate limit exceeded (429)"),
+		errors.New("unexpected EOF"),
+	}
+	for _, e := range recoverable {
+		if !isRecoverableErr(e) {
+			t.Errorf("應判為可續跑: %v", e)
+		}
+	}
+	terminal := []error{
+		nil,
+		errors.New("達到最大回合數上限 40，強制終止"),
+		errors.New("達到單任務成本上限 $1.00（本次已花費 $1.20），強制終止"),
+		errors.New("工具參數解析失敗"),
+	}
+	for _, e := range terminal {
+		if isRecoverableErr(e) {
+			t.Errorf("應判為終局（不續跑）: %v", e)
+		}
+	}
+}
+
+func TestResumeBackoff_Exponential(t *testing.T) {
+	for attempt, want := range map[int]time.Duration{1: 2 * time.Second, 2: 4 * time.Second, 3: 8 * time.Second} {
+		if got := resumeBackoff(attempt); got != want {
+			t.Errorf("resumeBackoff(%d)=%v, want %v", attempt, got, want)
+		}
+	}
+}
 
 // per-channel 隔離：不同頻道得到不同目錄、同頻道穩定、都在 root 之下。
 func TestChannelWorkDir_PerChannelIsolation(t *testing.T) {
