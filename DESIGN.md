@@ -33,7 +33,23 @@
 - **對照**：Claude Code 的 auto-compact 走 **LLM 摘要**（語意壓縮、較貴）；cogito 走**機械折疊 + 自校準**（確定性、零額外 API，但不做語意壓縮）。這是刻意的取捨：可預測 + 省錢，犧牲壓縮率。
 - **scoped**：不做 LLM 摘要式壓縮。
 
-### 3. 長期記憶
+### 3. 三層記憶（工作 / 會話 / 長期）
+記憶是**三層遞進**（窗口 ⊂ 全歷史 → 蒸餾記錄），各有獨立實作、明確壽命與持久化策略，不是同一 buffer 換名字：
+
+```
+① 工作記憶 Working  這一輪送進 LLM 的窗口
+   GetWorkingMemory(20) 末 N 則滑動窗 + Compactor 字元級折疊  session.go:95 / loop.go:157
+   壽命：單輪，每 turn 重取重折
+② 會話記憶 Session  這條對話的完整歷史
+   Session.history（RWMutex）+ GlobalSessionMgr 按 convID 分池      session.go:14,139
+   可持久化：SessionStore write-through 落盤（COGITO_SESSION_DIR）  session_store.go
+   壽命：整段對話；設環境變數後跨重啟續傳（預設純記憶體）
+③ 長期記憶 Long-term  跨會話/重啟/平台的蒸餾知識
+   離散記錄 .claw/memory/*.md + 索引常駐 + recall 按需 + KG 關聯    memory.go / graph.go
+   壽命：永久
+```
+①②的上下文工程細節見上節 2；以下深入第③層長期記憶。
+
 - **決定**：對齊 CoALA 四型記憶。離散記錄（`.claw/memory/<slug>.md`）+ **索引常駐封頂 + `recall` 按需檢索**（[memory.go](internal/context/memory.go)，關鍵字評分、中文 bigram、零依賴）+ **LRU（檔案 mtime）+ 超量歸檔（可復原非刪除）**。寫入走 synth→提案→人工放行。
 - **對照**：Hermes 有三層記憶 + 跨 session 用戶模型；cogito 的記憶是**檔案式、關鍵字檢索、無 embedding**（scoped），但**可審計、可手改、git 友善**，且遺忘用歸檔（接「失控控制」——記憶操作是新的失控面）。
 - **KG（已做 Stage 1）**：記錄=節點、`[[links]]`=邊、`tags`=label；`recall` 回的是**連通子圖**（種子 + k 跳鄰域 + 它們之間的明確關係，[graph.go](internal/context/graph.go)），讓模型做 RAG 做不到的多跳關係推理。

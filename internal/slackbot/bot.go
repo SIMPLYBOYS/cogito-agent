@@ -69,14 +69,27 @@ func (b *SlackBot) Start(ctx context.Context) {
 	log.Printf("🚀 cogito-agent Slack 服務已啟動（Socket Mode，outbound websocket，免公開 URL）")
 	go func() {
 		for evt := range b.client.Events {
-			if evt.Type != socketmode.EventTypeEventsAPI {
-				continue // 連線/心跳等事件無需處理
+			switch evt.Type {
+			case socketmode.EventTypeConnecting:
+				log.Printf("[Slack] Socket Mode 連線中…")
+				continue
+			case socketmode.EventTypeConnected:
+				log.Printf("[Slack] Socket Mode 已連線 ✅（開始接收事件）")
+				continue
+			case socketmode.EventTypeConnectionError:
+				log.Printf("[Slack] Socket Mode 連線錯誤: %v（檢查 SLACK_APP_TOKEN 與其 connections:write scope）", evt.Data)
+				continue
+			case socketmode.EventTypeEventsAPI:
+				// 往下處理
+			default:
+				continue // hello / 心跳 / 互動 等無需處理
 			}
 			apiEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 			if !ok {
 				continue
 			}
 			b.client.Ack(*evt.Request) // 先 Ack，避免 Slack 視為失敗而重送
+			log.Printf("[Slack] 收到 Events API 事件: %s", apiEvent.InnerEvent.Type)
 			if apiEvent.Type != slackevents.CallbackEvent {
 				continue
 			}
