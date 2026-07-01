@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -26,9 +27,11 @@ const (
 )
 
 type TelegramBot struct {
-	core   *chatbot.Core
-	token  string
-	client *http.Client
+	core    *chatbot.Core
+	token   string
+	client  *http.Client
+	botID   int64          // 本 bot 的 user id（判斷「回覆到我」用）
+	mention *regexp.Regexp // 剝除群組裡的 @提及（如 @cogito_bot，不分大小寫）
 }
 
 func NewTelegramBot(factory chatbot.EngineFactory, workDir string) *TelegramBot {
@@ -37,8 +40,37 @@ func NewTelegramBot(factory chatbot.EngineFactory, workDir string) *TelegramBot 
 		log.Fatal("請設置 TELEGRAM_BOT_TOKEN")
 	}
 	b := &TelegramBot{token: token, client: &http.Client{Timeout: (pollTimeoutSec + 15) * time.Second}}
+	// 取自身 id/username：群組裡用來判斷「有沒有在叫我」並剝掉 @提及（對齊 Slack 的 AuthTest）。
+	if err := b.fetchIdentity(); err != nil {
+		log.Fatalf("Telegram getMe 失敗，請檢查 TELEGRAM_BOT_TOKEN: %v", err)
+	}
 	b.core = chatbot.NewCore(platform, workDir, factory, b.send)
 	return b
+}
+
+// fetchIdentity 以 getMe 取本 bot 的 id 與 username，並編好剝提及的 regexp。
+func (b *TelegramBot) fetchIdentity() error {
+	resp, err := b.client.Get(apiBase + b.token + "/getMe")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	var r struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return err
+	}
+	if !r.OK || r.Result.Username == "" {
+		return fmt.Errorf("getMe 回應異常（ok=%v username=%q）", r.OK, r.Result.Username)
+	}
+	b.botID = r.Result.ID
+	b.mention = regexp.MustCompile(`(?i)@` + regexp.QuoteMeta(r.Result.Username))
+	return nil
 }
 
 func (b *TelegramBot) SetPostRunHook(h chatbot.PostRunHook)         { b.core.SetPostRunHook(h) }
@@ -88,14 +120,16 @@ func (b *TelegramBot) Start(ctx context.Context) {
 			if m == nil || m.From == nil || m.From.IsBot {
 				continue
 			}
-			text := strings.TrimSpace(m.Text)
-			if text == "" || text == "/start" { // /start 是 Telegram 慣例的開場，不當任務
-				if text == "/start" {
-					b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可；危險操作會請你回覆 approve/reject。")
-				}
+			// DM：每則都當任務。群組：只在 @我 或 回覆到我 時才當任務，並剝掉 @提及。
+			prompt, ok := b.addressedText(m)
+			if !ok {
+				continue // 群組閒聊、沒叫到我 → 不理
+			}
+			if prompt == "/start" { // Telegram 慣例的開場，不當任務
+				b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。")
 				continue
 			}
-			b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), text)
+			b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), prompt)
 		}
 	}
 }
@@ -111,18 +145,46 @@ func (b *TelegramBot) getUpdates(ctx context.Context, offset int64) ([]update, e
 	return parseUpdates(resp.Body)
 }
 
-// update 只取我們用得到的欄位（Telegram 回應遠不止這些）。
+// addressedText 決定一則訊息是否要當任務、以及清理後的 prompt：
+//   - 私聊（DM）：每則都算，回原文。
+//   - 群組：只在「@本 bot」或「回覆到本 bot 的訊息」時才算，並剝掉 @提及。
+//
+// 回傳 (prompt, ok)；ok=false 表示忽略（群組閒聊、或剝完變空）。
+func (b *TelegramBot) addressedText(m *tgMessage) (string, bool) {
+	text := strings.TrimSpace(m.Text)
+	if m.Chat.Type == "private" {
+		return text, text != ""
+	}
+	// 群組/超級群組：必須有叫到我。
+	repliedToMe := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && m.ReplyToMessage.From.ID == b.botID
+	if !b.mention.MatchString(text) && !repliedToMe {
+		return "", false
+	}
+	text = strings.TrimSpace(b.mention.ReplaceAllString(text, "")) // 剝掉 @cogito_bot，留乾淨任務
+	return text, text != ""
+}
+
+// Telegram 回應遠不止這些欄位——只取我們用得到的。用具名型別以便帶 chat.type 與 reply_to_message。
 type update struct {
-	UpdateID int64 `json:"update_id"`
-	Message  *struct {
-		Text string `json:"text"`
-		Chat struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		From *struct {
-			IsBot bool `json:"is_bot"`
-		} `json:"from"`
-	} `json:"message"`
+	UpdateID int64      `json:"update_id"`
+	Message  *tgMessage `json:"message"`
+}
+
+type tgMessage struct {
+	Text           string     `json:"text"`
+	Chat           tgChat     `json:"chat"`
+	From           *tgUser    `json:"from"`
+	ReplyToMessage *tgMessage `json:"reply_to_message"`
+}
+
+type tgChat struct {
+	ID   int64  `json:"id"`
+	Type string `json:"type"` // private / group / supergroup / channel
+}
+
+type tgUser struct {
+	ID    int64 `json:"id"`
+	IsBot bool  `json:"is_bot"`
 }
 
 func parseUpdates(r io.Reader) ([]update, error) {

@@ -197,7 +197,7 @@ internal/
 │   ├── core.go              Dispatch / handleAgentRun / 命名空間 / reporter
 │   └── approval.go          危險指令 HITL 審批（channel-based 單例）
 ├── slackbot/                Slack 傳輸層：Socket Mode（outbound websocket，免公開 URL）+ @提及剝離 → core.Dispatch
-├── telegrambot/             Telegram 傳輸層：getUpdates 長輪詢（免公開 URL）→ core.Dispatch
+├── telegrambot/             Telegram 傳輸層：getUpdates 長輪詢（免公開 URL）→ core.Dispatch（DM 全收；群組 @我/回覆我 才觸發、自動剝 @提及）
 ├── cmdutil/                 各 cmd 入口共用啟動樣板（Bootstrap：載入 .env + 初始化 OTel + 回傳 flush）
 ├── observability/           可觀測性
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）

@@ -1,9 +1,41 @@
 package telegrambot
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// 群組 @提及剝離：DM 全收；群組只在 @我 / 回覆我 時當任務，並剝掉 @提及。
+func TestAddressedText(t *testing.T) {
+	b := &TelegramBot{botID: 42, mention: regexp.MustCompile(`(?i)@cogito_bot`)}
+	dm := tgChat{ID: 1, Type: "private"}
+	grp := tgChat{ID: -100, Type: "supergroup"}
+	me := &tgUser{ID: 42}
+	other := &tgUser{ID: 7}
+
+	cases := []struct {
+		name     string
+		msg      tgMessage
+		wantText string
+		wantOK   bool
+	}{
+		{"DM 全收", tgMessage{Text: "做這個", Chat: dm}, "做這個", true},
+		{"DM 空", tgMessage{Text: "  ", Chat: dm}, "", false},
+		{"群組 @我 剝提及", tgMessage{Text: "@cogito_bot 幫我建檔", Chat: grp}, "幫我建檔", true},
+		{"群組 大小寫不敏感", tgMessage{Text: "@Cogito_Bot hi", Chat: grp}, "hi", true},
+		{"群組 沒叫我 → 忽略", tgMessage{Text: "大家好啊", Chat: grp}, "", false},
+		{"群組 只 @我沒內容 → 忽略", tgMessage{Text: "@cogito_bot", Chat: grp}, "", false},
+		{"群組 回覆到我", tgMessage{Text: "繼續", Chat: grp, ReplyToMessage: &tgMessage{From: me}}, "繼續", true},
+		{"群組 回覆到別人 → 忽略", tgMessage{Text: "繼續", Chat: grp, ReplyToMessage: &tgMessage{From: other}}, "", false},
+	}
+	for _, c := range cases {
+		got, ok := b.addressedText(&c.msg)
+		if got != c.wantText || ok != c.wantOK {
+			t.Errorf("%s: addressedText = (%q,%v), want (%q,%v)", c.name, got, ok, c.wantText, c.wantOK)
+		}
+	}
+}
 
 // parseUpdates 是入站解析的非平凡處：確認從 getUpdates 回應抽得 chat.id / text / is_bot，
 // 並按 update_id 推進 offset。
