@@ -89,6 +89,15 @@ func renderTranscript(msgs []schema.Message) string {
 	return b.String()
 }
 
+// planProgressNote 把框架對 TODO.md 的確定性解讀，組成注入 system 訊息的「進度帳本錨」：
+// 直接指出下一個未完成步驟，讓斷點續跑跳過已完成步驟由框架權威指定，而非模型重讀猜測。
+func planProgressNote(p ctxpkg.TodoProgress) string {
+	if p.NextStep == "" { // 全部打勾
+		return fmt.Sprintf("\n\n## 進度帳本（框架自 TODO.md 確定性讀取，權威）\nTODO.md 全部 %d 步皆已打勾。請彙整成果、做最終交付，切勿重複執行任何步驟。", p.Total)
+	}
+	return fmt.Sprintf("\n\n## 進度帳本（框架自 TODO.md 確定性讀取，權威）\n已完成 %d/%d 步。下一個【未完成】步驟就是：\n- [ ] %s\n請【直接從這一步繼續】，不要重做已打勾（- [x]）的步驟；每完成一步先用 edit_file 把它打勾再往下。", p.Done, p.Total, p.NextStep)
+}
+
 // clampRunes 按【字元】截頭尾（rune 安全，不切壞中文），中間以標記省略。
 func clampRunes(s string, limit int) string {
 	r := []rune(s)

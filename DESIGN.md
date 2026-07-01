@@ -22,6 +22,8 @@
 - **決定**：ReAct（Thinking→Action→Observation）多輪迴圈（[engine/loop.go](internal/engine/loop.go)），但**三道硬防線由框架強制**：回合上限、per-task 成本熔斷、死迴圈指紋偵測（參數正規化看穿尾空格/路徑微差）。另加**成本軟著陸**——花費跨 80% 即提醒模型「停工具、立刻交付」，避免「錢花了、做好了、卻在交付前一刻被硬砍」。
 - **對照**：Claude Code/Codex 也有 turn/權限上限；cogito 把「失控控制」當**第一主題**，且軟著陸這種「優雅降級」是多數 harness 沒做的。
 - **scoped**：無動態重規劃（plan 改寫）；Plan Mode 靠把計畫外部化到 `PLAN.md`/`TODO.md`（狀態外部化）而非內存。其價值是**狀態durability、與模型 IQ 正交**：實測中斷一個 6 步任務後，重啟一個零對話記憶的新進程只說「繼續」，agent 仍能讀 `TODO.md` 從第 5 步續跑、零重工——再強的模型也贏不了「重啟後 context 歸零」，檔案化的計畫贏得了。預設關、`-plan` opt-in（短任務不需要）。
+- **確定性步驟跳過**（[plan.go](internal/context/plan.go)）：斷點續跑「跳過已完成步驟」原本靠 LLM 自己重讀 `TODO.md` 猜位置（機率性、可能重做/漏做）。改由**框架每輪確定性解析 `TODO.md` 的 checkbox**，把「已完成幾步、下一個未完成步驟是哪一個」當**權威進度帳本**注入 system 訊息——由框架指定續跑點，而非模型猜。帳本準確性仍取決於模型誠實打勾（`- [x]`），但「讀哪裡、跳哪些」不再是模型的機率行為。
+- **狀態管理三模式的取捨（刻意只選 Checkpoint-Resume）**：對照業界三種 agent 狀態管理——① Checkpoint-Resume（快照+續跑）② Event Sourcing（全量事件日誌+重放）③ FSM（顯式狀態機）。cogito **刻意只落在 ①**：SessionSnapshot 落盤 + Plan Mode 帳本 + 暫時性中斷自動續跑（[chatbot/core.go](internal/chatbot/core.go)）。**不做 ②**——其稽核/回放/時間旅行價值我們已由 **OTel 全鏈追蹤 + append 導向的 history** 拿到 ~80%，重建成事件日誌是過度設計。**不做 ③**——顯式 FSM 會扼殺 ReAct 的彈性，且「異常可攔截/行為可控」已由護欄（回合/成本熔斷、HITL 審批、RecoveryManager）達成。呼應「沒有銀彈、按任務選模式」：這是**有意識的不做**，非缺漏。
 - **錯誤恢復是分層的，且各層的「成長」放對地方**（[recovery.go](internal/context/recovery.go)）：
   1. **RecoveryManager = 有界 first-aid**——規則式，只收「模型沒提示就會做錯」的少數高價值 nudge（如 edit_file stale old_text→先 read_file）。**刻意不追求覆蓋率、不該一直加 rule**（會變打地鼠）；主模型本就讀得懂多數錯誤。
   2. **長尾**交給模型自己（error-as-observation 回灌）。

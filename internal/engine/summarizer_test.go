@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -111,6 +113,32 @@ func TestMaintainSummary_IncrementalCarriesPrev(t *testing.T) {
 	}
 	if !strings.Contains(f.lastUser, "先前摘要") || !strings.Contains(f.lastUser, "PREV-SUMMARY") {
 		t.Errorf("第二次摺疊應帶入先前摘要，prompt=%q", f.lastUser)
+	}
+}
+
+// 端到端：Plan Mode 下，框架應把 TODO.md 的下一個未完成步驟【確定性】注入 system 訊息，
+// 讓斷點續跑跳過已完成步驟由框架權威指定（不靠模型重讀猜）。
+func TestRun_PlanModeInjectsDeterministicNextStep(t *testing.T) {
+	work := t.TempDir()
+	todo := "- [x] 已完成的步驟A\n- [x] 已完成的步驟B\n- [ ] 待辦的步驟C\n- [ ] 待辦的步驟D\n"
+	if err := os.WriteFile(filepath.Join(work, "TODO.md"), []byte(todo), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cp := &captureProvider{}
+	eng := NewAgentEngine(cp, newTestRegistry(), false, true) // planMode=true
+	eng.MaxCostUSD = 0
+
+	sess := ctxpkg.NewSession("plan", work)
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "繼續"})
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("不應報錯: %v", err)
+	}
+	if !strings.Contains(cp.system, "進度帳本") || !strings.Contains(cp.system, "待辦的步驟C") {
+		t.Errorf("system 應含確定性進度錨（下一步=待辦的步驟C）:\n%s", cp.system)
+	}
+	if strings.Contains(cp.system, "待辦的步驟D") {
+		t.Error("只應點出第一個未完成步驟，不該把之後的也塞進錨")
 	}
 }
 

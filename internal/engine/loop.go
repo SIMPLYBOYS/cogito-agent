@@ -157,12 +157,21 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			workingMemory = append([]schema.Message{dummyUser}, workingMemory...)
 		}
 
-		// 有滾動摘要時，把它併進 system 訊息（而非另開 user 回合，避免破壞 user/assistant 交替）：
-		// 模型於是看到 [system + 早期摘要] + [末 N 逐字]，跨逐出仍連貫。
-		sysMsg := systemMsg
+		// 把「進度帳本錨」與「滾動摘要」併進 system 訊息（而非另開 user 回合，避免破壞交替）。
+		// 進度帳本：Plan Mode 下框架每輪確定性讀 TODO.md，直接告訴模型「做完幾步、下一步是哪個」，
+		// 讓斷點續跑跳過已完成步驟不再靠模型重讀猜測。摘要：早期歷史摺疊後仍連貫。
+		sysExtra := ""
+		if e.PlanMode {
+			if prog, ok := ctxpkg.ReadTodoProgress(session.WorkDir); ok {
+				sysExtra += planProgressNote(prog)
+			}
+		}
 		if sum := session.Summary(); sum != "" {
-			sysMsg = schema.Message{Role: schema.RoleSystem, Content: systemMsg.Content +
-				"\n\n## 先前對話摘要\n（早期歷史已摺疊；salience 保留決策/約束/使用者更正/未解事項）\n" + sum}
+			sysExtra += "\n\n## 先前對話摘要\n（早期歷史已摺疊；salience 保留決策/約束/使用者更正/未解事項）\n" + sum
+		}
+		sysMsg := systemMsg
+		if sysExtra != "" {
+			sysMsg = schema.Message{Role: schema.RoleSystem, Content: systemMsg.Content + sysExtra}
 		}
 
 		var contextHistory []schema.Message
