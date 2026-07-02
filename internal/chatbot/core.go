@@ -25,6 +25,9 @@ import (
 // 自動斷點續跑（opt-in，COGITO_AUTO_RESUME=1）：任務因【暫時性】錯誤中止時最多自動續跑幾次。
 const maxAutoResume = 3
 
+// maxCrossResume：跨重啟續跑的上限——同一任務連續 N 次「啟動時續跑又被硬砍」就停手，防崩潰迴圈燒錢。
+const maxCrossResume = 3
+
 // resumeNudge 是續跑時補進歷史的系統提示（走 RoleUser，與成本軟著陸等系統提醒一致）。
 const resumeNudge = "[系統] 先前因暫時性錯誤（如網路中斷）使任務未完成；連線現已恢復。請檢視目前進度，從中斷處接續完成，不要重做已完成的步驟。"
 
@@ -117,6 +120,8 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 	}
 
 	session := c.sessionFor(convID)
+	session.SetRunning(true)        // 標記任務進行中；程序被硬砍時此旗標留在磁碟供啟動時掃出續跑
+	defer session.SetRunning(false) // 正常結束（成功/終局失敗）都清掉——只有硬砍才會留 true
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	reporter := &reporter{convID: convID}
@@ -127,6 +132,7 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 	for attempt := 0; ; {
 		err := eng.Run(context.Background(), session, reporter)
 		if err == nil {
+			session.ClearResume() // 成功 → 清跨重啟續跑計數（running 由上面的 defer 清）
 			if c.postRun != nil {
 				c.postRun(context.Background(), session, prompt)
 			}
@@ -180,6 +186,32 @@ func resumeBackoff(attempt int) time.Duration {
 // sessionFor 取（或建）本頻道的持久 Session——指令閘與跑任務共用同一把 session。
 func (c *Core) sessionFor(convID string) *ctxpkg.Session {
 	return ctxpkg.GlobalSessionMgr.GetOrCreate(convID, c.channelWorkDir(convID))
+}
+
+// ResumeInterrupted 在程序啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍
+// 標記進行中」的自動從斷點續跑。只處理本平台（platform 前綴）的 session；連續多次續跑仍中斷則停手
+// 防崩潰迴圈。需 COGITO_AUTO_RESUME=1 且有持久化（COGITO_SESSION_DIR），否則自然 no-op。
+func (c *Core) ResumeInterrupted() {
+	if !c.autoResume {
+		return
+	}
+	for _, s := range ctxpkg.GlobalSessionMgr.ListInterrupted() {
+		id := s.ID
+		if !strings.HasPrefix(id, c.platform+":") {
+			continue // 只續本平台的；別的平台由它自己的 core 處理
+		}
+		if s.ResumeAttempts() >= maxCrossResume {
+			SendMessage(id, "⚠️ 上次中斷的任務已連續多次自動續跑仍未完成，已停止自動續跑。回覆任意訊息可手動接續。")
+			s.ClearResume()
+			continue
+		}
+		if !c.tryAcquire(c.channelWorkDir(id)) {
+			continue // 該頻道已忙（極少見）→ 跳過，handleAgentRun 期望呼叫端已持鎖
+		}
+		s.BumpResumeAttempts()
+		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
+		go c.handleAgentRun(id, resumeNudge)
+	}
 }
 
 // tryPlanCommand：per-channel Plan Mode 切換——`plan on`/`plan off`/`plan status`。狀態存在 Session

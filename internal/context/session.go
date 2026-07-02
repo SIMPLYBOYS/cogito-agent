@@ -24,7 +24,11 @@ type Session struct {
 	// planMode 是本會話（頻道）是否走 Plan Mode——per-channel 切換（`plan on`/`plan off`），
 	// 預設關。開了則該頻道之後的任務外部化計畫到 PLAN.md/TODO.md，並啟用目標錨與確定性步驟跳過。
 	planMode bool
-	mu       sync.RWMutex
+	// running＝有任務正在跑。正常結束清 false；程序被硬砍時留 true，供啟動時掃出續跑。
+	// resumeAttempts＝跨重啟續跑已嘗試次數（防同一任務崩潰迴圈燒錢）。
+	running        bool
+	resumeAttempts int
+	mu             sync.RWMutex
 
 	// 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
 	TotalPromptTokens     int
@@ -57,6 +61,8 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		history:               snap.History,
 		summary:               snap.Summary,
 		planMode:              snap.PlanMode,
+		running:               snap.Running,
+		resumeAttempts:        snap.ResumeAttempts,
 		TotalPromptTokens:     snap.TotalPromptTokens,
 		TotalCompletionTokens: snap.TotalCompletionTokens,
 		TotalCostUSD:          snap.TotalCostUSD,
@@ -76,6 +82,8 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		History:               h,
 		Summary:               s.summary,
 		PlanMode:              s.planMode,
+		Running:               s.running,
+		ResumeAttempts:        s.resumeAttempts,
 		TotalPromptTokens:     s.TotalPromptTokens,
 		TotalCompletionTokens: s.TotalCompletionTokens,
 		TotalCostUSD:          s.TotalCostUSD,
@@ -152,6 +160,69 @@ func (s *Session) SetPlanMode(on bool) {
 	s.planMode = on
 	s.UpdatedAt = time.Now()
 	s.persistLocked()
+}
+
+// Running 回報是否有任務進行中（啟動時據此掃出被硬砍中斷的任務）。
+func (s *Session) Running() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.running
+}
+
+// SetRunning 標記任務進行中並落盤。true 於 handleAgentRun 起始、false 於其結束（含失敗）。
+func (s *Session) SetRunning(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = on
+	s.persistLocked()
+}
+
+// ResumeAttempts 回報跨重啟續跑已嘗試次數（防崩潰迴圈）。
+func (s *Session) ResumeAttempts() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.resumeAttempts
+}
+
+// BumpResumeAttempts 續跑前 +1 並落盤。
+func (s *Session) BumpResumeAttempts() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resumeAttempts++
+	s.persistLocked()
+}
+
+// ClearResume 清除中斷/續跑狀態（running=false、attempts=0）並落盤——任務成功、或放棄自動續跑時用。
+func (s *Session) ClearResume() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.running = false
+	s.resumeAttempts = 0
+	s.persistLocked()
+}
+
+// ListInterrupted 從持久化後端還原所有 session，回傳其中「上次被硬砍、任務仍標記進行中」的那些。
+// 未開持久化（store==nil）時回 nil——沒有落盤就沒有跨重啟續跑。
+func (sm *SessionManager) ListInterrupted() []*Session {
+	sm.mu.RLock()
+	store := sm.store
+	sm.mu.RUnlock()
+	if store == nil {
+		return nil
+	}
+	ids, err := store.List()
+	if err != nil {
+		log.Printf("[Session] 列出持久化 session 失敗: %v", err)
+		return nil
+	}
+	var out []*Session
+	for _, id := range ids {
+		s := sm.GetOrCreate(id, "") // workDir="" → 還原時保留快照裡的 WorkDir
+		if s.Running() {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // EvictablePrefix 回傳「超出逐字尾、應摺進摘要」的前綴【拷貝】：history 條數未達 trigger 時回 nil

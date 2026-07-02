@@ -255,10 +255,12 @@ func main() {
 		tg.SetPostRunHook(postRun)
 		tg.SetPostFailureHook(postFailure)
 		go tg.Start(ctx)
+		tg.ResumeInterrupted() // 跨重啟續跑：續本次被硬砍中斷的 Telegram 任務（需 AUTO_RESUME + SESSION_DIR）
 	}
 
 	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外端口，零基建。
 	go bot.Start(ctx)
+	bot.ResumeInterrupted() // 跨重啟續跑：續上次被硬砍中斷的 Slack 任務（需 AUTO_RESUME + SESSION_DIR）
 
 	<-ctx.Done()
 	log.Println("收到關閉信號，優雅關閉中...")

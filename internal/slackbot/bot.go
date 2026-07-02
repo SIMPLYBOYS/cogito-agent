@@ -63,6 +63,9 @@ func (b *SlackBot) SetPostFailureHook(h chatbot.PostFailureHook) { b.core.SetPos
 // SendMessage 以命名空間 convID（"slack:頻道"）路由發送，供 cmd 的審批/提案通知用。
 func (b *SlackBot) SendMessage(convID, text string) { chatbot.SendMessage(convID, text) }
 
+// ResumeInterrupted 啟動時自動續跑被硬砍中斷的任務（見 chatbot.Core.ResumeInterrupted）。
+func (b *SlackBot) ResumeInterrupted() { b.core.ResumeInterrupted() }
+
 // Start 阻塞跑 Socket Mode：開一條到 Slack 的 websocket 收事件，直到 ctx 取消。事件處理在
 // 另一 goroutine 消費 client.Events，每筆 Events API 事件必須 Ack 否則 Slack 會重送。
 func (b *SlackBot) Start(ctx context.Context) {

@@ -79,6 +79,9 @@ func (b *TelegramBot) SetPostFailureHook(h chatbot.PostFailureHook) { b.core.Set
 // SendMessage 以命名空間 convID（"telegram:chatID"）路由發送，供 cmd 的審批/提案通知用。
 func (b *TelegramBot) SendMessage(convID, text string) { chatbot.SendMessage(convID, text) }
 
+// ResumeInterrupted 啟動時自動續跑被硬砍中斷的任務（見 chatbot.Core.ResumeInterrupted）。
+func (b *TelegramBot) ResumeInterrupted() { b.core.ResumeInterrupted() }
+
 // send 是核心注入的原生發送：chatID 為純數字字串，Bot API 的 chat_id 要整數。
 func (b *TelegramBot) send(chatID, text string) {
 	id, err := strconv.ParseInt(chatID, 10, 64)
