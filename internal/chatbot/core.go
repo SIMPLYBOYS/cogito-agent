@@ -95,8 +95,8 @@ func (c *Core) Dispatch(channelID, text string) {
 	if c.tryResolveApproval(id, text) {
 		return
 	}
-	// 自我進化的閘：apply/reject memory|edges，與 per-channel Plan Mode 切換（不佔鎖、不當成新任務）。
-	if c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryPlanCommand(id, text) {
+	// 自我進化的閘：apply/reject memory|edges|config，與 per-channel Plan Mode 切換（不佔鎖、不當成新任務）。
+	if c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
@@ -212,6 +212,32 @@ func (c *Core) ResumeInterrupted() {
 		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
 		go c.handleAgentRun(id, resumeNudge)
 	}
+}
+
+// tryConfigCommand：apply/reject config 閘——把 `cmd/bench -tune` 產出的提案參數（config.proposed.json）
+// 過人工閘晉升為執行期 config.json（引擎啟動時讀）。閉合參數自調飛輪：tune→propose→人工 apply→生效。
+func (c *Core) tryConfigCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "apply config", "approve config":
+		changes, err := evolve.ApplyProposedConfig(c.workDir)
+		switch {
+		case err != nil:
+			SendMessage(convID, fmt.Sprintf("❌ 套用參數失敗: %v", err))
+		case len(changes) == 0:
+			SendMessage(convID, "ℹ️ 目前沒有提案參數。")
+		default:
+			SendMessage(convID, "✅ 已套用調參提案（下次任務起生效）：\n• "+strings.Join(changes, "\n• "))
+		}
+		return true
+	case "reject config", "discard config":
+		if had, _ := evolve.DiscardProposedConfig(c.workDir); had {
+			SendMessage(convID, "🗑️ 已丟棄提案參數（未套用）。")
+		} else {
+			SendMessage(convID, "ℹ️ 目前沒有提案參數。")
+		}
+		return true
+	}
+	return false
 }
 
 // tryPlanCommand：per-channel Plan Mode 切換——`plan on`/`plan off`/`plan status`。狀態存在 Session

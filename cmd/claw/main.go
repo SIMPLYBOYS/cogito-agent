@@ -158,6 +158,18 @@ func main() {
 		// per-channel Plan Mode：由該頻道 session 的切換狀態決定（`plan on`/`plan off`）；預設關，
 		// 短任務/閒聊免計畫檔儀式，長任務手動開即啟用目標錨 + 確定性步驟跳過。
 		eng.PlanMode = sess.PlanMode()
+		// 執行期讀【已套用】的調參（.claw/config.json，由 apply config 從提案晉升）——閉合參數自調飛輪。
+		if k, ok := evolve.LoadKnobs(rootDir); ok {
+			if k.MaxTurns > 0 {
+				eng.MaxTurns = k.MaxTurns
+			}
+			if k.MaxConcurrentTools > 0 {
+				eng.MaxConcurrentTools = k.MaxConcurrentTools
+			}
+			if k.MaxCostUSD > 0 {
+				eng.MaxCostUSD = k.MaxCostUSD
+			}
+		}
 		// 技能（.claw/skills）與 AGENTS.md 從【共享根目錄】讀，與 per-channel 工作產物分離：
 		// 工具 rooted 在 sess.WorkDir（各頻道子目錄），但配置/技能是全 bot 共用資產。
 		eng.AssetsDir = rootDir

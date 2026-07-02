@@ -98,3 +98,58 @@ func TestWriteProposedConfig(t *testing.T) {
 		t.Error("提案檔應含安全提示")
 	}
 }
+
+// C1 閉環：提案 → apply 晉升為 config.json → LoadKnobs 讀得到；套用時再 clamp（防手改提案繞過上限）。
+func TestApplyProposedConfig_PromotesAndClamps(t *testing.T) {
+	root := t.TempDir()
+	clawDir := filepath.Join(root, ".claw")
+
+	// 手工造一份提案：一個合法收緊(max_turns 40→20) + 一個【超界】值(max_cost_usd 999，應被 clamp 到 5.0)。
+	proposals := []Proposal{
+		{Knob: "max_turns", Current: 40, Proposed: 20, Reason: "收緊"},
+		{Knob: "max_cost_usd", Current: 1.0, Proposed: 999.0, Reason: "越界試探", Sensitive: true},
+	}
+	if _, err := WriteProposedConfig(clawDir, defaultKnobs, proposals); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, err := ApplyProposedConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("應有 2 條變更，got %v", changes)
+	}
+
+	// 提案檔應已清除
+	if _, err := os.Stat(filepath.Join(clawDir, ProposedConfigFileName)); !os.IsNotExist(err) {
+		t.Error("套用後提案檔應被刪除")
+	}
+	// LoadKnobs 讀得到，且越界值被 clamp
+	k, ok := LoadKnobs(root)
+	if !ok {
+		t.Fatal("套用後 LoadKnobs 應讀得到 config.json")
+	}
+	if k.MaxTurns != 20 {
+		t.Errorf("max_turns 應套用為 20，got %d", k.MaxTurns)
+	}
+	if k.MaxCostUSD != maxCostUSD { // 999 被 clamp 到上界 5.0
+		t.Errorf("越界的 max_cost_usd 應被 clamp 到 %.1f，got %.2f", maxCostUSD, k.MaxCostUSD)
+	}
+	if k.MaxConcurrentTools != defaultKnobs.MaxConcurrentTools { // 未提案的沿用基底
+		t.Errorf("未提案的 max_concurrent_tools 應維持基底 %d，got %d", defaultKnobs.MaxConcurrentTools, k.MaxConcurrentTools)
+	}
+}
+
+func TestLoadKnobs_MissingReturnsFalse(t *testing.T) {
+	if _, ok := LoadKnobs(t.TempDir()); ok {
+		t.Error("無 config.json 應回 false（呼叫端沿用引擎預設）")
+	}
+}
+
+func TestApplyProposedConfig_NoProposalNoop(t *testing.T) {
+	changes, err := ApplyProposedConfig(t.TempDir())
+	if err != nil || changes != nil {
+		t.Errorf("無提案應回 (nil,nil)，got changes=%v err=%v", changes, err)
+	}
+}

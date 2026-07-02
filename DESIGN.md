@@ -78,6 +78,7 @@
 
 ### 6. 自我進化
 - **決定**：四件套（[evolve/](internal/evolve/)）——技能自生成、記憶自更新（提案 → apply 後**放行為 `.claw/memory` 記錄**，非併回 AGENTS.md）、失敗 Reflexion、參數自調。**全部走安全閘**：只寫暫存提案（`skills-proposed/` / `AGENTS.proposed.md`（提案暫存檔）/ `config.proposed.json` / `kg/edges.proposed.jsonl`）→ 確定性把關（結構 + 危險指令/憑證掃描）或人工 review → 才生效。技能對齊 [agentskills.io](https://agentskills.io) 開放標準。
+- **參數自調閉環（[param_tune.go](internal/evolve/param_tune.go)）**：`cmd/bench -tune` 依跑分聚合指標【確定性】產出有界調參提案 → `config.proposed.json`；`apply config` 過人工閘晉升為 `.claw/config.json` → 引擎啟動時 `LoadKnobs` 讀入覆蓋預設旋鈕（MaxTurns/併發/成本熔斷）。**兩道有界**：Advise 產提案時 clamp、apply 時再 clamp——即便有人手改提案檔也繞不過安全上限。這就是「propose→人工 apply→執行期生效」在**失控控制旋鈕**上的完整飛輪（放寬敏感旋鈕標 `sensitive`，人工放行才動）。
 - **兩種觸發（harness 兜底 + agent 自主）**：任務結束時 **post-task hook 由 harness 保證觸發**，反思出技能/記憶/KG 關係（可靠，不指望 agent 記得）；同時暴露 `consolidate` 工具讓 **agent 判斷有可複用價值時自己提前沉澱**（自主）。兩者產物同樣 gated。這就是「框架強制觸發 + 模型判斷內容」落在自我進化上的體現。
 - **對照**：Hermes 走到 **RL 微調（改模型權重）** 的飛輪；cogito 只在 **prompt/技能/記憶層**進化、**永不改權重**、**永遠 gated**。誠實說：進化較淺，但**安全、可審計、可回退**。
 - **教訓（真實踩過）**：曾把一條過度擬合的爛慣例 `apply` 進 live AGENTS.md，污染了後續所有任務——閘只跟「人有沒有認真 review」一樣可靠。這強化了「提案而非自動生效」的設計。

@@ -13,6 +13,10 @@ import (
 // 絕不自動改 live 旋鈕——同一安全鐵律：放寬任何「失控控制」旋鈕都須人工審核後手動套用。
 const ProposedConfigFileName = "config.proposed.json"
 
+// ActiveConfigFileName 是【已套用】的執行期參數檔。引擎啟動時讀它覆蓋預設旋鈕；由 apply config 從
+// 提案檔晉升而來（propose→人工 apply→生效，與 memory/edges 同一閘）。
+const ActiveConfigFileName = "config.json"
+
 // Knobs 是引擎可調的「失控控制」旋鈕（對應 internal/engine 的預設）。
 type Knobs struct {
 	MaxTurns           int     `json:"max_turns"`
@@ -120,6 +124,100 @@ func WriteProposedConfig(clawDir string, cur Knobs, proposals []Proposal) (strin
 		return "", fmt.Errorf("寫入提案參數失敗: %w", err)
 	}
 	return path, nil
+}
+
+// LoadKnobs 讀【已套用】的執行期參數 <root>/.claw/config.json。bool 表示存在且可解析——不存在時
+// 呼叫端沿用引擎預設（不套用）。這是讓調參提案「執行期可讀」的那一端，閉合 tune→propose→apply→生效。
+func LoadKnobs(root string) (Knobs, bool) {
+	data, err := os.ReadFile(filepath.Join(root, ".claw", ActiveConfigFileName))
+	if err != nil {
+		return Knobs{}, false
+	}
+	var k Knobs
+	if json.Unmarshal(data, &k) != nil {
+		return Knobs{}, false
+	}
+	return k, true
+}
+
+// ApplyProposedConfig 把提案參數過【人工閘】套用：讀 config.proposed.json，以其 current 為基底套上每條
+// proposal 的 proposed 值，寫入 config.json（引擎啟動時會讀），並刪除提案檔。回傳每條「knob old→new」摘要。
+// 套用時一律再 clamp 在有界範圍（雙保險——即便有人手改提案檔也繞不過安全上限）。無提案回 (nil, nil)。
+func ApplyProposedConfig(root string) ([]string, error) {
+	clawDir := filepath.Join(root, ".claw")
+	proposedPath := filepath.Join(clawDir, ProposedConfigFileName)
+	data, err := os.ReadFile(proposedPath)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Current   Knobs      `json:"current"`
+		Proposals []Proposal `json:"proposals"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("解析提案參數失敗: %w", err)
+	}
+
+	k := doc.Current // 以提案基底為起點，套上各提案值
+	var changes []string
+	for _, p := range doc.Proposals {
+		switch p.Knob {
+		case "max_turns":
+			v := clampInt(int(toFloat(p.Proposed)), minTurns, maxTurns)
+			changes = append(changes, fmt.Sprintf("max_turns: %d→%d", k.MaxTurns, v))
+			k.MaxTurns = v
+		case "max_concurrent_tools":
+			v := clampInt(int(toFloat(p.Proposed)), minConcurrency, maxConcurrency)
+			changes = append(changes, fmt.Sprintf("max_concurrent_tools: %d→%d", k.MaxConcurrentTools, v))
+			k.MaxConcurrentTools = v
+		case "max_cost_usd":
+			v := clampFloat(toFloat(p.Proposed), minCostUSD, maxCostUSD)
+			changes = append(changes, fmt.Sprintf("max_cost_usd: %.2f→%.2f", k.MaxCostUSD, v))
+			k.MaxCostUSD = v
+		}
+	}
+	if len(changes) == 0 {
+		return nil, nil
+	}
+
+	if err := os.MkdirAll(clawDir, 0o755); err != nil {
+		return nil, err
+	}
+	out, err := json.MarshalIndent(k, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(clawDir, ActiveConfigFileName), out, 0o644); err != nil {
+		return nil, fmt.Errorf("寫入 config.json 失敗: %w", err)
+	}
+	_ = os.Remove(proposedPath) // 套用後清掉提案（與 memory/edges 一致）
+	return changes, nil
+}
+
+// DiscardProposedConfig 丟棄提案參數（未套用）。回傳原本是否有提案。
+func DiscardProposedConfig(root string) (bool, error) {
+	p := filepath.Join(root, ".claw", ProposedConfigFileName)
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, os.Remove(p)
+}
+
+// toFloat 把 JSON 解出的提案值（數字一律是 float64）轉成 float64。
+func toFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case json.Number:
+		f, _ := n.Float64()
+		return f
+	}
+	return 0
 }
 
 func clampInt(v, lo, hi int) int {
