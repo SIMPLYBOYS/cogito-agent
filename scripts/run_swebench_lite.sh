@@ -40,13 +40,17 @@ python3 scripts/fetch_swebench_lite.py -n "$N" --offset "$OFFSET" -o "$LITE"
 echo "== ② dry-run 檢視前 3 題（不花錢） =="
 go run ./cmd/bench -swebench "$LITE" -limit 3 -dry-run
 
-# --- ③ cogito 生成 predictions（花錢：每題一次 agent loop） ---
-echo "== ③ 生成 predictions（model=${MODEL}）→ ${PREDS} =="
-go run ./cmd/bench -swebench "$LITE" -limit "$N" -model "$MODEL" -predictions "$PREDS"
+# --- ③ cogito 生成 predictions（花錢：每題一次 agent loop）。已有結果就跳過，避免重跑重花錢（FORCE=1 強制重生）。 ---
+if [ -s "$PREDS" ] && [ "${FORCE:-0}" != "1" ]; then
+  echo "== ③ 略過生成：$PREDS 已存在（FORCE=1 可強制重生） =="
+else
+  echo "== ③ 生成 predictions（model=${MODEL}）→ ${PREDS} =="
+  go run ./cmd/bench -swebench "$LITE" -limit "$N" -model "$MODEL" -predictions "$PREDS"
+fi
 
 # --- ④ 官方 Docker 評測（免費但重；首次拉/建映像很慢）。在 $OUT 內跑，把 logs/報告都關進去。 ---
 echo "== ④ 官方 harness 評測（Docker） =="
-python3 -c "import swebench" 2>/dev/null || pip install swebench
+python3 -c "import swebench" 2>/dev/null || python3 -m pip install swebench
 ( cd "$OUT" && python3 -m swebench.harness.run_evaluation \
     --dataset_name "$DATASET" \
     --predictions_path "$(basename "$PREDS")" \
