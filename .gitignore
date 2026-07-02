@@ -77,3 +77,6 @@ skills-lock.json
 
 # Playwright / demo 截圖殘留（非源碼）
 /preview.png
+
+# SWE-bench 評測產物 / harness 日誌（非源碼）
+/.swebench/
