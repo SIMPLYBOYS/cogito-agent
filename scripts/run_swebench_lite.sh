@@ -41,7 +41,7 @@ echo "== ② dry-run 檢視前 3 題（不花錢） =="
 go run ./cmd/bench -swebench "$LITE" -limit 3 -dry-run
 
 # --- ③ cogito 生成 predictions（花錢：每題一次 agent loop） ---
-echo "== ③ 生成 predictions（model=$MODEL）→ $PREDS =="
+echo "== ③ 生成 predictions（model=${MODEL}）→ ${PREDS} =="
 go run ./cmd/bench -swebench "$LITE" -limit "$N" -model "$MODEL" -predictions "$PREDS"
 
 # --- ④ 官方 Docker 評測（免費但重；首次拉/建映像很慢）。在 $OUT 內跑，把 logs/報告都關進去。 ---
