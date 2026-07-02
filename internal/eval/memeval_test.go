@@ -61,6 +61,32 @@ func TestRunMemEval_ThreeModes(t *testing.T) {
 	}
 }
 
+// 真實多跳語料（testdata/mem_multihop：12 個互連服務節點 + 12 題標註，半數多跳）：
+// 證明「keyword+KG 在多跳查詢上贏過純 keyword」——多跳題的答案節點與查詢零字面重疊，
+// keyword 撈不到（Seeds 只回 score>0），只有沿 [[link]] 擴張的 KG 撈得到。這是 KG 勝 RAG 的量化證據。
+func TestRunMemEval_MultiHop_KGBeatsKeyword(t *testing.T) {
+	root := "testdata/mem_multihop"
+	cases, err := LoadMemLabels(filepath.Join(root, "labels.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep := RunMemEval(ctxpkg.NewMemoryLoader(root), cases, nil, 3, 1)
+	got := map[string]ModeScore{}
+	for _, m := range rep.Modes {
+		got[m.Mode] = m
+	}
+	kw, kg := got["keyword"].HitAtK, got["keyword+kg"].HitAtK
+	if kg <= kw {
+		t.Errorf("多跳語料上 keyword+kg(%.2f) 應【嚴格優於】keyword(%.2f)", kg, kw)
+	}
+	if kg != 1.0 {
+		t.Errorf("keyword+kg 應命中全部（含多跳），got %.2f", kg)
+	}
+	if kw >= 1.0 { // keyword 若滿分表示語料沒真正考多跳（護欄：改壞語料會被抓到）
+		t.Errorf("keyword 不該滿分（多跳題應漏），got %.2f", kw)
+	}
+}
+
 func TestRunMemEval_NoEmbedderSkipsMode(t *testing.T) {
 	root := t.TempDir()
 	d := filepath.Join(root, ".claw", "memory")

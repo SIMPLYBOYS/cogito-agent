@@ -1,0 +1,12 @@
+{"query":"信用卡 Apple Pay 金流","expected":["atlas-payment"]}
+{"query":"每秒限流 100 封 email","expected":["iris-sendgrid"]}
+{"query":"簽發與驗證 JWT","expected":["selene-auth"]}
+{"query":"主關聯式資料庫 每日快照","expected":["titan-postgres"]}
+{"query":"金鑰 90 天輪替","expected":["helios-vault"]}
+{"query":"session refresh token TTL","expected":["rhea-redis"]}
+{"query":"orion 下游會呼叫哪些","expected":["atlas-payment"]}
+{"query":"gaia 路由到哪些","expected":["orion-checkout"]}
+{"query":"vesta 之後接什麼","expected":["titan-postgres"]}
+{"query":"atlas 之後接什麼","expected":["helios-vault"]}
+{"query":"luna 之後接什麼","expected":["iris-sendgrid"]}
+{"query":"selene 之後接什麼","expected":["rhea-redis"]}
