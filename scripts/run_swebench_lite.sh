@@ -50,8 +50,12 @@ fi
 
 # --- ④ 官方 Docker 評測（免費但重；首次拉/建映像很慢）。在 $OUT 內跑，把 logs/報告都關進去。 ---
 echo "== ④ 官方 harness 評測（Docker） =="
-python3 -c "import swebench" 2>/dev/null || python3 -m pip install swebench
-( cd "$OUT" && python3 -m swebench.harness.run_evaluation \
+# macOS Homebrew python 是 externally-managed（PEP 668）不能系統裝，故用獨立 venv 裝 swebench。
+VENV="$OUT/venv"
+[ -d "$VENV" ] || { echo "建立 venv → $VENV"; python3 -m venv "$VENV"; }
+PY="$(cd "$OUT" && pwd)/venv/bin/python3"
+"$PY" -c "import swebench" 2>/dev/null || { echo "裝 swebench 到 venv…"; "$PY" -m pip install -q --upgrade pip swebench; }
+( cd "$OUT" && "$PY" -m swebench.harness.run_evaluation \
     --dataset_name "$DATASET" \
     --predictions_path "$(basename "$PREDS")" \
     --max_workers "$WORKERS" \
