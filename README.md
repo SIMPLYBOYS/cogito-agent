@@ -1,8 +1,8 @@
 # cogito-agent
 
-> 一個用 Go 實現的極簡 AI 編程 Agent —— 接入 Slack，由 Claude 驅動，能夠自主"思考 → 調用工具 → 觀察結果"循環，在指定工作區內讀寫文件、執行命令來完成編程任務。
+> 一個用 Go 實現的極簡 AI 編程 Agent —— 接入 Slack / Telegram，由 Claude 驅動，能夠自主"思考 → 調用工具 → 觀察結果"循環，在指定工作區內讀寫文件、執行命令來完成編程任務。
 
-`cogito-agent` 是一個輕量級的自主智能體（Agent）框架。它把一個由 Anthropic Claude 驅動的 Agent 引擎接入 Slack：你在 Slack 中 @機器人或私聊它，它就會在鎖定的工作目錄內自主執行任務，並把思考過程、工具調用和結果實時回推到會話中。
+`cogito-agent` 是一個輕量級的自主智能體（Agent）框架。它把一個由 Anthropic Claude 驅動的 Agent 引擎接入 Slack / Telegram：你 @機器人或私聊它，它就會在鎖定的工作目錄內自主執行任務，並把思考過程、工具調用和結果實時回推到會話中。
 
 > 這個專案是什麼、不是什麼，以及它的差異化與發展優先序，見 [POSITIONING.md](POSITIONING.md)。
 
@@ -38,8 +38,9 @@
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
 **接入與可觀測性**
-- 💬 **多平台集成（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 Events API webhook、Telegram 走 getUpdates 長輪詢（免公開 URL）。可同進程同時跑，會話/工作目錄靠 `platform:` 前綴命名空間天然隔離；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
-- 📡 **實時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答實時推到 Slack，並按會話累計 token 與 USD。
+- 💬 **多平台集成（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同進程同時跑，會話/工作目錄靠 `platform:` 前綴命名空間天然隔離；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
+  - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @提及留乾淨指令。差別僅在機制——Slack 由 Events API 事件類型（`app_mention` / `message.im`）天然區分；Telegram 無此區分，故由傳輸層自行判斷「有沒有叫到我」。
+- 📡 **實時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答實時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
 - 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
 - 🧩 **MCP 集成（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 
@@ -158,7 +159,7 @@ flowchart TB
 
 ```
 cmd/
-├── claw/                 Slack 服務端入口（生產用）：裝配 Provider/Registry/Engine/SlackBot + OTel，啟動 HTTP
+├── claw/                 服務端入口（生產用）：裝配 Provider/Registry/Engine + OTel，啟動 Slack Socket Mode（＋設了 token 則同時跑 Telegram 長輪詢）
 ├── claw-cli/             通用命令行入口（-prompt / -dir / -session / -plan）
 ├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-dry-run）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
