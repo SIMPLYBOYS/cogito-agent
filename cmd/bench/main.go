@@ -33,6 +33,7 @@ func main() {
 	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
+	skillAB := flag.Bool("skill-ab", false, "技能任務影響 A/B：同一任務在『無/有綁定技能』下各跑一次，量化技能的行為價值（需 ANTHROPIC_API_KEY）")
 	predictions := flag.String("predictions", "", "SWE-bench 生成模式：對 -swebench 的實例跑 agent → 輸出官方 predictions JSONL 到此路徑（交給官方 harness 評測）")
 	flag.Parse()
 
@@ -76,6 +77,16 @@ func main() {
 		}
 		tc, mem := eval.MemoryABScenario()
 		fmt.Print(eval.RunMemoryAB(context.Background(), tc, mem, *model).Render())
+		return
+	}
+
+	// 技能 Level 2 A/B：用內建情境跑「無技能 vs 綁定技能」，量化技能的【行為】價值（結構把關之外）。
+	if *skillAB {
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			log.Fatal("技能 A/B 需 ANTHROPIC_API_KEY")
+		}
+		tc, doc, name := eval.SkillABScenario()
+		fmt.Print(eval.RunSkillAB(context.Background(), tc, doc, name, *model).Render())
 		return
 	}
 
