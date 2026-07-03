@@ -192,11 +192,17 @@ type tgUser struct {
 
 func parseUpdates(r io.Reader) ([]update, error) {
 	var body struct {
-		OK     bool     `json:"ok"`
-		Result []update `json:"result"`
+		OK          bool     `json:"ok"`
+		Description string   `json:"description"`
+		Result      []update `json:"result"`
 	}
 	if err := json.NewDecoder(r).Decode(&body); err != nil {
 		return nil, err
+	}
+	// ok:false 是 Telegram API 的錯誤形式（如 token 失效、被限流）。原本靜默當空更新，
+	// 錯誤被吞掉；改回報 error → Start 記日誌並退避重試，而非誤以為「沒新訊息」。
+	if !body.OK {
+		return nil, fmt.Errorf("Telegram API 回應 ok=false: %s", body.Description)
 	}
 	return body.Result, nil
 }

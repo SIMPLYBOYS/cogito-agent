@@ -61,3 +61,21 @@ func TestParseUpdates(t *testing.T) {
 		t.Errorf("offset 推進依據 update_id，got %d", us[1].UpdateID)
 	}
 }
+
+// 畸形 JSON（截斷 body 等）應回 error，讓 Start 退避重試而非崩潰或當空。
+func TestParseUpdates_MalformedJSON(t *testing.T) {
+	if _, err := parseUpdates(strings.NewReader(`{"ok":true,"result":[{"update`)); err == nil {
+		t.Error("截斷的 JSON 應回 error")
+	}
+}
+
+// ok:false（token 失效/限流等 API 錯誤）應回 error 並帶 description，不再被靜默吞掉當作沒新訊息。
+func TestParseUpdates_NotOK(t *testing.T) {
+	_, err := parseUpdates(strings.NewReader(`{"ok":false,"description":"Unauthorized"}`))
+	if err == nil {
+		t.Fatal("ok:false 應回 error")
+	}
+	if !strings.Contains(err.Error(), "Unauthorized") {
+		t.Errorf("error 應帶 API description，got %v", err)
+	}
+}

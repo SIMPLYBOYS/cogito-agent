@@ -32,3 +32,36 @@ func TestDeriveLangfuseAuthHeader(t *testing.T) {
 		t.Errorf("缺金鑰不應設 header: got %q", got)
 	}
 }
+
+// exporter 選擇的環境變數解析：純字串，決定追蹤是否啟用（Enabled 是 loop 昂貴序列化的閘）。
+func TestExporterSelection(t *testing.T) {
+	// 全部清空 → 未啟用
+	t.Setenv("OTEL_TRACES_EXPORTER", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "")
+	if isConsoleExporter() || otlpEndpoint() != "" || Enabled() {
+		t.Error("全未設時應未啟用任何 exporter")
+	}
+
+	// console/stdout 皆識別為 console exporter
+	t.Setenv("OTEL_TRACES_EXPORTER", "Console") // 大小寫不敏感
+	if !isConsoleExporter() || !Enabled() {
+		t.Error("OTEL_TRACES_EXPORTER=Console 應識別為 console 且 Enabled")
+	}
+	t.Setenv("OTEL_TRACES_EXPORTER", "stdout")
+	if !isConsoleExporter() {
+		t.Error("stdout 也應識別為 console exporter")
+	}
+
+	// OTLP endpoint：主變數優先，否則退回 *_TRACES_ENDPOINT
+	t.Setenv("OTEL_TRACES_EXPORTER", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel:4318")
+	if otlpEndpoint() != "http://otel:4318" || !Enabled() {
+		t.Error("設了 OTLP endpoint 應回該值且 Enabled")
+	}
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://traces:4318")
+	if otlpEndpoint() != "http://traces:4318" {
+		t.Error("主變數未設時應退回 *_TRACES_ENDPOINT")
+	}
+}
