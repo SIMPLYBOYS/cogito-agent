@@ -23,11 +23,17 @@ import (
 
 func main() {
 	dir := flag.String("dir", "./bench-reports", "benchmark JSON 報告所在目錄")
-	addr := flag.String("addr", ":8090", "監聽位址")
+	// 預設綁 loopback（127.0.0.1）而非 :8090（＝0.0.0.0 全介面）：儀表板無認證，預設不對外
+	// 曝露給同網段。要對外請顯式 -addr :8090（或 0.0.0.0:8090），並自行加前置認證/防火牆。
+	addr := flag.String("addr", "127.0.0.1:8090", "監聽位址（預設僅本機；對外用 :8090）")
 	flag.Parse()
 
+	disp := *addr
+	if strings.HasPrefix(disp, ":") {
+		disp = "localhost" + disp
+	}
 	http.HandleFunc("/", dashboardHandler(*dir))
-	log.Printf("📊 Benchmark 儀表板已啟動：http://localhost%s （報告目錄：%s）", *addr, *dir)
+	log.Printf("📊 Benchmark 儀表板已啟動：http://%s （報告目錄：%s）", disp, *dir)
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
