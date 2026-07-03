@@ -80,3 +80,6 @@ skills-lock.json
 
 # SWE-bench 評測產物 / harness 日誌（非源碼）
 /.swebench/
+
+# 個人面試小抄（本機參考，不對外公開）
+/docs/interview/
