@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -50,7 +49,10 @@ func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
-	fullPath := filepath.Join(t.workDir, input.Path)
+	fullPath, err := resolveInWorkDir(t.workDir, input.Path)
+	if err != nil {
+		return "", err
+	}
 
 	file, err := os.Open(fullPath)
 	if err != nil {

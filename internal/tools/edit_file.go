@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -60,7 +59,10 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
-	fullPath := filepath.Join(t.workDir, input.Path)
+	fullPath, err := resolveInWorkDir(t.workDir, input.Path)
+	if err != nil {
+		return "", err
+	}
 
 	contentBytes, err := os.ReadFile(fullPath)
 	if err != nil {

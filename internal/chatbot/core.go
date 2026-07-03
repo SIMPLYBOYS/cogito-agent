@@ -65,6 +65,9 @@ type Core struct {
 
 	autoResume bool // 暫時性中斷後自動續跑（COGITO_AUTO_RESUME=1 開）
 
+	allowedUsers map[string]bool // COGITO_ALLOWED_USERS：可驅動 agent 的使用者 id；空＝fail-closed 拒絕所有
+	adminUsers   map[string]bool // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
+
 	busy   map[string]bool // per-WorkDir 鎖：同目錄序列化、不同頻道並行
 	busyMu sync.Mutex
 }
@@ -72,13 +75,34 @@ type Core struct {
 // NewCore 建核心並向全域 senders 註冊本平台的原生發送，使 SendMessage 路由可達。
 func NewCore(platform, workDir string, factory EngineFactory, rawSend func(channelID, text string)) *Core {
 	senders.Store(platform, rawSend)
-	return &Core{
-		platform:   platform,
-		workDir:    workDir,
-		factory:    factory,
-		autoResume: os.Getenv("COGITO_AUTO_RESUME") == "1",
-		busy:       make(map[string]bool),
+	allowed := parseUserSet(os.Getenv("COGITO_ALLOWED_USERS"))
+	admins := parseUserSet(os.Getenv("COGITO_ADMIN_USERS"))
+	if len(admins) == 0 {
+		admins = allowed // 未單獨設 admin：可對話者即可審批（fail-closed 已把陌生人擋在門外）
 	}
+	if len(allowed) == 0 {
+		log.Printf("[%s] ⚠️ 未設 COGITO_ALLOWED_USERS，已 fail-closed 拒絕所有入站任務。請設環境變數（逗號分隔 user id）授權可用者。", platform)
+	}
+	return &Core{
+		platform:     platform,
+		workDir:      workDir,
+		factory:      factory,
+		autoResume:   os.Getenv("COGITO_AUTO_RESUME") == "1",
+		allowedUsers: allowed,
+		adminUsers:   admins,
+		busy:         make(map[string]bool),
+	}
+}
+
+// parseUserSet 解析逗號分隔的 user id 清單成集合（去空白、略過空項）。
+func parseUserSet(s string) map[string]bool {
+	set := make(map[string]bool)
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			set[p] = true
+		}
+	}
+	return set
 }
 
 func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
@@ -87,12 +111,19 @@ func (c *Core) SetPostFailureHook(h PostFailureHook) { c.postFailure = h }
 // convID 把傳輸層的原生頻道 ID 加上平台前綴，成為全域唯一的會話標識。
 func (c *Core) convID(channelID string) string { return c.platform + ":" + channelID }
 
-// Dispatch 是兩個傳輸層共用的入站管線：傳入【原生】頻道 ID 與已清理的文本。
-// 依序試審批 / 記憶閘 / 關係閘口令（命中即消費、不佔鎖）；否則當新任務取鎖後背景開跑。
-func (c *Core) Dispatch(channelID, text string) {
+// Dispatch 是兩個傳輸層共用的入站管線：傳入【原生】頻道 ID、發訊者 user id 與已清理的文本。
+// 先過授權閘（fail-closed：不在 allowlist 一律拒絕），再依序試審批 / 記憶閘 / 關係閘口令
+// （命中即消費、不佔鎖）；否則當新任務取鎖後背景開跑。
+func (c *Core) Dispatch(channelID, userID, text string) {
 	id := c.convID(channelID)
+	// 【硬防線】入口授權：未授權者一律擋在門外——這是「開放 bot」唯一能安全的前提。
+	if !c.allowedUsers[userID] {
+		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
+		SendMessage(id, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。請管理員將它加入 COGITO_ALLOWED_USERS 後再試。", userID))
+		return
+	}
 	// 審批口令即便會話忙碌也要處理——這正是解開忙碌的方式。
-	if c.tryResolveApproval(id, text) {
+	if c.tryResolveApproval(id, userID, text) {
 		return
 	}
 	// 自我進化的閘：apply/reject memory|edges|config，與 per-channel Plan Mode 切換（不佔鎖、不當成新任務）。
@@ -314,7 +345,8 @@ func (c *Core) tryEdgesCommand(convID, text string) bool {
 }
 
 // tryResolveApproval 攔截 approve/reject 口令（裸口令按本頻道解析，亦兼容 approve <taskID>）。命中即消費。
-func (c *Core) tryResolveApproval(convID, text string) bool {
+// 只有管理員（COGITO_ADMIN_USERS）能放行/否決高危操作——杜絕「發起者＝批准者」自我放行繞過人在迴路。
+func (c *Core) tryResolveApproval(convID, userID, text string) bool {
 	text = strings.TrimSpace(text)
 	lower := strings.ToLower(text)
 
@@ -327,6 +359,13 @@ func (c *Core) tryResolveApproval(convID, text string) bool {
 		allowed, reason = false, "人類管理員認為風險過高，已拒絕該操作"
 	default:
 		return false
+	}
+
+	// 命中口令但非管理員：消費掉並拒絕，別讓發起者自我放行。
+	if !c.adminUsers[userID] {
+		log.Printf("[%s] 🚫 非管理員 %s 嘗試 %s，已拒絕\n", c.platform, userID, lower)
+		SendMessage(convID, "🚫 只有管理員可以 approve/reject 高危操作。")
+		return true
 	}
 
 	idPart := strings.TrimSpace(text[strings.IndexByte(text, ' ')+1:])

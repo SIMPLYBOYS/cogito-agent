@@ -60,14 +60,20 @@ func TestCostTracker_PerSessionAccounting(t *testing.T) {
 	}
 }
 
-// 未知模型無定價 → 成本 0，但 token 仍應如實累計。
-func TestCostTracker_UnknownModelZeroCost(t *testing.T) {
+// 未知模型（如 OpenAI 相容端點）改用 fallback 估價 → 成本【非 0】，成本熔斷才不會失效。
+// 這是安全修補：舊行為靜默 0 會讓 MaxCostUSD 熔斷對未登記模型完全失效。
+func TestCostTracker_UnknownModelUsesFallbackPrice(t *testing.T) {
 	sess := ctxpkg.NewSession("x", "/tmp")
 	tr := NewCostTracker(&stubProvider{prompt: 100, completion: 100}, "unknown-model", sess)
 	_, _ = tr.Generate(context.Background(), nil, nil)
 
-	if sess.TotalCostUSD != 0 {
-		t.Errorf("未知模型應 0 成本，got %.6f", sess.TotalCostUSD)
+	// fallback 預設 in $5 / out $25 每百萬 → (100*5 + 100*25)/1e6 = 0.003
+	want := (100*fallbackInputPrice + 100*fallbackOutputPrice) / 1_000_000.0
+	if !approxEq(sess.TotalCostUSD, want) {
+		t.Errorf("未知模型應以 fallback 計費 %.6f，got %.6f", want, sess.TotalCostUSD)
+	}
+	if sess.TotalCostUSD == 0 {
+		t.Error("未知模型成本不得為 0——否則成本熔斷失效")
 	}
 	if sess.TotalPromptTokens != 100 {
 		t.Errorf("token 仍應累計，got %d", sess.TotalPromptTokens)

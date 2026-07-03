@@ -99,14 +99,14 @@ func (b *SlackBot) Start(ctx context.Context) {
 			switch ev := apiEvent.InnerEvent.Data.(type) {
 			case *slackevents.AppMentionEvent:
 				prompt := strings.TrimSpace(b.mention.ReplaceAllString(ev.Text, ""))
-				b.core.Dispatch(ev.Channel, prompt)
+				b.core.Dispatch(ev.Channel, ev.User, prompt)
 			case *slackevents.MessageEvent:
 				// 私聊（DM）；過濾機器人消息與編輯/系統子類型，避免迴環。
 				if ev.BotID != "" || ev.User == b.botUserID || ev.SubType != "" {
 					continue
 				}
 				if ev.ChannelType == "im" {
-					b.core.Dispatch(ev.Channel, strings.TrimSpace(ev.Text))
+					b.core.Dispatch(ev.Channel, ev.User, strings.TrimSpace(ev.Text))
 				}
 			}
 		}

@@ -54,13 +54,16 @@ func (t *WriteFileTool) Execute(ctx context.Context, args json.RawMessage) (stri
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
-	fullPath := filepath.Join(t.workDir, input.Path)
+	fullPath, err := resolveInWorkDir(t.workDir, input.Path)
+	if err != nil {
+		return "", err
+	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return "", fmt.Errorf("創建父目錄失敗: %w", err)
 	}
 
-	err := os.WriteFile(fullPath, []byte(input.Content), 0644)
+	err = os.WriteFile(fullPath, []byte(input.Content), 0644)
 	if err != nil {
 		return "", fmt.Errorf("寫入文件失敗: %w", err)
 	}
