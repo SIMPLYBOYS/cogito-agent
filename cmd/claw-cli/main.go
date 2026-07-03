@@ -40,6 +40,15 @@ func main() {
 	attemptsPtr := flag.Int("max-attempts", 5, "goal 循環最大嘗試次數")
 	flag.Parse()
 
+	// 無 -prompt 就印用法後退出，別偷偷跑一個寫死的任務去動使用者的工作區（過去的預設行為）。
+	if strings.TrimSpace(*promptPtr) == "" {
+		fmt.Fprintln(os.Stderr, "請用 -prompt \"你的任務\" 交辦任務。例如：")
+		fmt.Fprintln(os.Stderr, "  claw-cli -prompt \"幫我寫一個 http server\"")
+		fmt.Fprintln(os.Stderr, "  claw-cli -prompt \"繼續上次的任務\" -dir ./myproj -session task_001   # 指定工作區 + 斷點續傳")
+		fmt.Fprintln(os.Stderr, "完整參數：claw-cli -h")
+		os.Exit(2)
+	}
+
 	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。flush 必須在退出前呼叫。
 	flush := cmdutil.Bootstrap("cogito-agent-cli")
 	defer flush()
@@ -51,13 +60,6 @@ func main() {
 	}
 
 	prompt := *promptPtr
-	if prompt == "" {
-		// 內置默認任務
-		prompt = `
-	我需要在當前目錄下新建一個 ping.go，提供一個簡單的 http ping 接口。
-	寫完之後，幫我把代碼用 git 提交一下。
-	`
-	}
 
 	workDir, err := filepath.Abs(*dirPtr)
 	if err != nil {

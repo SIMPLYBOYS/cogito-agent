@@ -438,15 +438,30 @@ func (r *reporter) OnThinking(ctx context.Context) {
 }
 
 func (r *reporter) OnToolCall(ctx context.Context, toolName, args string) {
-	SendMessage(r.convID, fmt.Sprintf("🛠️ *正在執行工具*：`%s`\n參數：`%s`", toolName, args))
+	// 參數壓成單行預覽再送——否則 write_file 寫大檔、長 bash 腳本會把整包內容原封貼進頻道洗版。
+	SendMessage(r.convID, fmt.Sprintf("🛠️ *正在執行工具*：`%s`\n參數：`%s`", toolName, argPreview(args, 200)))
 }
 
 func (r *reporter) OnToolResult(ctx context.Context, toolName, result string, isError bool) {
 	if isError {
-		SendMessage(r.convID, fmt.Sprintf("⚠️ *執行報錯* (%s)：\n%s", toolName, result))
+		// 錯誤保留多行結構（便於讀 stderr），但仍封頂長度，避免 10KB 報錯淹沒頻道。
+		SendMessage(r.convID, fmt.Sprintf("⚠️ *執行報錯* (%s)：\n%s", toolName, capRunes(result, 800)))
 	} else {
 		SendMessage(r.convID, fmt.Sprintf("✅ *執行成功* (%s)", toolName))
 	}
+}
+
+// capRunes rune-safe 截斷（不切壞多位元組字元），超長補省略標記。
+func capRunes(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "…（已截斷）"
+	}
+	return s
+}
+
+// argPreview 把工具參數壓成單行預覽：去換行 + rune-safe 截斷，用於聊天進度回報。
+func argPreview(s string, max int) string {
+	return capRunes(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "), max)
 }
 
 func (r *reporter) OnMessage(ctx context.Context, content string) { SendMessage(r.convID, content) }
