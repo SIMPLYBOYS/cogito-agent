@@ -158,12 +158,16 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 	reporter := &reporter{convID: convID}
 	eng := c.factory(session, reporter)
 
+	startCost := session.CostUSD() // 快照本次任務進入時的累計花費，收尾時報「本次」增量（session 是跨任務累加的）
+
 	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
 	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。
 	for attempt := 0; ; {
 		err := eng.Run(context.Background(), session, reporter)
 		if err == nil {
 			session.ClearResume() // 成功 → 清跨重啟續跑計數（running 由上面的 defer 清）
+			// 收尾訊號：給頻道一個明確的「完成」與本次花費，讓對話有結束感、成本也透明。
+			SendMessage(convID, fmt.Sprintf("✅ 任務完成（本次花費 $%.4f）", session.CostUSD()-startCost))
 			if c.postRun != nil {
 				c.postRun(context.Background(), session, prompt)
 			}
@@ -177,7 +181,7 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 			session.Append(schema.Message{Role: schema.RoleUser, Content: resumeNudge})
 			continue
 		}
-		SendMessage(convID, fmt.Sprintf("❌ Agent 運行崩潰: %v", err))
+		SendMessage(convID, fmt.Sprintf("⚠️ 任務未能完成（本次花費 $%.4f）：%v", session.CostUSD()-startCost, err))
 		if c.postFailure != nil {
 			c.postFailure(context.Background(), session, prompt, err.Error())
 		}
