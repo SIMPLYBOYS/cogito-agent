@@ -277,7 +277,8 @@ var GlobalSessionMgr = &SessionManager{
 	sessions: make(map[string]*Session),
 }
 
-// RecordUsage 供外部 CostTracker 調用，累加本 Session 的 Token 與費用賬單。
+// RecordUsage 供外部 CostTracker 調用，累加本 Session 的 Token 與費用賬單並落盤——
+// 賬單是金錢資料，即時持久化（不與回合尾的 Append 合併），確保崩潰不丟計費。
 func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

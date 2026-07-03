@@ -105,7 +105,9 @@ func (s *FileSessionStore) Load(id string) (*SessionSnapshot, bool, error) {
 }
 
 func (s *FileSessionStore) Save(snap *SessionSnapshot) error {
-	data, err := json.MarshalIndent(snap, "", "  ")
+	// 用 Marshal 而非 MarshalIndent：session 檔是機器讀的，縮排只是徒增體積與 CPU（約 1.5–2x）。
+	// 每回合會全量重寫整檔，省下的縮排開銷隨 history 長度線性放大。
+	data, err := json.Marshal(snap)
 	if err != nil {
 		return fmt.Errorf("序列化 session 失敗: %w", err)
 	}

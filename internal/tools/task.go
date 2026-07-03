@@ -17,6 +17,10 @@ const (
 	MaxBackgroundTasks = 5
 	// maxTaskOutputBytes 是每個任務輸出緩衝的上限（保留尾部），避免噪音 server 撐爆記憶體。
 	maxTaskOutputBytes = 256 * 1024
+	// doneTaskRetention 是「已結束任務」的保留數：超出的最舊者在下次 Start 時清掉。
+	// 沒有這層，tm.tasks 只增不減——長活 session 每跑一個背景任務就滯留一個 taskState（各含最多
+	// 256KB buffer），單調洩漏。保留最近 N 個讓 List/Output 仍能查近況，記憶體上界 = N×256KB。
+	doneTaskRetention = 10
 )
 
 // syncBuffer 是併發安全、有上限的輸出緩衝：背景進程 goroutine 寫、Output 工具讀。
@@ -81,6 +85,31 @@ func NewTaskManager(executor sandbox.Executor, workDir string) *TaskManager {
 	return &TaskManager{tasks: make(map[string]*taskState), executor: executor, workDir: workDir}
 }
 
+// pruneDoneLocked 清掉「已結束且超出保留數」的最舊任務，只保留最近結束的 doneTaskRetention 個。
+// 須在持有 tm.mu 時呼叫（鎖序 tm.mu → ts.mu，與 runningCount 一致）。
+func (tm *TaskManager) pruneDoneLocked() {
+	type done struct {
+		id      string
+		started time.Time
+	}
+	var finished []done
+	for id, ts := range tm.tasks {
+		ts.mu.Lock()
+		d := ts.done
+		ts.mu.Unlock()
+		if d {
+			finished = append(finished, done{id, ts.startedAt})
+		}
+	}
+	if len(finished) <= doneTaskRetention {
+		return
+	}
+	sort.Slice(finished, func(i, j int) bool { return finished[i].started.Before(finished[j].started) })
+	for _, f := range finished[:len(finished)-doneTaskRetention] {
+		delete(tm.tasks, f.id)
+	}
+}
+
 func (tm *TaskManager) runningCount() int {
 	n := 0
 	for _, t := range tm.tasks {
@@ -96,6 +125,7 @@ func (tm *TaskManager) runningCount() int {
 // Start 在背景拉起一條命令，立即回傳任務 ID（不等待完成）。
 func (tm *TaskManager) Start(command string) (string, error) {
 	tm.mu.Lock()
+	tm.pruneDoneLocked() // 順手清掉超出保留數的舊結束任務，防長活 session 的 map 單調洩漏
 	if tm.runningCount() >= MaxBackgroundTasks {
 		tm.mu.Unlock()
 		return "", fmt.Errorf("背景任務已達並發上限 %d，請先用 task_kill 收掉不需要的任務", MaxBackgroundTasks)

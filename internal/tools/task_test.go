@@ -1,12 +1,44 @@
 package tools
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 )
+
+// pruneDoneLocked 只保留最近 doneTaskRetention 個結束任務，最舊者被清；執行中任務不動。
+func TestTaskManager_PruneDoneTasks(t *testing.T) {
+	tm := NewTaskManager(nil, "/tmp")
+	base := time.Now()
+	for i := 0; i < doneTaskRetention+5; i++ {
+		id := fmt.Sprintf("task-%d", i)
+		tm.tasks[id] = &taskState{id: id, startedAt: base.Add(time.Duration(i) * time.Second), done: true}
+	}
+	tm.tasks["running"] = &taskState{id: "running", startedAt: base, done: false}
+
+	tm.mu.Lock()
+	tm.pruneDoneLocked()
+	tm.mu.Unlock()
+
+	if tm.get("running") == nil {
+		t.Fatal("執行中任務不該被清掉")
+	}
+	if tm.get("task-0") != nil {
+		t.Fatal("最舊的結束任務應被清掉")
+	}
+	done := 0
+	for _, ts := range tm.tasks {
+		if ts.done {
+			done++
+		}
+	}
+	if done != doneTaskRetention {
+		t.Fatalf("結束任務應保留 %d 個，got %d", doneTaskRetention, done)
+	}
+}
 
 // 等待條件成立（背景任務是非同步的），逾時則 fail。
 func waitFor(t *testing.T, cond func() bool, msg string) {
