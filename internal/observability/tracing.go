@@ -87,3 +87,10 @@ func isConsoleExporter() bool {
 	v := strings.ToLower(os.Getenv("OTEL_TRACES_EXPORTER"))
 	return v == "console" || v == "stdout"
 }
+
+// Enabled 回報是否配置了任一 exporter（console 或 OTLP）——判斷邏輯與 InitTracing 的 exporter 選擇一致。
+// 用於在追蹤關閉時跳過昂貴的 span 屬性序列化：AddAttribute 在 no-op provider 下雖是空操作，但它的
+// 引數（如 jsonStr(整個 context)）仍會 eager 求值而白燒 CPU。呼叫端應以此為閘再組屬性值。
+func Enabled() bool {
+	return isConsoleExporter() || otlpEndpoint() != ""
+}

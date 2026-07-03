@@ -135,9 +135,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			reporter.OnTurn(ctx, turnCount) // 供跑分量測順滑度（實際執行的回合數）
 		}
 
-		// 【埋點 2】Turn Span（defer 確保 break/return 也會結束並計入樹）
+		// 【埋點 2】Turn Span。顯式在每個迴圈出口（break/return/迭代尾）結束，而非用 defer——
+		// defer 綁函式返回，會把所有回合 span 拖到整個 Run 結束才一起關，導致每回合耗時被記成
+		// 「該回合開始→整個 Run 結束」而全部失真，且 span 物件整場持有不釋放。
 		turnCtx, turnSpan := observability.StartSpan(ctx, fmt.Sprintf("Turn-%d", turnCount))
-		defer turnSpan.EndSpan()
 
 		// 長對話維護：history 超過門檻時，把超出逐字尾的舊訊息摺進滾動摘要並真正逐出（history 有界）。
 		// 只在超門檻時付一次 LLM；EnableSummary 關則跳過。放在取窗口前，使本輪就吃到收斂後的 history。
@@ -203,6 +204,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			thinkResp, err := e.provider.Generate(thinkCtx, compactedContext, nil)
 			thinkSpan.EndSpan()
 			if err != nil {
+				turnSpan.EndSpan()
 				return fmt.Errorf("Thinking 階段失敗: %w", err)
 			}
 			if thinkResp.Content != "" {
@@ -221,7 +223,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		actSpan.AddAttribute("gen_ai.request.model", e.provider.ModelName())
 		actSpan.AddAttribute("langfuse.observation.type", "generation")
 		// 送出的完整 messages → Langfuse 的 Input（之前只有 token 數，看不到實際提示）
-		actSpan.AddAttribute("langfuse.observation.input", jsonStr(compactedContext))
+		// 以 Enabled() 為閘：追蹤關閉時 jsonStr(整個 context) 仍會 eager 求值，白 Marshal 一次。
+		if observability.Enabled() {
+			actSpan.AddAttribute("langfuse.observation.input", jsonStr(compactedContext))
+		}
 		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
 		if actionResp != nil {
 			if actionResp.Usage != nil {
@@ -229,14 +234,17 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				actSpan.AddAttribute("gen_ai.usage.output_tokens", actionResp.Usage.CompletionTokens)
 			}
 			// 模型本輪實際輸出（文字 + tool_calls）→ Langfuse 的 Output 顯示完整內容，
-			// 不再只是 trace 樹裡那條被砍到 N 字的工具 output_preview。
-			actSpan.AddAttribute("langfuse.observation.output", jsonStr(map[string]any{
-				"content":    actionResp.Content,
-				"tool_calls": actionResp.ToolCalls,
-			}))
+			// 不再只是 trace 樹裡那條被砍到 N 字的工具 output_preview。同樣以 Enabled() 為閘避免白 Marshal。
+			if observability.Enabled() {
+				actSpan.AddAttribute("langfuse.observation.output", jsonStr(map[string]any{
+					"content":    actionResp.Content,
+					"tool_calls": actionResp.ToolCalls,
+				}))
+			}
 		}
 		actSpan.EndSpan()
 		if err != nil {
+			turnSpan.EndSpan()
 			return fmt.Errorf("Action 階段失敗: %w", err)
 		}
 
@@ -259,6 +267,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		}
 
 		if len(actionResp.ToolCalls) == 0 {
+			turnSpan.EndSpan()
 			break
 		}
 
@@ -325,6 +334,8 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		if reminderMsg := e.injector.CheckTurn(turnCalls, turnResults); reminderMsg != nil {
 			session.Append(*reminderMsg)
 		}
+
+		turnSpan.EndSpan() // 本回合正常結束：在迭代尾顯式收尾，讓耗時只涵蓋這一回合
 	}
 
 	return nil

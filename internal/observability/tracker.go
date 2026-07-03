@@ -107,7 +107,8 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 
 		if t.session != nil {
 			t.session.RecordUsage(promptTokens, completionTokens, cost)
-			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.TotalCostUSD)
+			// 用 CostUSD() 在鎖保護下讀取，避免與並發 RecordUsage 對裸欄位 TotalCostUSD 的 data race。
+			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.CostUSD())
 		}
 	} else {
 		log.Printf("[Tracker] ⚠️ API 調用完成，但未返回 Usage 數據 | 耗時: %v\n", latency)
