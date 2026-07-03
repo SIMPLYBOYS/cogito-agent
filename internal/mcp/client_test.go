@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -98,8 +99,8 @@ func TestClient_ListAndCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("echo 執行失敗: %v", err)
 	}
-	if out != "hello" {
-		t.Errorf("echo 應回傳 hello，got %q", out)
+	if !strings.Contains(out, "hello") { // 結果被包在「不受信外部資料」邊界標記內
+		t.Errorf("echo 回傳應含 hello，got %q", out)
 	}
 
 	// boom 應以 error 回傳（isError → error-as-observation）
@@ -130,8 +131,8 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 	wg.Wait()
 	for i, got := range results {
 		want := string(rune('A' + i))
-		if got != want {
-			t.Errorf("併發呼叫 %d：id 路由錯誤，want %q got %q", i, want, got)
+		if !strings.Contains(got, want) { // 每個結果含各自 msg＝id 路由正確（結果外層有邊界標記）
+			t.Errorf("併發呼叫 %d：id 路由錯誤，want 含 %q got %q", i, want, got)
 		}
 	}
 }

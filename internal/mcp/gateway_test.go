@@ -49,8 +49,8 @@ func TestGateway_CatalogAndCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp_call_tool 執行失敗: %v", err)
 	}
-	if out != "via-gateway" {
-		t.Errorf("應回傳 via-gateway，got %q", out)
+	if !strings.Contains(out, "via-gateway") { // 結果被包在「不受信外部資料」邊界標記內
+		t.Errorf("回傳應含 via-gateway，got %q", out)
 	}
 
 	// 未知工具名 → error

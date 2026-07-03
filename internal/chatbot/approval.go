@@ -109,15 +109,25 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 }
 
 // bashDangerPatterns 是 bash（前景/背景）與 MCP 工具參數共用的危險指令黑名單。
+// 比對前一律 lowercase，故模式用小寫即可涵蓋大小寫變體（DROP TABLE / RM -RF…）。
+// ponytail: 黑名單是防禦縱深，列不完；真正邊界應是「低信任來源預設走 Docker sandbox（--network none）」。
 var bashDangerPatterns = []string{
-	`rm\s+-r`,      // 遞歸刪除
-	`sudo\s+`,      // 提權
-	`drop\s+`,      // SQL DROP
-	`>.*\.go`,      // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
-	`nginx\s+-s`,   // 重啟/停止 nginx（會中斷線上服務）
-	`systemctl\s+`, // 系統服務管理（start/stop/restart）
-	`kill\s+`,      // 殺進程
+	`rm\s+-\S*[rf]`,            // rm 帶 r/f 旗標的任意組合：-rf/-fr/-r/-f/-Rf…（原 rm\s+-r 漏掉 -fr）
+	`rm\s+--(recursive|force)`, // 長旗標形式
+	`find\s+.*-delete`,         // find … -delete 遞歸刪除
+	`sudo\s+`,                  // 提權
+	`drop\s+`,                  // SQL DROP
+	`truncate\s+table`,         // SQL TRUNCATE
+	`>.*\.go`,                  // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
+	`nginx\s+-s`,               // 重啟/停止 nginx（會中斷線上服務）
+	`systemctl\s+`,             // 系統服務管理（start/stop/restart）
+	`kill\s+`,                  // 殺進程
+	`printenv`,                 // 傾印環境變數（含金鑰）
 }
+
+// secretSegments 是機密/憑證路徑片段：bash 或 MCP 工具參數命中即要求審批，擋 cat .env / curl -d @.env
+// / 讀 id_rsa 這類外洩。比對前一律 lowercase。與寫檔工具的敏感目標判斷（IsDangerousCommand 內）互補。
+var secretSegments = []string{".env", "id_rsa", "credentials", ".ssh", ".aws", "/etc/passwd", "/etc/shadow"}
 
 // mcpDangerVerbs 是遠端 MCP 工具名裡的「破壞性/高風險」動詞——語意未知時據此攔下要審批。
 var mcpDangerVerbs = []string{
@@ -137,9 +147,15 @@ func IsDangerousCommand(toolName string, args string) bool {
 	case "bash", "bash_background":
 		// 背景 bash 與前景 bash 走同一危險黑名單——否則 `bash_background` 會成為審批繞道
 		// （長駐的 rm -rf / kill 更危險）。對應 memory「拉起需審批」的重啟條件。
+		low := strings.ToLower(args)
 		for _, p := range bashDangerPatterns {
-			if matched, _ := regexp.MatchString(p, args); matched {
+			if matched, _ := regexp.MatchString(p, low); matched {
 				return true
+			}
+		}
+		for _, seg := range secretSegments {
+			if strings.Contains(low, seg) {
+				return true // 機密/憑證外洩（cat .env / 讀 id_rsa …）
 			}
 		}
 	case "mcp_call_tool":
@@ -163,7 +179,7 @@ func IsDangerousCommand(toolName string, args string) bool {
 				return true
 			}
 		}
-		for _, seg := range []string{".env", ".ssh", ".aws", "id_rsa", "/etc/passwd", "/etc/shadow"} {
+		for _, seg := range secretSegments {
 			if strings.Contains(scan, seg) {
 				return true
 			}
