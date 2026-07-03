@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -96,5 +98,71 @@ func TestOpenAIProvider_Defaults(t *testing.T) {
 	p := NewOpenAIProvider(OpenAIConfig{APIKey: "k"})
 	if p.ModelName() != "gpt-4o-mini" || p.MaxContextTokens() != 128000 {
 		t.Errorf("預設值錯誤: model=%s ctx=%d", p.ModelName(), p.MaxContextTokens())
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	if parseRetryAfter("2") != 2*time.Second {
+		t.Error("秒數形式應解析為對應秒數")
+	}
+	if parseRetryAfter("") != 0 || parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT") != 0 {
+		t.Error("缺失或 HTTP 日期形式應回 0（退回指數退避）")
+	}
+}
+
+func TestSleepBackoff_RespectsCtxCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sleepBackoff(ctx, 5, 0) {
+		t.Error("ctx 已取消應立即回 false")
+	}
+	if !sleepBackoff(context.Background(), 0, time.Millisecond) {
+		t.Error("正常等待應回 true")
+	}
+}
+
+// 429 連兩次後成功：驗證會重試而非整個任務中止（P5 的核心韌性缺口）。
+func TestOpenAIProvider_RetriesOn429ThenSucceeds(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&hits, 1) < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			io.WriteString(w, `{"error":{"message":"rate limited"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", Model: "x", HTTPClient: srv.Client()})
+	resp, err := p.Generate(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("429 兩次後應重試成功: %v", err)
+	}
+	if resp.Content != "ok" {
+		t.Errorf("內容錯誤: %q", resp.Content)
+	}
+	if n := atomic.LoadInt32(&hits); n != 3 {
+		t.Errorf("應重試到第 3 次才成功，實際打了 %d 次", n)
+	}
+}
+
+// 4xx（非 429）不重試：用戶端錯誤重試無益，應立即失敗、只打一次。
+func TestOpenAIProvider_NoRetryOn4xx(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":{"message":"bad request"}}`)
+	}))
+	defer srv.Close()
+
+	p := NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", Model: "x", HTTPClient: srv.Client()})
+	if _, err := p.Generate(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil); err == nil {
+		t.Fatal("HTTP 400 應回 error")
+	}
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Errorf("4xx 不該重試，應只打 1 次，實際 %d 次", n)
 	}
 }

@@ -6,11 +6,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
+)
+
+const (
+	// maxRetries 是瞬時性失敗（網路錯誤 / 429 / 5xx）的重試次數。Claude 走官方 SDK 自帶重試，
+	// 這裡替手寫的 OpenAI 相容路徑補上對等韌性——否則一次 rate limit 就整個任務中止。
+	maxRetries = 3
+	// maxBackoff 封頂單次退避，避免伺服器回一個巨大的 Retry-After 把任務卡死。
+	maxBackoff = 30 * time.Second
 )
 
 // OpenAIProvider 是一個【OpenAI 相容】的 LLMProvider：手寫精簡的 /chat/completions 客戶端。
@@ -160,29 +170,54 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		return nil, fmt.Errorf("序列化請求失敗: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
+	url := p.cfg.BaseURL + "/chat/completions"
+	var raw []byte
+	var statusCode int
+	for attempt := 0; ; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI 相容 API 請求失敗: %w", err)
+		resp, doErr := p.client.Do(req)
+		if doErr != nil {
+			// 網路類錯誤（連線重置/逾時等）：瞬時性，退避重試。
+			if attempt < maxRetries && ctx.Err() == nil {
+				log.Printf("[OpenAI] 請求失敗（%v），退避後重試 %d/%d", doErr, attempt+1, maxRetries)
+				if !sleepBackoff(ctx, attempt, 0) {
+					return nil, ctx.Err()
+				}
+				continue
+			}
+			return nil, fmt.Errorf("OpenAI 相容 API 請求失敗: %w", doErr)
+		}
+		raw, _ = io.ReadAll(resp.Body)
+		statusCode = resp.StatusCode
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		resp.Body.Close()
+
+		// 429（限流）與 5xx（伺服器側瞬時錯誤）可重試；4xx（如 401/400）是用戶端錯誤，重試無益，直接落下。
+		if (statusCode == http.StatusTooManyRequests || statusCode >= 500) && attempt < maxRetries && ctx.Err() == nil {
+			log.Printf("[OpenAI] HTTP %d，退避後重試 %d/%d", statusCode, attempt+1, maxRetries)
+			if !sleepBackoff(ctx, attempt, retryAfter) {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		break
 	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
 
 	var parsed oaiResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("解析回應失敗（HTTP %d）: %w\n%s", resp.StatusCode, err, truncate(string(raw), 300))
+		return nil, fmt.Errorf("解析回應失敗（HTTP %d）: %w\n%s", statusCode, err, truncate(string(raw), 300))
 	}
-	if resp.StatusCode != http.StatusOK {
+	if statusCode != http.StatusOK {
 		if parsed.Error != nil {
-			return nil, fmt.Errorf("OpenAI 相容 API 錯誤（HTTP %d）: %s", resp.StatusCode, parsed.Error.Message)
+			return nil, fmt.Errorf("OpenAI 相容 API 錯誤（HTTP %d）: %s", statusCode, parsed.Error.Message)
 		}
-		return nil, fmt.Errorf("OpenAI 相容 API 錯誤（HTTP %d）: %s", resp.StatusCode, truncate(string(raw), 300))
+		return nil, fmt.Errorf("OpenAI 相容 API 錯誤（HTTP %d）: %s", statusCode, truncate(string(raw), 300))
 	}
 	if len(parsed.Choices) == 0 {
 		return nil, fmt.Errorf("回應沒有 choices")
@@ -207,6 +242,33 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		}
 	}
 	return result, nil
+}
+
+// sleepBackoff 在重試前退避等待：優先用伺服器的 Retry-After，否則指數退避（0.5s、1s、2s…），封頂
+// maxBackoff。等待期間尊重 ctx 取消——回傳 false 表示 ctx 已取消，呼叫端應中止。
+func sleepBackoff(ctx context.Context, attempt int, retryAfter time.Duration) bool {
+	d := retryAfter
+	if d <= 0 {
+		d = time.Duration(500*(1<<attempt)) * time.Millisecond
+	}
+	if d > maxBackoff {
+		d = maxBackoff
+	}
+	select {
+	case <-time.After(d):
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// parseRetryAfter 解析 Retry-After 標頭的秒數形式（OpenAI 與多數相容端點用此形式）；非秒數（HTTP 日期）
+// 或缺失則回 0，交由呼叫端退回指數退避。
+func parseRetryAfter(v string) time.Duration {
+	if secs, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return 0
 }
 
 func truncate(s string, max int) string {
