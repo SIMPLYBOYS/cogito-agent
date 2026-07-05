@@ -12,6 +12,10 @@
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest", "--headless"]
     },
+    "job104": {
+      "command": "uvx",
+      "args": ["job104-mcp@latest"]
+    },
     "twinkle-hub": {
       "type": "http",
       "url": "https://api.twinkleai.tw/mcp/",
