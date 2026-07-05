@@ -40,7 +40,8 @@ func NewSlackBot(factory chatbot.EngineFactory, workDir string) *SlackBot {
 	}
 
 	send := func(channelID, text string) {
-		if _, _, err := api.PostMessage(channelID, slackapi.MsgOptionText(text, false)); err != nil {
+		// Slack mrkdwn 原生吃 ``` 等寬 block（表格對齊靠它），但粗體是單星號：**x**→*x*。
+		if _, _, err := api.PostMessage(channelID, slackapi.MsgOptionText(slackMrkdwn(text), false)); err != nil {
 			log.Printf("[Slack] 消息發送失敗: %v\n", err)
 		}
 	}
@@ -55,6 +56,13 @@ func NewSlackBot(factory chatbot.EngineFactory, workDir string) *SlackBot {
 // botMentionRegexp 匹配本 bot 的 @提及，兩種格式都吃：<@U123> 與 <@U123|顯示名>。
 func botMentionRegexp(botID string) *regexp.Regexp {
 	return regexp.MustCompile("<@" + regexp.QuoteMeta(botID) + `(\|[^>]*)?>`)
+}
+
+var slackBoldRe = regexp.MustCompile(`\*\*(.+?)\*\*`)
+
+// slackMrkdwn 把中介格式的 **粗體** 轉成 Slack 的單星號 *粗體*（``` 等寬 block Slack 原生就 render）。
+func slackMrkdwn(s string) string {
+	return slackBoldRe.ReplaceAllString(s, "*$1*")
 }
 
 func (b *SlackBot) SetPostRunHook(h chatbot.PostRunHook)         { b.core.SetPostRunHook(h) }

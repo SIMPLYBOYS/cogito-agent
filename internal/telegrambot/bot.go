@@ -83,19 +83,52 @@ func (b *TelegramBot) SendMessage(convID, text string) { chatbot.SendMessage(con
 func (b *TelegramBot) ResumeInterrupted() { b.core.ResumeInterrupted() }
 
 // send 是核心注入的原生發送：chatID 為純數字字串，Bot API 的 chat_id 要整數。
+// 先以 HTML parse_mode 送（表格→<pre> 等寬對齊、**粗體**→<b>）；若 HTML 不合法（如標記不平衡）
+// Telegram 會回非 2xx，此時退回純文字重送一次，確保訊息不因格式化而整條發不出去。
 func (b *TelegramBot) send(chatID, text string) {
 	id, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil {
 		log.Printf("[Telegram] 非法 chat_id %q: %v\n", chatID, err)
 		return
 	}
-	payload, _ := json.Marshal(map[string]any{"chat_id": id, "text": text})
+	if b.postMessage(id, telegramHTML(text), "HTML") {
+		return
+	}
+	b.postMessage(id, text, "") // fallback：純文字
+}
+
+// postMessage 送一則訊息，回傳是否成功（HTTP 2xx）。parseMode 空字串＝純文字。
+func (b *TelegramBot) postMessage(id int64, text, parseMode string) bool {
+	m := map[string]any{"chat_id": id, "text": text}
+	if parseMode != "" {
+		m["parse_mode"] = parseMode
+	}
+	payload, _ := json.Marshal(m)
 	resp, err := b.client.Post(apiBase+b.token+"/sendMessage", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		log.Printf("[Telegram] 消息發送失敗: %v\n", err)
-		return
+		return false
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+var (
+	tgFenceRe = regexp.MustCompile("(?s)```[a-zA-Z]*\n?(.*?)```")
+	tgBoldRe  = regexp.MustCompile(`\*\*(.+?)\*\*`)
+	tgCodeRe  = regexp.MustCompile("`([^`\n]+)`")
+)
+
+// telegramHTML 把中介格式轉成 Telegram HTML parse_mode：先 escape &<>（純文字/進度訊息在 HTML
+// 模式下才安全），再把 ``` 圍欄→<pre>（等寬、保住表格對齊）、**粗體**→<b>、`code`→<code>。
+func telegramHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = tgFenceRe.ReplaceAllString(s, "<pre>$1</pre>")
+	s = tgBoldRe.ReplaceAllString(s, "<b>$1</b>")
+	s = tgCodeRe.ReplaceAllString(s, "<code>$1</code>")
+	return s
 }
 
 // Start 阻塞跑長輪詢迴圈，直到 ctx 取消。網路出錯退避重試，不讓整個 bot 倒下。

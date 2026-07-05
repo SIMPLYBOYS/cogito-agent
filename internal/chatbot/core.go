@@ -468,7 +468,147 @@ func argPreview(s string, max int) string {
 	return capRunes(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "), max)
 }
 
-func (r *reporter) OnMessage(ctx context.Context, content string) { SendMessage(r.convID, content) }
+func (r *reporter) OnMessage(ctx context.Context, content string) {
+	// 最終回覆走格式化：GFM 表格→等寬對齊 block、## 標題→粗體。傳輸層再把 ``` / **粗體** 轉成
+	// 各平台語法（Slack 原生吃、Telegram 用 HTML）。進度訊息不經這裡，維持精簡。
+	SendMessage(r.convID, formatForChat(content))
+}
+
+// formatForChat 把模型輸出的 GitHub Markdown 轉成【聊天平台通用】的中介格式：Markdown 表格兩個
+// 平台都不 render，改成空格對齊（CJK 算 2 格寬）的等寬 code block；## 標題轉 **粗體**。輸出仍用
+// ``` 與 **x** 當中性標記，由各傳輸層的 send 落地成該平台語法。
+func formatForChat(content string) string {
+	lines := strings.Split(content, "\n")
+	var out []string
+	for i := 0; i < len(lines); i++ {
+		if isTableRow(lines[i]) && i+1 < len(lines) && isTableSeparator(lines[i+1]) {
+			block, next := renderTable(lines, i)
+			out = append(out, block)
+			i = next - 1
+			continue
+		}
+		out = append(out, headerToBold(lines[i]))
+	}
+	return strings.Join(out, "\n")
+}
+
+func isTableRow(line string) bool {
+	return strings.Contains(line, "|") && strings.TrimSpace(line) != ""
+}
+
+// isTableSeparator 判斷是否為 GFM 表格的分隔列（只含 - : | 與空白，且至少一個 -）。
+func isTableSeparator(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" || !strings.Contains(t, "-") {
+		return false
+	}
+	return strings.Trim(t, "-:| ") == ""
+}
+
+// headerToBold 把 `## 標題` 轉成 `**標題**`（聊天平台不 render #）。
+func headerToBold(line string) string {
+	t := strings.TrimLeft(line, " ")
+	h := 0
+	for h < len(t) && t[h] == '#' {
+		h++
+	}
+	if h > 0 && h <= 6 && h < len(t) && t[h] == ' ' {
+		return "**" + strings.TrimSpace(t[h+1:]) + "**"
+	}
+	return line
+}
+
+// renderTable 從 start（表頭列）起把一段 GFM 表格轉成等寬對齊、包在 ``` 內的 block。
+// 回傳 block 與「表格結束後的下一列索引」。欄寬用顯示寬度（CJK=2）計算，才不會在等寬字型下歪掉。
+func renderTable(lines []string, start int) (string, int) {
+	parse := func(l string) []string {
+		t := strings.TrimSpace(l)
+		t = strings.TrimPrefix(t, "|")
+		t = strings.TrimSuffix(t, "|")
+		cells := strings.Split(t, "|")
+		for i := range cells {
+			cells[i] = strings.TrimSpace(cells[i])
+		}
+		return cells
+	}
+	header := parse(lines[start])
+	var rows [][]string
+	end := start + 2 // 跳過表頭 + 分隔列
+	for end < len(lines) && isTableRow(lines[end]) {
+		rows = append(rows, parse(lines[end]))
+		end++
+	}
+	// 欄數取所有列的最大值；欄寬取該欄所有 cell 顯示寬度的最大值。
+	cols := len(header)
+	for _, r := range rows {
+		if len(r) > cols {
+			cols = len(r)
+		}
+	}
+	width := make([]int, cols)
+	measure := func(cells []string) {
+		for i, c := range cells {
+			if w := dispWidth(c); w > width[i] {
+				width[i] = w
+			}
+		}
+	}
+	measure(header)
+	for _, r := range rows {
+		measure(r)
+	}
+	pad := func(cells []string) string {
+		parts := make([]string, cols)
+		for i := 0; i < cols; i++ {
+			c := ""
+			if i < len(cells) {
+				c = cells[i]
+			}
+			parts[i] = c + strings.Repeat(" ", width[i]-dispWidth(c))
+		}
+		return strings.TrimRight(strings.Join(parts, "  "), " ")
+	}
+	var b strings.Builder
+	b.WriteString("```\n")
+	b.WriteString(pad(header) + "\n")
+	sep := make([]string, cols)
+	for i := range sep {
+		sep[i] = strings.Repeat("─", width[i])
+	}
+	b.WriteString(strings.Join(sep, "  ") + "\n")
+	for _, r := range rows {
+		b.WriteString(pad(r) + "\n")
+	}
+	b.WriteString("```")
+	return b.String(), end
+}
+
+// dispWidth 回傳字串在等寬字型下的顯示寬度：CJK/全形字算 2 格，其餘 1 格。
+func dispWidth(s string) int {
+	w := 0
+	for _, r := range s {
+		if isWide(r) {
+			w += 2
+		} else {
+			w++
+		}
+	}
+	return w
+}
+
+func isWide(r rune) bool {
+	return (r >= 0x1100 && r <= 0x115F) || // Hangul Jamo
+		(r >= 0x2E80 && r <= 0x303E) || // CJK 部首/康熙
+		(r >= 0x3041 && r <= 0x33FF) || // 平假名/片假名/CJK 符號
+		(r >= 0x3400 && r <= 0x4DBF) || // CJK 擴充 A
+		(r >= 0x4E00 && r <= 0x9FFF) || // CJK 統一表意
+		(r >= 0xAC00 && r <= 0xD7A3) || // 韓文音節
+		(r >= 0xF900 && r <= 0xFAFF) || // CJK 相容
+		(r >= 0xFE30 && r <= 0xFE4F) || // CJK 相容形式
+		(r >= 0xFF00 && r <= 0xFF60) || // 全形 ASCII
+		(r >= 0xFFE0 && r <= 0xFFE6) ||
+		(r >= 0x20000 && r <= 0x3FFFD) // CJK 擴充 B+
+}
 
 // OnTurn 不回推（回合計數對使用者是噪音）。
 func (r *reporter) OnTurn(ctx context.Context, turn int) {}
