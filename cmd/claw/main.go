@@ -129,6 +129,7 @@ func main() {
 		registry.Register(tools.NewEditFileTool(sess.WorkDir))
 		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
 		registry.Register(tools.NewRecallTool(rootDir))    // 長期記憶按需檢索：與記憶索引同源（根 workspace）
+		registry.Register(tools.NewBarChartTool())         // 數據可視化：等寬長條圖（聊天平台 render 成對齊圖）
 		if selfEvolveEnabled() {                           // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
 			registry.Register(tools.NewConsolidateTool(llmProvider, rootDir, sess))
 		}

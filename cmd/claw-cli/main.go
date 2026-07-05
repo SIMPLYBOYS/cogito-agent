@@ -98,6 +98,7 @@ func main() {
 	registry.Register(tools.NewEditFileTool(workDir))
 	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
 	registry.Register(tools.NewRecallTool(workDir))    // 長期記憶按需檢索（CLI 工作區即記憶來源）
+	registry.Register(tools.NewBarChartTool())         // 數據可視化：等寬長條圖
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
 		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, sess)) // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
 	}
