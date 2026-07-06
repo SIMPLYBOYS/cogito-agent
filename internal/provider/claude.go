@@ -12,8 +12,9 @@ import (
 )
 
 type ClaudeProvider struct {
-	client anthropic.Client
-	model  string
+	client    anthropic.Client
+	model     string
+	maxTokens int // 0＝用預設 4096；供 effort 調整子 agent 輸出上限
 }
 
 // NewClaudeProvider 走 Anthropic 官方端點（https://api.anthropic.com）。
@@ -39,6 +40,18 @@ func (p *ClaudeProvider) MaxContextTokens() int {
 // ModelName 返回構造時傳入的 Claude 模型 id（如 claude-opus-4-8）。
 func (p *ClaudeProvider) ModelName() string {
 	return p.model
+}
+
+// Configure 回傳換了 model / maxTokens 的變體（值拷貝，原 provider 不變；共用同一 client）。
+func (p *ClaudeProvider) Configure(model string, maxTokens int) LLMProvider {
+	np := *p
+	if model != "" {
+		np.model = model
+	}
+	if maxTokens > 0 {
+		np.maxTokens = maxTokens
+	}
+	return &np
 }
 
 func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
@@ -79,9 +92,13 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		anthropicTools = append(anthropicTools, anthropic.ToolUnionParam{OfTool: &tp})
 	}
 
+	maxTokens := int64(4096)
+	if p.maxTokens > 0 {
+		maxTokens = int64(p.maxTokens)
+	}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(p.model),
-		MaxTokens: 4096,
+		MaxTokens: maxTokens,
 		Messages:  anthropicMsgs,
 	}
 

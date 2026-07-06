@@ -61,6 +61,16 @@ func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
 func (p *OpenAIProvider) ModelName() string     { return p.cfg.Model }
 func (p *OpenAIProvider) MaxContextTokens() int { return p.cfg.MaxContextTokens }
 
+// Configure 回傳換了 model 的變體（沿用同一端點/金鑰/HTTP client）。maxTokens 目前不套用——
+// 此 provider 的請求未送 max_tokens（由端點自行決定），effort 對 OpenAI 相容路徑靜默忽略。
+func (p *OpenAIProvider) Configure(model string, _ int) LLMProvider {
+	cfg := p.cfg // 值拷貝（含 HTTPClient 指標，沿用同一 client）
+	if model != "" {
+		cfg.Model = model
+	}
+	return NewOpenAIProvider(cfg)
+}
+
 // ---- wire types（OpenAI chat-completions）----
 
 type oaiToolCall struct {

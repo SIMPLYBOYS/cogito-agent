@@ -348,9 +348,22 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 //   - 返回值 string 即"探索報告"，作為 spawn_subagent 工具的輸出回給主 agent。
 //
 // 滿足 tools.AgentRunner 接口；reporter 用 any 規避包依賴，內部斷言回 Reporter。
-func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, skillBody string, systemPrompt string, readOnlyRegistry tools.Registry, reporter any) (string, error) {
+func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, error) {
+	readOnlyRegistry := task.Registry
+	reporter := task.Reporter
+
+	// 子 agent 選模型 / effort：provider 支援 Configurable 且有指定時，用換了 model/輸出上限的變體
+	// （成本仍記進同一 session）；不支援則沿用主引擎 provider（靜默忽略）。
+	prov := e.provider
+	if task.Model != "" || task.MaxTokens > 0 {
+		if cfg, ok := e.provider.(provider.Configurable); ok {
+			prov = cfg.Configure(task.Model, task.MaxTokens)
+			log.Printf("[Subagent] 🧠 子 agent 用模型 %s（maxTokens=%d）\n", prov.ModelName(), task.MaxTokens)
+		}
+	}
+
 	// 具名 agent 傳入自己的角色 prompt；未指定則沿用預設「探路者」（唯讀探索），行為與過去一致。
-	systemContent := systemPrompt
+	systemContent := task.SystemPrompt
 	if systemContent == "" {
 		systemContent = `你是一個專門負責深度探索的探路者 (Explorer Subagent)。
 你的任務是根據主架構師的指令，在當前工作區內仔細閱讀代碼、查閱日誌，蒐集足夠的信息。
@@ -362,13 +375,13 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, skillBody s
 	}
 
 	// 綁定技能：完整正文只活在這個子 agent 的隔離 context（主 context 不被汙染）。
-	if skillBody != "" {
-		systemContent += "\n\n---\n【已綁定專業技能 · 嚴格依照以下操作指南執行本次任務】\n\n" + skillBody
+	if task.SkillBody != "" {
+		systemContent += "\n\n---\n【已綁定專業技能 · 嚴格依照以下操作指南執行本次任務】\n\n" + task.SkillBody
 	}
 
 	contextHistory := []schema.Message{
 		{Role: schema.RoleSystem, Content: systemContent},
-		{Role: schema.RoleUser, Content: taskPrompt},
+		{Role: schema.RoleUser, Content: task.Prompt},
 	}
 
 	const maxSubTurns = 10
@@ -385,7 +398,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, taskPrompt string, skillBody s
 		compactedContext := e.compactor.Compact(contextHistory)
 
 		// 子任務要求急速響應，強制跳過慢思考，直接行動
-		actionResp, err := e.provider.Generate(ctx, compactedContext, availableTools)
+		actionResp, err := prov.Generate(ctx, compactedContext, availableTools)
 		if err != nil {
 			return "", fmt.Errorf("子智能體推理失敗: %w", err)
 		}

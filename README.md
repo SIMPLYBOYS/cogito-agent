@@ -411,6 +411,9 @@ go run ./cmd/claw-cli -prompt "..."
 name: code-reviewer
 description: 從正確性/安全/可讀性審查程式碼變更，只讀不改
 tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集，省略＝沿用預設探索工具
+model: claude-opus-4-8          # 可選；該 agent 用的模型（省略＝沿用主引擎模型）
+effort: high                    # 可選；low/medium/high → 輸出 token 上限 2048/4096/8192
+isolation: worktree             # 可選；在 git worktree 隔離執行，完事把 diff apply 回主工作區
 ---
 你是資深 code reviewer。用 read_file 與 bash 閱讀變更，從正確性/安全/可讀性審查。
 每個問題給 file:line + 一句話問題 + 最小修法；沒問題就說「無明顯問題」。完成後輸出精煉報告。
@@ -420,7 +423,8 @@ tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集
 - **可寫的實作型 agent**：在 `tools` 明確宣告 `write_file` / `edit_file`，該 agent 就能改檔（如上例 `implementer`）。寫入是 **opt-in**——沒宣告就拿不到，且照走審批 middleware（敏感寫入 `.env`/`.git`/絕對路徑仍需人工放行）、檔案工具在工具層硬擋逃出工作區。
 - `tools` 只能是子 agent 工具超集（`read_file`/`bash`/`write_file`/`edit_file`）的子集，不含 `spawn_subagent`（杜絕遞迴）。
 - 可用清單會自動列進 `spawn_subagent` 的工具說明，讓模型知道有哪些角色可派。
-- ⚠️ **並行寫入的邊界**：一輪派出多個【可寫】agent 到同一 workspace 可能相互覆蓋；需要真正隔離時，並行只派唯讀分析 agent，寫入交給單一 implementer 序列化（worktree 級隔離為後續方向）。
+- **選模型 / effort**：`model` 讓探路用便宜快的（haiku）、審查用強的（opus）分層；`effort` 調輸出深度（token 上限）。provider 支援才生效，成本仍記進同一 session。effort 是輸出上限的粗略代理，非 extended-thinking。
+- **worktree 隔離**（`isolation: worktree`）：可寫 agent 在 base 的 git worktree 隔離跑，完事把 diff **序列化 apply 回主工作區**——這樣一輪並行多個可寫 agent 也不會相互覆蓋（各寫各的 worktree，回寫一個一個來）。前提：workspace 是 git repo（否則自動降級為共享工作區）、host 執行模式（docker sandbox 下 bash 掛在 base 容器，與 worktree 檔案隔離不完全對齊）。回寫衝突時，diff 會附在子 agent 報告裡交主 agent 處理。
 
 ### 技能自生成 + 把關
 

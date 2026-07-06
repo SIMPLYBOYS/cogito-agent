@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -13,8 +14,34 @@ import (
 // AgentRunner 定義引擎向工具層暴露的"拉起子智能體"能力。接口定義在 tools 包（使用端），
 // 這樣 tools 不需要 import engine，避免循環依賴；*engine.AgentEngine 靠 duck typing 滿足它。
 // skillBody 為可選的「綁定技能正文」：非空時注入子 agent 的隔離 context，主 context 不被汙染。
+// SubTask 是一次子 agent 委派的完整參數（用 struct 而非長 positional 參數，好擴充）。
+type SubTask struct {
+	Prompt       string
+	SkillBody    string
+	SystemPrompt string
+	Model        string   // 空＝沿用主引擎模型
+	MaxTokens    int      // <=0＝用預設；供 effort 調整輸出上限
+	Registry     Registry // 子 agent 可用的工具（已 Subset / 已 rooted 在隔離目錄）
+	Reporter     interface{}
+}
+
 type AgentRunner interface {
-	RunSub(ctx context.Context, taskPrompt string, skillBody string, systemPrompt string, readOnlyRegistry Registry, reporter interface{}) (string, error)
+	RunSub(ctx context.Context, task SubTask) (string, error)
+}
+
+// effortToMaxTokens 把 agent 的 effort（low/medium/high）映射成輸出 token 上限——思考深度的粗略代理
+// （非 extended-thinking）。未知/空＝0（用 provider 預設 4096）。
+func effortToMaxTokens(effort string) int {
+	switch effort {
+	case "low":
+		return 2048
+	case "medium":
+		return 4096
+	case "high":
+		return 8192
+	default:
+		return 0
+	}
 }
 
 // SubagentTool 是一個標準 BaseTool：主 agent 調用它來派出一個受限的探索子 agent，
@@ -31,6 +58,12 @@ type SubagentTool struct {
 	reporter    interface{}
 	skillLoader *ctxpkg.SkillLoader
 	agentLoader *ctxpkg.AgentLoader
+
+	// worktree 隔離（可選）：baseWorkDir 是 session 工作區；regFactory 依給定目錄建同款工具超集。
+	// isolation:worktree 的 agent 會在 baseWorkDir 的 git worktree 裡跑，工具 rooted 在該 worktree。
+	// 兩者為 nil/空時 isolation 靜默降級為共享工作區。
+	baseWorkDir string
+	regFactory  func(workDir string) Registry
 }
 
 // skillsBaseDir 是含 .claw/skills 與 .claw/agents 的目錄（須與主 agent 的索引同源）。
@@ -43,6 +76,14 @@ func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter int
 		skillLoader: ctxpkg.NewSkillLoader(skillsBaseDir),
 		agentLoader: ctxpkg.NewAgentLoader(skillsBaseDir),
 	}
+}
+
+// WithWorktreeIsolation 開啟 worktree 隔離能力：baseWorkDir＝session 工作區，regFactory 依目錄建工具超集
+// （與傳入 subagentRegistry 同款，但 rooted 在指定目錄）。未呼叫則 isolation:worktree 降級為共享工作區。
+func (t *SubagentTool) WithWorktreeIsolation(baseWorkDir string, regFactory func(workDir string) Registry) *SubagentTool {
+	t.baseWorkDir = baseWorkDir
+	t.regFactory = regFactory
+	return t
 }
 
 func (t *SubagentTool) Name() string {
@@ -91,26 +132,56 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("解析參數失敗: %w", err)
 	}
 
-	// 預設（無 agent_type，或具名 agent 未宣告 tools）＝唯讀探路者工具集。具名 agent 若在其 tools
-	// 明確宣告 write/edit，才會拿到寫入能力（opt-in + 審批）。載入失敗則 error-as-observation。
-	reg := t.registry.Subset(defaultSubagentTools)
-	var systemPrompt string
+	// 載入具名 agent（若有）：角色 prompt、工具子集、model/effort/isolation。載入失敗＝error-as-observation。
+	var def ctxpkg.AgentDef
 	role := "探路者"
 	if input.AgentType != "" {
-		def, err := t.agentLoader.Load(input.AgentType)
+		d, err := t.agentLoader.Load(input.AgentType)
 		if err != nil {
 			return fmt.Errorf("載入 agent 失敗: %v", err).Error(), nil
 		}
-		systemPrompt = def.Prompt
-		role = def.Name
-		if len(def.Tools) > 0 {
-			reg = t.registry.Subset(def.Tools) // 該 agent 宣告的工具（可含 write/edit）
-		}
-		log.Printf("[Subagent] 🎭 使用具名 agent [%s]（工具 %v）\n", def.Name, def.Tools)
+		def = d
+		role = d.Name
+		log.Printf("[Subagent] 🎭 使用具名 agent [%s]（工具 %v，model=%q effort=%q isolation=%q）\n",
+			d.Name, d.Tools, d.Model, d.Effort, d.Isolation)
 	}
 
-	// 綁定技能：解析技能名取完整正文，注入子 agent 隔離 context。失敗則 error-as-observation，
-	// 不中斷主循環，由主 agent 自行改用其他名稱或不綁定。
+	// 工具集：具名 agent 宣告了 tools 就用（可含 write/edit），否則預設唯讀探路者工具集（安全底線）。
+	toolset := defaultSubagentTools
+	if len(def.Tools) > 0 {
+		toolset = def.Tools
+	}
+	reg := t.registry.Subset(toolset)
+
+	// worktree 隔離（可選）：isolation:worktree 且能力已裝配時，在 base 的 git worktree 裡跑，工具 rooted
+	// 在 worktree；完事把 diff 序列化 apply 回主工作區。非 git repo / 未裝配則靜默降級為共享工作區。
+	var mergeBack func() string
+	if def.Isolation == "worktree" && t.regFactory != nil && t.baseWorkDir != "" {
+		if wt, cleanup, err := addWorktree(t.baseWorkDir); err != nil {
+			log.Printf("[Subagent] ⚠️ worktree 隔離不可用（%v），改用共享工作區\n", err)
+		} else {
+			defer cleanup()
+			reg = t.regFactory(wt).Subset(toolset) // 工具 rooted 在隔離 worktree
+			base := t.baseWorkDir
+			mergeBack = func() string {
+				patch, derr := worktreeDiff(wt)
+				switch {
+				case derr != nil:
+					return "\n\n[隔離回寫] 抓 diff 失敗：" + derr.Error()
+				case strings.TrimSpace(patch) == "":
+					return "\n\n[隔離回寫] 子 agent 未改動任何檔案。"
+				default:
+					if aerr := applyPatchToBase(base, patch); aerr != nil {
+						return "\n\n[隔離回寫] ⚠️ " + aerr.Error() + "\n（改動仍在隔離區的 diff）:\n" + patch
+					}
+					return "\n\n[隔離回寫] ✅ 已把子 agent 的改動 apply 回主工作區。"
+				}
+			}
+			log.Printf("[Subagent] 🌿 worktree 隔離：%s\n", wt)
+		}
+	}
+
+	// 綁定技能：解析技能名取完整正文，注入子 agent 隔離 context。失敗則 error-as-observation。
 	var skillBody string
 	if input.Skill != "" {
 		body, err := t.skillLoader.ReadSkill(input.Skill)
@@ -123,11 +194,21 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 
 	log.Printf("[Subagent] 🚀 主 Agent 發起委派！正在拉起 [%s]: [%s]...\n", role, input.TaskPrompt)
 
-	summary, err := t.runner.RunSub(ctx, input.TaskPrompt, skillBody, systemPrompt, reg, t.reporter)
+	summary, err := t.runner.RunSub(ctx, SubTask{
+		Prompt:       input.TaskPrompt,
+		SkillBody:    skillBody,
+		SystemPrompt: def.Prompt, // 空＝RunSub 回退預設探路者 prompt
+		Model:        def.Model,
+		MaxTokens:    effortToMaxTokens(def.Effort),
+		Registry:     reg,
+		Reporter:     t.reporter,
+	})
 	if err != nil {
-		// 故意把錯誤 swallow 成正常 Output（error-as-observation）：讓主 agent 看到失敗信息
-		// 但不中斷主 ReAct 循環，由主 agent 自行決定如何補救。
+		// error-as-observation：讓主 agent 看到失敗但不中斷主 ReAct 循環。
 		return fmt.Errorf("子智能體執行失敗: %v", err).Error(), nil
+	}
+	if mergeBack != nil {
+		summary += mergeBack() // 把隔離回寫結果附在報告尾，讓主 agent 知道改動去向
 	}
 
 	log.Printf("[Subagent] ✅ 子智能體任務結束。報告返回給主幹...")

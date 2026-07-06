@@ -70,6 +70,20 @@ func (t *CostTracker) ModelName() string {
 	return t.nextProvider.ModelName()
 }
 
+// Configure 讓子 agent 選模型/effort 仍保有成本追蹤：配置內層 provider 後重新包一層 CostTracker，
+// 以新模型名計價、記進同一 session。內層不支援配置則原樣返回（model/effort 靜默忽略）。
+func (t *CostTracker) Configure(model string, maxTokens int) provider.LLMProvider {
+	cfg, ok := t.nextProvider.(provider.Configurable)
+	if !ok {
+		return t
+	}
+	newModel := model
+	if newModel == "" {
+		newModel = t.modelName
+	}
+	return NewCostTracker(cfg.Configure(model, maxTokens), newModel, t.session)
+}
+
 func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	startTime := time.Now()
 

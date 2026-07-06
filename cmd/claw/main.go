@@ -178,18 +178,23 @@ func main() {
 		// 子智能體工具池（超集）：read_file + bash 供探索；write_file + edit_file 供【實作型】具名
 		// agent（須在 .claw/agents/<name>.md 的 tools 明確宣告才拿得到；預設探路者只取唯讀子集，見
 		// defaultSubagentTools）。無 spawn_subagent（杜絕遞迴）。同掛審批——子 agent 的危險 bash /
-		// 敏感寫入也要人工放行。主 Agent 一次吐多個即可並行委派多路（引擎並行 fan-out）。
-		subagentReg := tools.NewRegistry()
-		subagentReg.Register(tools.NewReadFileTool(sess.WorkDir))
-		subagentReg.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
-		subagentReg.Register(tools.NewWriteFileTool(sess.WorkDir))
-		subagentReg.Register(tools.NewEditFileTool(sess.WorkDir))
-		subagentReg.Use(approval)
-		subagentReg.Use(timing)
-		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（RunSub 內以「[Subagent] …」
-		// 前綴回報）也會串流回本頻道。SlackReporter 的 PostMessage 對並發安全，多隊偵察兵
-		// 同時回報只是訊息交錯。
-		registry.Register(tools.NewSubagentTool(eng, subagentReg, reporter, rootDir)) // skillsBaseDir=rootDir：可綁定技能進子 context
+		// 敏感寫入也要人工放行。抽成 factory 以支援 worktree 隔離（依 worktree 目錄重建同款工具）。
+		buildSubReg := func(wd string) tools.Registry {
+			r := tools.NewRegistry()
+			r.Register(tools.NewReadFileTool(wd))
+			r.Register(tools.NewBashToolWithExecutor(wd, executor))
+			r.Register(tools.NewWriteFileTool(wd))
+			r.Register(tools.NewEditFileTool(wd))
+			r.Use(approval)
+			r.Use(timing)
+			return r
+		}
+		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（以「[Subagent] …」前綴回報）串流回頻道。
+		// WithWorktreeIsolation：isolation:worktree 的 agent 在 git worktree 隔離跑、完事序列化 apply 回主
+		// 工作區（防並行寫入相互覆蓋）。ponytail: 依賴 host executor；docker sandbox 下 bash 仍掛在 base
+		// 容器，worktree 檔案隔離與 docker bash 不完全對齊——並行寫入建議用 host 執行模式。
+		registry.Register(tools.NewSubagentTool(eng, buildSubReg(sess.WorkDir), reporter, rootDir).
+			WithWorktreeIsolation(sess.WorkDir, buildSubReg)) // skillsBaseDir=rootDir：可綁定技能進子 context
 
 		return eng
 	}

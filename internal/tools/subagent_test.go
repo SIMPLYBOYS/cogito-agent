@@ -8,22 +8,26 @@ import (
 	"testing"
 )
 
-// fakeRunner 捕獲傳給 RunSub 的參數，驗證技能正文/角色 prompt/工具集是否正確傳入子 agent。
+// fakeRunner 捕獲傳給 RunSub 的參數，驗證技能正文/角色 prompt/工具集/模型是否正確傳入子 agent。
 type fakeRunner struct {
 	gotTask      string
 	gotSkillBody string
 	gotSysPrompt string
-	gotTools     []string // 子 agent 實際拿到的工具名（排序）
+	gotModel     string
+	gotMaxTokens int
+	gotTools     []string // 子 agent 實際拿到的工具名
 	called       bool
 }
 
-func (f *fakeRunner) RunSub(_ context.Context, taskPrompt, skillBody, systemPrompt string, reg Registry, _ interface{}) (string, error) {
+func (f *fakeRunner) RunSub(_ context.Context, task SubTask) (string, error) {
 	f.called = true
-	f.gotTask = taskPrompt
-	f.gotSkillBody = skillBody
-	f.gotSysPrompt = systemPrompt
+	f.gotTask = task.Prompt
+	f.gotSkillBody = task.SkillBody
+	f.gotSysPrompt = task.SystemPrompt
+	f.gotModel = task.Model
+	f.gotMaxTokens = task.MaxTokens
 	f.gotTools = nil
-	for _, d := range reg.GetAvailableTools() {
+	for _, d := range task.Registry.GetAvailableTools() {
 		f.gotTools = append(f.gotTools, d.Name)
 	}
 	return "report-ok", nil
@@ -154,6 +158,24 @@ func TestSubagent_WriteAgentGetsWriteTools(t *testing.T) {
 	}
 	if !hasTool(fr.gotTools, "write_file") || !hasTool(fr.gotTools, "edit_file") {
 		t.Errorf("實作型 agent 應拿到 write/edit，got %v", fr.gotTools)
+	}
+}
+
+// 具名 agent 宣告 model/effort → 傳入 SubTask 的 Model 與 MaxTokens（effort:high→8192）。
+func TestSubagent_ModelAndEffort(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentDef(t, dir, "reviewer",
+		"---\nname: reviewer\ndescription: 審查\nmodel: claude-opus-4-8\neffort: high\ntools: [read_file, bash]\n---\n你是 reviewer。")
+	fr := &fakeRunner{}
+	st := NewSubagentTool(fr, superReg(), nil, dir)
+	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"審","agent_type":"reviewer"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if fr.gotModel != "claude-opus-4-8" {
+		t.Errorf("應傳入 model，got %q", fr.gotModel)
+	}
+	if fr.gotMaxTokens != 8192 {
+		t.Errorf("effort:high 應→8192 maxTokens，got %d", fr.gotMaxTokens)
 	}
 }
 

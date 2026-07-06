@@ -15,6 +15,9 @@ type AgentDef struct {
 	Name        string
 	Description string
 	Tools       []string // 該 agent 可用的工具名（現有子 agent 工具的子集；空＝沿用預設探索工具集）
+	Model       string   // 可選：該 agent 用的模型 id（空＝沿用主引擎模型）。如 explorer 用 haiku、reviewer 用 opus
+	Effort      string   // 可選：low/medium/high → 子 agent 輸出 token 上限（思考深度的粗略代理；非 extended-thinking）
+	Isolation   string   // 可選："worktree"＝在 git worktree 隔離執行（防並行寫入相互覆蓋），完事把 diff 序列化 apply 回主工作區
 	Prompt      string   // system prompt（frontmatter 之後的正文）
 }
 
@@ -93,6 +96,12 @@ func parseAgentMD(content string) AgentDef {
 					def.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 				case strings.HasPrefix(line, "tools:"):
 					def.Tools = parseTags(strings.TrimPrefix(line, "tools:")) // 複用記憶的 list 解析
+				case strings.HasPrefix(line, "model:"):
+					def.Model = strings.TrimSpace(strings.TrimPrefix(line, "model:"))
+				case strings.HasPrefix(line, "effort:"):
+					def.Effort = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "effort:")))
+				case strings.HasPrefix(line, "isolation:"):
+					def.Isolation = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(line, "isolation:")))
 				}
 			}
 		}
