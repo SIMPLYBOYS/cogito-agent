@@ -175,18 +175,21 @@ func main() {
 		// 工具 rooted 在 sess.WorkDir（各頻道子目錄），但配置/技能是全 bot 共用資產。
 		eng.AssetsDir = rootDir
 
-		// 子智能體只讀能力沙箱：只給 read_file + bash（探索/find/grep 用），無 write/edit、
-		// 無 spawn_subagent（杜絕遞迴）；同樣掛審批，子 agent 的危險 bash 也要人工放行。
-		// 註冊 spawn_subagent 後，主 Agent 一次吐多個即可並行委派多路偵察兵（引擎並行 fan-out）。
-		readOnly := tools.NewRegistry()
-		readOnly.Register(tools.NewReadFileTool(sess.WorkDir))
-		readOnly.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
-		readOnly.Use(approval)
-		readOnly.Use(timing)
+		// 子智能體工具池（超集）：read_file + bash 供探索；write_file + edit_file 供【實作型】具名
+		// agent（須在 .claw/agents/<name>.md 的 tools 明確宣告才拿得到；預設探路者只取唯讀子集，見
+		// defaultSubagentTools）。無 spawn_subagent（杜絕遞迴）。同掛審批——子 agent 的危險 bash /
+		// 敏感寫入也要人工放行。主 Agent 一次吐多個即可並行委派多路（引擎並行 fan-out）。
+		subagentReg := tools.NewRegistry()
+		subagentReg.Register(tools.NewReadFileTool(sess.WorkDir))
+		subagentReg.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
+		subagentReg.Register(tools.NewWriteFileTool(sess.WorkDir))
+		subagentReg.Register(tools.NewEditFileTool(sess.WorkDir))
+		subagentReg.Use(approval)
+		subagentReg.Use(timing)
 		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（RunSub 內以「[Subagent] …」
 		// 前綴回報）也會串流回本頻道。SlackReporter 的 PostMessage 對並發安全，多隊偵察兵
 		// 同時回報只是訊息交錯。
-		registry.Register(tools.NewSubagentTool(eng, readOnly, reporter, rootDir)) // skillsBaseDir=rootDir：可綁定技能進子 context
+		registry.Register(tools.NewSubagentTool(eng, subagentReg, reporter, rootDir)) // skillsBaseDir=rootDir：可綁定技能進子 context
 
 		return eng
 	}

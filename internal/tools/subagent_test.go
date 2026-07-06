@@ -8,20 +8,43 @@ import (
 	"testing"
 )
 
-// fakeRunner 捕獲傳給 RunSub 的參數，驗證技能正文/角色 prompt 是否被注入子 agent。
+// fakeRunner 捕獲傳給 RunSub 的參數，驗證技能正文/角色 prompt/工具集是否正確傳入子 agent。
 type fakeRunner struct {
 	gotTask      string
 	gotSkillBody string
 	gotSysPrompt string
+	gotTools     []string // 子 agent 實際拿到的工具名（排序）
 	called       bool
 }
 
-func (f *fakeRunner) RunSub(_ context.Context, taskPrompt, skillBody, systemPrompt string, _ Registry, _ interface{}) (string, error) {
+func (f *fakeRunner) RunSub(_ context.Context, taskPrompt, skillBody, systemPrompt string, reg Registry, _ interface{}) (string, error) {
 	f.called = true
 	f.gotTask = taskPrompt
 	f.gotSkillBody = skillBody
 	f.gotSysPrompt = systemPrompt
+	f.gotTools = nil
+	for _, d := range reg.GetAvailableTools() {
+		f.gotTools = append(f.gotTools, d.Name)
+	}
 	return "report-ok", nil
+}
+
+// superReg 建一個含 read/bash/write/edit 的超集註冊表（用 stubTool），模擬 cmd/claw 傳入的池。
+func superReg() Registry {
+	r := NewRegistry()
+	for _, n := range []string{"read_file", "bash", "write_file", "edit_file"} {
+		r.Register(stubTool{name: n})
+	}
+	return r
+}
+
+func hasTool(tools []string, name string) bool {
+	for _, t := range tools {
+		if t == name {
+			return true
+		}
+	}
+	return false
 }
 
 func writeSkill(t *testing.T, base string) {
@@ -100,15 +123,37 @@ func TestSubagent_NamedAgent(t *testing.T) {
 	}
 }
 
-// 未指定 agent_type → systemPrompt 為空（RunSub 回退預設探路者）。
-func TestSubagent_DefaultExplorer(t *testing.T) {
+// 未指定 agent_type → systemPrompt 為空（回退預設探路者），且【只拿唯讀工具】——即便傳入的是含
+// write/edit 的超集，預設探路者也絕不該拿到寫入能力。
+func TestSubagent_DefaultExplorerIsReadOnly(t *testing.T) {
 	fr := &fakeRunner{}
-	st := NewSubagentTool(fr, NewRegistry(), nil, t.TempDir())
+	st := NewSubagentTool(fr, superReg(), nil, t.TempDir())
 	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"找 bug"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if fr.gotSysPrompt != "" {
 		t.Errorf("未指定 agent_type 時 systemPrompt 應為空，got %q", fr.gotSysPrompt)
+	}
+	if !hasTool(fr.gotTools, "read_file") || !hasTool(fr.gotTools, "bash") {
+		t.Errorf("預設應有 read_file+bash，got %v", fr.gotTools)
+	}
+	if hasTool(fr.gotTools, "write_file") || hasTool(fr.gotTools, "edit_file") {
+		t.Errorf("預設探路者不該拿到 write/edit（安全），got %v", fr.gotTools)
+	}
+}
+
+// 具名【實作型】agent 宣告 write/edit → 子 agent 拿得到寫入工具（opt-in）。
+func TestSubagent_WriteAgentGetsWriteTools(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentDef(t, dir, "implementer",
+		"---\nname: implementer\ndescription: 實作\ntools: [read_file, bash, write_file, edit_file]\n---\n你是實作工程師，依規格改檔。")
+	fr := &fakeRunner{}
+	st := NewSubagentTool(fr, superReg(), nil, dir)
+	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"實作 X","agent_type":"implementer"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if !hasTool(fr.gotTools, "write_file") || !hasTool(fr.gotTools, "edit_file") {
+		t.Errorf("實作型 agent 應拿到 write/edit，got %v", fr.gotTools)
 	}
 }
 

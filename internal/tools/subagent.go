@@ -20,22 +20,28 @@ type AgentRunner interface {
 // SubagentTool 是一個標準 BaseTool：主 agent 調用它來派出一個受限的探索子 agent，
 // 子 agent 在隔離的上下文裡跑完，只回傳一段精煉報告——主 agent 的 session 不被搜索過程汙染。
 // 可選地綁定一個技能（skill 參數）：該技能的完整正文只會載入子 agent 的隔離 context。
+// defaultSubagentTools 是未指定 agent_type（或具名 agent 未宣告 tools）時的預設工具集——維持唯讀
+// 探索，不含 write/edit。寫入能力對子 agent 是 opt-in：只有具名 agent 在其 tools 明確宣告才給，
+// 且照樣過審批 middleware。這保證「預設探路者永遠動不了檔」，即便傳入的註冊表是含寫入的超集。
+var defaultSubagentTools = []string{"read_file", "bash"}
+
 type SubagentTool struct {
-	runner           AgentRunner
-	readOnlyRegistry Registry
-	reporter         interface{} // 暫用 interface 規避包依賴；RunSub 內部斷言回 engine.Reporter
-	skillLoader      *ctxpkg.SkillLoader
-	agentLoader      *ctxpkg.AgentLoader
+	runner      AgentRunner
+	registry    Registry // 子 agent 可用工具的【超集】；預設取唯讀子集，具名 agent 依其 tools 選用
+	reporter    interface{}
+	skillLoader *ctxpkg.SkillLoader
+	agentLoader *ctxpkg.AgentLoader
 }
 
 // skillsBaseDir 是含 .claw/skills 與 .claw/agents 的目錄（須與主 agent 的索引同源）。
-func NewSubagentTool(runner AgentRunner, readOnlyRegistry Registry, reporter interface{}, skillsBaseDir string) *SubagentTool {
+// subagentRegistry 是子 agent 可委派工具的超集（探索用 read_file+bash；實作型 agent 另需 write/edit）。
+func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter interface{}, skillsBaseDir string) *SubagentTool {
 	return &SubagentTool{
-		runner:           runner,
-		readOnlyRegistry: readOnlyRegistry,
-		reporter:         reporter,
-		skillLoader:      ctxpkg.NewSkillLoader(skillsBaseDir),
-		agentLoader:      ctxpkg.NewAgentLoader(skillsBaseDir),
+		runner:      runner,
+		registry:    subagentRegistry,
+		reporter:    reporter,
+		skillLoader: ctxpkg.NewSkillLoader(skillsBaseDir),
+		agentLoader: ctxpkg.NewAgentLoader(skillsBaseDir),
 	}
 }
 
@@ -85,9 +91,9 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("解析參數失敗: %w", err)
 	}
 
-	// 具名 agent：載入其角色 prompt 與工具集（工具集是既有子 agent 工具的子集）。失敗則
-	// error-as-observation，由主 agent 改用其他名稱或不指定。
-	reg := t.readOnlyRegistry
+	// 預設（無 agent_type，或具名 agent 未宣告 tools）＝唯讀探路者工具集。具名 agent 若在其 tools
+	// 明確宣告 write/edit，才會拿到寫入能力（opt-in + 審批）。載入失敗則 error-as-observation。
+	reg := t.registry.Subset(defaultSubagentTools)
 	var systemPrompt string
 	role := "探路者"
 	if input.AgentType != "" {
@@ -98,7 +104,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		systemPrompt = def.Prompt
 		role = def.Name
 		if len(def.Tools) > 0 {
-			reg = t.readOnlyRegistry.Subset(def.Tools) // 限縮到該 agent 宣告的工具
+			reg = t.registry.Subset(def.Tools) // 該 agent 宣告的工具（可含 write/edit）
 		}
 		log.Printf("[Subagent] 🎭 使用具名 agent [%s]（工具 %v）\n", def.Name, def.Tools)
 	}

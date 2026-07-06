@@ -416,9 +416,11 @@ tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集
 每個問題給 file:line + 一句話問題 + 最小修法；沒問題就說「無明顯問題」。完成後輸出精煉報告。
 ```
 
-- `agent_type` 未指定 → 預設探路者（唯讀探索），行為與過去一致。
-- `tools` 只能限縮既有子 agent 工具集（目前 `read_file` + `bash`），不能提權；審批/計時 middleware 照舊生效。
+- `agent_type` 未指定 → 預設探路者（**唯讀** `read_file`+`bash`），行為與過去一致。
+- **可寫的實作型 agent**：在 `tools` 明確宣告 `write_file` / `edit_file`，該 agent 就能改檔（如上例 `implementer`）。寫入是 **opt-in**——沒宣告就拿不到，且照走審批 middleware（敏感寫入 `.env`/`.git`/絕對路徑仍需人工放行）、檔案工具在工具層硬擋逃出工作區。
+- `tools` 只能是子 agent 工具超集（`read_file`/`bash`/`write_file`/`edit_file`）的子集，不含 `spawn_subagent`（杜絕遞迴）。
 - 可用清單會自動列進 `spawn_subagent` 的工具說明，讓模型知道有哪些角色可派。
+- ⚠️ **並行寫入的邊界**：一輪派出多個【可寫】agent 到同一 workspace 可能相互覆蓋；需要真正隔離時，並行只派唯讀分析 agent，寫入交給單一 implementer 序列化（worktree 級隔離為後續方向）。
 
 ### 技能自生成 + 把關
 
