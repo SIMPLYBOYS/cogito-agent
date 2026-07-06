@@ -126,8 +126,8 @@ func (c *Core) Dispatch(channelID, userID, text string) {
 	if c.tryResolveApproval(id, userID, text) {
 		return
 	}
-	// 自我進化的閘：apply/reject memory|edges|config，與 per-channel Plan Mode 切換（不佔鎖、不當成新任務）。
-	if c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
+	// 指令 gate：help、自我進化 apply/reject、Plan Mode 切換（不佔鎖、不當成新任務）。
+	if c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
@@ -247,6 +247,32 @@ func (c *Core) ResumeInterrupted() {
 		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
 		go c.handleAgentRun(id, resumeNudge)
 	}
+}
+
+// helpText 是聊天端的指令一覽（**粗體**/`code` 由各平台 send 轉成該平台語法）。與 Dispatch 的
+// 指令 gate 對齊——改動指令請同步這裡。大部分能力用自然語言交辦，這裡只列【框架級固定指令】。
+const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
+	"**交辦任務**：直接打字描述任務即可（群組請 @我 或回覆我）。危險操作會請你 approve/reject。\n\n" +
+	"**審批（HITL）**\n" +
+	"`approve` / `reject` — 放行 / 否決待審批的高危操作（僅管理員；可帶 ID：`approve <id>`）\n\n" +
+	"**Plan Mode（長任務斷點續傳）**\n" +
+	"`plan on` / `plan off` / `plan status` — 把計畫/進度外部化到 PLAN.md · TODO.md 的開關\n\n" +
+	"**自我進化把關（提案 → 人工放行）**\n" +
+	"`apply memory` / `reject memory` — 放行 / 丟棄提案的長期記憶\n" +
+	"`apply edges` / `reject edges` — 放行 / 丟棄提案的知識圖譜關係\n" +
+	"`apply config` / `reject config` — 套用 / 丟棄調參提案\n\n" +
+	"**說明**\n" +
+	"`help` — 顯示本清單\n\n" +
+	"（其餘能力用自然語言交辦：讀寫檔案、bash、長期記憶 recall、派子 agent、畫長條圖、呼叫 MCP 工具…）"
+
+// tryHelpCommand：顯示指令一覽。命中即消費。
+func (c *Core) tryHelpCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "help", "/help", "?", "指令", "commands", "/commands":
+		SendMessage(convID, helpText)
+		return true
+	}
+	return false
 }
 
 // tryConfigCommand：apply/reject config 閘——把 `cmd/bench -tune` 產出的提案參數（config.proposed.json）

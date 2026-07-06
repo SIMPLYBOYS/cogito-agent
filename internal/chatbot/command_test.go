@@ -16,6 +16,22 @@ func lastOf(msgs func() []string) string {
 	return all[len(all)-1]
 }
 
+func TestTryHelpCommand(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdhelp", nil, nil)
+	for _, cmd := range []string{"help", "/help", "?", "指令", "commands"} {
+		if !c.tryHelpCommand("cmdhelp:ch", cmd) {
+			t.Errorf("%q 應被 help 閘攔截", cmd)
+		}
+	}
+	last := lastOf(msgs)
+	if !strings.Contains(last, "指令一覽") || !strings.Contains(last, "approve") || !strings.Contains(last, "plan on") {
+		t.Errorf("help 應列出指令，got %q", last)
+	}
+	if c.tryHelpCommand("cmdhelp:ch", "幫我修個 bug") {
+		t.Error("一般訊息不該被 help 閘攔截")
+	}
+}
+
 func TestTryConfigCommand(t *testing.T) {
 	c, msgs := newCaptureCore(t, "cmdcfg", nil, nil)
 	c.workDir = t.TempDir()

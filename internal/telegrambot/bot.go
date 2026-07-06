@@ -162,7 +162,7 @@ func (b *TelegramBot) Start(ctx context.Context) {
 				continue // 群組閒聊、沒叫到我 → 不理
 			}
 			if prompt == "/start" { // Telegram 慣例的開場，不當任務
-				b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。")
+				b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。打 `help` 看完整指令。")
 				continue
 			}
 			b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
