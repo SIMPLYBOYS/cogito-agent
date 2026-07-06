@@ -113,6 +113,20 @@ func main() {
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, *planPtr)
 	reporter := engine.NewTerminalReporter()
 
+	// spawn_subagent（含 worktree 隔離）：CLI 也能委派具名子 agent（.claw/agents/*.md）。子 agent
+	// 工具超集依目錄重建，isolation:worktree 的 agent 在 git worktree 隔離跑、完事 apply 回 workDir。
+	// 註冊在 eng 之後：registry 是 eng 持有的同一物件，之後掛的工具 eng 仍看得到。
+	buildSubReg := func(wd string) tools.Registry {
+		r := tools.NewRegistry()
+		r.Register(tools.NewReadFileTool(wd))
+		r.Register(tools.NewBashToolWithExecutor(wd, executor))
+		r.Register(tools.NewWriteFileTool(wd))
+		r.Register(tools.NewEditFileTool(wd))
+		return r
+	}
+	registry.Register(tools.NewSubagentTool(eng, buildSubReg(workDir), reporter, workDir).
+		WithWorktreeIsolation(workDir, buildSubReg))
+
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
