@@ -20,7 +20,7 @@
 
 **內置工具**（全在鎖定的工作區內運行）
 - `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四件極簡原語。
-- 🧭 **`spawn_subagent`**：把深度探索委派給只讀子智能體，上下文隔離、可並行派多路；可綁定技能進子 context。
+- 🧭 **`spawn_subagent`**：把子任務委派給隔離子智能體，上下文隔離、可並行派多路；可綁定技能進子 context。支援**具名 agent**（`agent_type`）——在 `.claw/agents/<name>.md` 用 frontmatter 定義角色/工具集（code-reviewer、planner、security-auditor…），不指定則為預設探路者。
 - ⏱️ **背景任務**：長命令（dev server、長建置/訓練）丟背景跑、跨輪查輸出/終止；每會話獨立、有並發上限、走同一危險審批。
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
 
@@ -401,6 +401,24 @@ export OPENAI_BASE_URL=https://api.openai.com/v1   # 或 http://localhost:8000/v
 export OPENAI_MODEL=gpt-4o-mini
 go run ./cmd/claw-cli -prompt "..."
 ```
+
+### 具名子 agent（`.claw/agents/*.md`）
+
+把「單一探路者」擴成一組專才：在 `<workspace>/.claw/agents/<name>.md` 用 frontmatter 定義角色，主 agent 呼叫 `spawn_subagent` 時帶 `agent_type` 即可派出。複用同一套隔離委派 + 能力沙箱機制，可並行派多路。
+
+```markdown
+---
+name: code-reviewer
+description: 從正確性/安全/可讀性審查程式碼變更，只讀不改
+tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集，省略＝沿用預設探索工具
+---
+你是資深 code reviewer。用 read_file 與 bash 閱讀變更，從正確性/安全/可讀性審查。
+每個問題給 file:line + 一句話問題 + 最小修法；沒問題就說「無明顯問題」。完成後輸出精煉報告。
+```
+
+- `agent_type` 未指定 → 預設探路者（唯讀探索），行為與過去一致。
+- `tools` 只能限縮既有子 agent 工具集（目前 `read_file` + `bash`），不能提權；審批/計時 middleware 照舊生效。
+- 可用清單會自動列進 `spawn_subagent` 的工具說明，讓模型知道有哪些角色可派。
 
 ### 技能自生成 + 把關
 

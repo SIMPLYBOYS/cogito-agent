@@ -31,6 +31,7 @@ type Registry interface {
 	Use(mw MiddlewareFunc) // 全局 middleware 掛載點
 	GetAvailableTools() []schema.ToolDefinition
 	Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
+	Subset(names []string) Registry // 取只含指定工具的子註冊表（沿用同一組 middleware），供具名子 agent 限縮能力
 }
 
 type registryImpl struct {
@@ -47,6 +48,18 @@ func NewRegistry() Registry {
 
 func (r *registryImpl) Use(mw MiddlewareFunc) {
 	r.middlewares = append(r.middlewares, mw)
+}
+
+// Subset 回傳只含 names 內工具的新註冊表，沿用同一組 middleware（審批/計時仍生效）。
+// 不存在的名稱略過。供具名子 agent 依其 tools 宣告限縮能力（只能是既有工具的子集）。
+func (r *registryImpl) Subset(names []string) Registry {
+	sub := &registryImpl{tools: make(map[string]BaseTool), middlewares: r.middlewares}
+	for _, n := range names {
+		if t, ok := r.tools[n]; ok {
+			sub.tools[n] = t
+		}
+	}
+	return sub
 }
 
 func (r *registryImpl) Register(tool BaseTool) {
