@@ -288,6 +288,10 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | 口令 | 作用 |
    |---|---|
    | `help` / `指令` / `commands` | 顯示指令一覽 |
+   | `goal <驗收標準>` | 設一個持久目標，agent 每輪完成後用 LLM judge 驗收、未達成自動續跑（封頂 5 次；受成本熔斷/回合上限保護）。`goal status`/`pause`/`resume`/`clear` 管理 |
+   | `stop` | 中止本頻道正在執行的任務（讓執行中的 Run 可取消） |
+   | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
+   | `model` / `model <id>` / `model reset` | 查看 / 切換本頻道模型（`reset` 還原啟動預設） |
    | `stop` | 中止本頻道正在執行的任務（可取消 context，回合邊界即時停下） |
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
    | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |

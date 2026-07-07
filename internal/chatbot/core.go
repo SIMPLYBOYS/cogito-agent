@@ -28,6 +28,10 @@ const maxAutoResume = 3
 // maxCrossResume：跨重啟續跑的上限——同一任務連續 N 次「啟動時續跑又被硬砍」就停手，防崩潰迴圈燒錢。
 const maxCrossResume = 3
 
+// maxGoalContinue：goal 任務完成後 judge 驗收未過時，自動續跑的上限（防未達成無限續跑燒錢；
+// 另有引擎的成本熔斷/回合上限兜底）。
+const maxGoalContinue = 5
+
 // resumeNudge 是續跑時補進歷史的系統提示（走 RoleUser，與成本軟著陸等系統提醒一致）。
 const resumeNudge = "[系統] 先前因暫時性錯誤（如網路中斷）使任務未完成；連線現已恢復。請檢視目前進度，從中斷處接續完成，不要重做已完成的步驟。"
 
@@ -141,8 +145,8 @@ func (c *Core) Dispatch(channelID, userID, text string) {
 		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
 		return
 	}
-	// compress / learn：會摺疊 session 或蒸餾技能，走 goroutine（有 LLM 呼叫）、取鎖與任務序列化。命中即消費。
-	if c.tryCompressCommand(id, text) || c.tryLearnCommand(id, text) {
+	// compress / learn / goal：會摺疊 session、蒸餾技能，或起一個持久目標任務（各自處理鎖）。命中即消費。
+	if c.tryCompressCommand(id, text) || c.tryLearnCommand(id, text) || c.tryGoalCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
@@ -154,12 +158,12 @@ func (c *Core) Dispatch(channelID, userID, text string) {
 		return
 	}
 	log.Printf("[%s] 收到 %s: %s\n", c.platform, channelID, text)
-	go c.handleAgentRun(ctx, id, text)
+	go c.handleAgentRun(ctx, id, text, false)
 }
 
 // handleAgentRun 在背景跑一個任務：每個頻道 = 一個持久 Session（多輪記憶 + 跨頻道含磁碟隔離），
 // 成功觸發 postRun、失敗觸發 postFailure。convID 已含平台前綴。
-func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string) {
+func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTask bool) {
 	workDir := c.channelWorkDir(convID)
 	defer c.release(workDir) // 運行結束（含審批被拒/超時/崩潰/被 /stop 取消）釋放鎖並 cancel context
 
@@ -177,6 +181,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string) {
 	eng := c.factory(session, reporter)
 
 	startCost := session.CostUSD() // 快照本次任務進入時的累計花費，收尾時報「本次」增量（session 是跨任務累加的）
+	goalContinues := 0             // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
 
 	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
 	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。
@@ -184,6 +189,34 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string) {
 		err := eng.Run(ctx, session, reporter)
 		if err == nil {
 			session.ClearResume() // 成功 → 清跨重啟續跑計數（running 由上面的 defer 清）
+
+			// goal 驗收：若本次是 goal 任務、目標仍在且未暫停，用 LLM judge 驗收；未達成且未達上限就
+			// 把評語當反饋續跑（複用 Tier 2 的 JudgeGoal，與 CLI 的 -verify-judge 同一機制）。
+			if goalTask && ctx.Err() == nil {
+				if g := session.Goal(); g != "" && !session.GoalPaused() {
+					done, reason, jerr := eng.JudgeGoal(ctx, session, g)
+					switch {
+					case jerr != nil:
+						SendMessage(convID, fmt.Sprintf("⚠️ 目標驗收出錯（%v），視為完成（本次花費 $%.4f）。", jerr, session.CostUSD()-startCost))
+						return
+					case done:
+						SendMessage(convID, fmt.Sprintf("✅ 目標達成（本次花費 $%.4f）：%s", session.CostUSD()-startCost, reason))
+						if c.postRun != nil {
+							c.postRun(context.Background(), session, prompt)
+						}
+						return
+					case goalContinues < maxGoalContinue:
+						goalContinues++
+						SendMessage(convID, fmt.Sprintf("🎯 尚未達成，自動續跑（第 %d/%d 次）：%s", goalContinues, maxGoalContinue, reason))
+						session.Append(schema.Message{Role: schema.RoleUser, Content: "目標尚未達成。驗收評語：" + reason + "\n請據此繼續，直到達成目標。"})
+						continue
+					default:
+						SendMessage(convID, fmt.Sprintf("⚠️ 已達自動續跑上限（%d 次），目標仍未達成：%s（本次花費 $%.4f）。可補充指令或 `goal clear`。", maxGoalContinue, reason, session.CostUSD()-startCost))
+						return
+					}
+				}
+			}
+
 			// 收尾訊號：給頻道一個明確的「完成」與本次花費，讓對話有結束感、成本也透明。
 			SendMessage(convID, fmt.Sprintf("✅ 任務完成（本次花費 $%.4f）", session.CostUSD()-startCost))
 			if c.postRun != nil {
@@ -271,7 +304,7 @@ func (c *Core) ResumeInterrupted() {
 		}
 		s.BumpResumeAttempts()
 		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
-		go c.handleAgentRun(ctx, id, resumeNudge)
+		go c.handleAgentRun(ctx, id, resumeNudge, false)
 	}
 }
 
@@ -283,6 +316,7 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"`stop` — 中止本頻道正在跑的任務\n" +
 	"`status` — 看本會話花費 / token / 歷史長度 / 模型\n" +
 	"`model` / `model <id>` — 查看 / 切換本頻道模型（`model reset` 還原預設）\n" +
+	"`goal <驗收標準>` — 設一個目標，我追到 judge 判定達成為止（`goal status/pause/resume/clear` 管理）\n" +
 	"`compress` — 手動摺疊 context，縮短歷史省成本\n" +
 	"`learn` — 從本次對話蒸餾一個【提案】技能（過 skillgate 把關才生效）\n\n" +
 	"**審批（HITL）**\n" +
@@ -447,6 +481,61 @@ func (c *Core) tryLearnCommand(convID, text string) bool {
 		}
 	}()
 	return true
+}
+
+// tryGoalCommand：持久目標（`goal <text>` 設目標並立即起任務追它；`goal status/pause/resume/clear` 管理）。
+// `goal <text>` 走 handleAgentRun 的 goal 迴圈：每輪完成後 judge 驗收、未達成續跑（封頂 maxGoalContinue）。
+func (c *Core) tryGoalCommand(convID, text string) bool {
+	t := strings.TrimSpace(text)
+	low := strings.ToLower(t)
+	if low != "goal" && low != "/goal" && low != "目標" &&
+		!strings.HasPrefix(low, "goal ") && !strings.HasPrefix(low, "/goal ") && !strings.HasPrefix(low, "目標 ") {
+		return false
+	}
+	arg := ""
+	if i := strings.IndexByte(t, ' '); i >= 0 {
+		arg = strings.TrimSpace(t[i+1:])
+	}
+	s := c.sessionFor(convID)
+	switch {
+	case arg == "", strings.EqualFold(arg, "status"), arg == "?":
+		g := s.Goal()
+		if g == "" {
+			SendMessage(convID, "🎯 目前沒有設定目標。用 `goal <驗收標準>` 設一個，我會追到達成為止（每輪完成自動驗收、未達成續跑）。")
+		} else {
+			state := "追蹤中"
+			if s.GoalPaused() {
+				state = "已暫停"
+			}
+			SendMessage(convID, fmt.Sprintf("🎯 目前目標（%s）：%s\n`goal pause`/`goal resume` 暫停/恢復自動續跑、`goal clear` 清除。", state, g))
+		}
+		return true
+	case strings.EqualFold(arg, "pause"):
+		s.SetGoalPaused(true)
+		SendMessage(convID, "⏸️ 已暫停 goal 自動續跑（目標仍保留，下次 `goal <同一標準>` 或 `goal resume` 再追）。")
+		return true
+	case strings.EqualFold(arg, "resume"):
+		s.SetGoalPaused(false)
+		SendMessage(convID, "▶️ 已恢復 goal 自動續跑。")
+		return true
+	case strings.EqualFold(arg, "clear"), strings.EqualFold(arg, "off"):
+		s.ClearGoal()
+		SendMessage(convID, "🎯 已清除目標。")
+		return true
+	default:
+		// goal <text>：設目標 + 立即起一個 goal 任務追它（自己取鎖、走 goal 迴圈）。
+		s.SetGoal(arg)
+		workDir := c.channelWorkDir(convID)
+		ctx, cancel := context.WithCancel(context.Background())
+		if !c.tryAcquire(workDir, cancel) {
+			cancel()
+			SendMessage(convID, "🎯 目標已記下，但目前有任務進行中。可 `/stop` 中止後打 `goal "+arg+"` 讓我開始追。")
+			return true
+		}
+		SendMessage(convID, fmt.Sprintf("🎯 目標已設定，開始追蹤（每輪完成後自動驗收，未達成最多續跑 %d 次）：\n%s", maxGoalContinue, arg))
+		go c.handleAgentRun(ctx, convID, arg, true)
+		return true
+	}
 }
 
 // tryConfigCommand：apply/reject config 閘——把 `cmd/bench -tune` 產出的提案參數（config.proposed.json）

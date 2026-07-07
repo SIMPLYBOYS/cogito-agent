@@ -130,6 +130,53 @@ func TestTryLearnCommand(t *testing.T) {
 	}
 }
 
+func TestTryGoalCommand(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdgoal", nil, nil)
+	c.workDir = t.TempDir()
+	conv := "cmdgoal:ch"
+
+	// 無 goal → status 提示沒設
+	c.tryGoalCommand(conv, "goal")
+	if !strings.Contains(lastOf(msgs), "沒有設定目標") {
+		t.Errorf("空 goal 應提示未設定，got %q", lastOf(msgs))
+	}
+
+	// 設 goal：先佔鎖走 busy 分支（不實跑，免 factory），驗證目標已存進 session
+	c.tryAcquire(c.channelWorkDir(conv), func() {})
+	if !c.tryGoalCommand(conv, "goal 通過所有測試") {
+		t.Fatal("goal <text> 應被攔截")
+	}
+	if got := c.sessionFor(conv).Goal(); got != "通過所有測試" {
+		t.Errorf("目標應被設定，got %q", got)
+	}
+	if !strings.Contains(lastOf(msgs), "任務進行中") {
+		t.Errorf("忙碌時 goal <text> 應提示，got %q", lastOf(msgs))
+	}
+	c.release(c.channelWorkDir(conv))
+
+	// status 顯示目標；pause/resume/clear
+	c.tryGoalCommand(conv, "goal status")
+	if !strings.Contains(lastOf(msgs), "通過所有測試") {
+		t.Errorf("status 應顯示目標，got %q", lastOf(msgs))
+	}
+	c.tryGoalCommand(conv, "goal pause")
+	if !c.sessionFor(conv).GoalPaused() {
+		t.Error("pause 應設暫停")
+	}
+	c.tryGoalCommand(conv, "goal resume")
+	if c.sessionFor(conv).GoalPaused() {
+		t.Error("resume 應解除暫停")
+	}
+	c.tryGoalCommand(conv, "goal clear")
+	if c.sessionFor(conv).Goal() != "" {
+		t.Error("clear 應清除目標")
+	}
+
+	if c.tryGoalCommand(conv, "幫我看看程式") {
+		t.Error("非指令不該被 goal 閘攔截")
+	}
+}
+
 func TestTryConfigCommand(t *testing.T) {
 	c, msgs := newCaptureCore(t, "cmdcfg", nil, nil)
 	c.workDir = t.TempDir()

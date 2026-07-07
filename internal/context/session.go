@@ -27,6 +27,10 @@ type Session struct {
 	// model 是本會話（頻道）的模型覆蓋——per-channel 切換（`model <id>`），空＝沿用啟動預設。
 	// factory 建引擎時讀它，經 provider.Configurable 換模型（便宜任務走小模型、推理走大模型）。
 	model string
+	// goal 是本會話的持久目標（`goal <text>`）：每次 goal 任務完成後用 LLM judge 驗收，未達成自動續跑。
+	// 空＝無 goal；goalPaused＝保留目標但暫停自動續跑。
+	goal       string
+	goalPaused bool
 	// running＝有任務正在跑。正常結束清 false；程序被硬砍時留 true，供啟動時掃出續跑。
 	// resumeAttempts＝跨重啟續跑已嘗試次數（防同一任務崩潰迴圈燒錢）。
 	running        bool
@@ -65,6 +69,8 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		summary:               snap.Summary,
 		planMode:              snap.PlanMode,
 		model:                 snap.Model,
+		goal:                  snap.Goal,
+		goalPaused:            snap.GoalPaused,
 		running:               snap.Running,
 		resumeAttempts:        snap.ResumeAttempts,
 		TotalPromptTokens:     snap.TotalPromptTokens,
@@ -87,6 +93,8 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		Summary:               s.summary,
 		PlanMode:              s.planMode,
 		Model:                 s.model,
+		Goal:                  s.goal,
+		GoalPaused:            s.goalPaused,
 		Running:               s.running,
 		ResumeAttempts:        s.resumeAttempts,
 		TotalPromptTokens:     s.TotalPromptTokens,
@@ -193,6 +201,49 @@ func (s *Session) SetModel(model string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.model = model
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
+// Goal 回傳本會話的持久目標（空＝無 goal）。
+func (s *Session) Goal() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.goal
+}
+
+// GoalPaused 回傳是否暫停 goal 自動續跑。
+func (s *Session) GoalPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.goalPaused
+}
+
+// SetGoal 設定持久目標並落盤（設新目標時解除暫停）。
+func (s *Session) SetGoal(goal string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.goal = goal
+	s.goalPaused = false
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
+// SetGoalPaused 切換 goal 自動續跑的暫停狀態並落盤（`goal pause`/`goal resume`）。
+func (s *Session) SetGoalPaused(paused bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.goalPaused = paused
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
+// ClearGoal 清除持久目標與暫停狀態並落盤（`goal clear`）。
+func (s *Session) ClearGoal() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.goal = ""
+	s.goalPaused = false
 	s.UpdatedAt = time.Now()
 	s.persistLocked()
 }
