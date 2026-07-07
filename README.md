@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo/banner.png" alt="COGITO-AGENT — cogito, ergo ago" width="720">
+</p>
+
 # cogito-agent
 
 > 一個用 Go 實現的極簡 AI 編程 Agent —— 接入 Slack / Telegram，由 Claude 驅動，能夠自主"思考 → 調用工具 → 觀察結果"循環，在指定工作區內讀寫文件、執行命令來完成編程任務。

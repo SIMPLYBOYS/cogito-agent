@@ -41,6 +41,8 @@ func main() {
 	attemptsPtr := flag.Int("max-attempts", 5, "goal 循環最大嘗試次數")
 	flag.Parse()
 
+	cmdutil.PrintBanner() // 啟動 logo（非終端自動不印）
+
 	// 無 -prompt 就印用法後退出，別偷偷跑一個寫死的任務去動使用者的工作區（過去的預設行為）。
 	if strings.TrimSpace(*promptPtr) == "" {
 		fmt.Fprintln(os.Stderr, "請用 -prompt \"你的任務\" 交辦任務。例如：")

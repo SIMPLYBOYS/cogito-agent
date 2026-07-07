@@ -27,6 +27,7 @@ import (
 )
 
 func main() {
+	cmdutil.PrintBanner() // 啟動 logo（非終端自動不印）
 	// 載入 .env + 初始化 OTel（單一 bootstrap，避免漏接 InitTracing）。flush 在優雅關閉時呼叫。
 	flush := cmdutil.Bootstrap("cogito-agent")
 
