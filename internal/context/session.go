@@ -24,6 +24,9 @@ type Session struct {
 	// planMode 是本會話（頻道）是否走 Plan Mode——per-channel 切換（`plan on`/`plan off`），
 	// 預設關。開了則該頻道之後的任務外部化計畫到 PLAN.md/TODO.md，並啟用目標錨與確定性步驟跳過。
 	planMode bool
+	// model 是本會話（頻道）的模型覆蓋——per-channel 切換（`model <id>`），空＝沿用啟動預設。
+	// factory 建引擎時讀它，經 provider.Configurable 換模型（便宜任務走小模型、推理走大模型）。
+	model string
 	// running＝有任務正在跑。正常結束清 false；程序被硬砍時留 true，供啟動時掃出續跑。
 	// resumeAttempts＝跨重啟續跑已嘗試次數（防同一任務崩潰迴圈燒錢）。
 	running        bool
@@ -61,6 +64,7 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		history:               snap.History,
 		summary:               snap.Summary,
 		planMode:              snap.PlanMode,
+		model:                 snap.Model,
 		running:               snap.Running,
 		resumeAttempts:        snap.ResumeAttempts,
 		TotalPromptTokens:     snap.TotalPromptTokens,
@@ -82,6 +86,7 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		History:               h,
 		Summary:               s.summary,
 		PlanMode:              s.planMode,
+		Model:                 s.model,
 		Running:               s.running,
 		ResumeAttempts:        s.resumeAttempts,
 		TotalPromptTokens:     s.TotalPromptTokens,
@@ -158,6 +163,36 @@ func (s *Session) SetPlanMode(on bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.planMode = on
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
+// Usage 在鎖保護下回傳累計 token 與花費（供 /status 顯示，避免與 RecordUsage 競爭裸欄位）。
+func (s *Session) Usage() (promptTokens, completionTokens int, costUSD float64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.TotalPromptTokens, s.TotalCompletionTokens, s.TotalCostUSD
+}
+
+// HistoryLen 回傳目前 history 的訊息數（供 /status）。
+func (s *Session) HistoryLen() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.history)
+}
+
+// Model 回傳本會話的模型覆蓋（空＝沿用啟動預設）。
+func (s *Session) Model() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.model
+}
+
+// SetModel 設定本會話的模型覆蓋並落盤（`model <id>` 指令用；空字串＝清除、回預設）。
+func (s *Session) SetModel(model string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.model = model
 	s.UpdatedAt = time.Now()
 	s.persistLocked()
 }

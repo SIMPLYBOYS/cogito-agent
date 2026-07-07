@@ -68,8 +68,10 @@ type Core struct {
 	allowedUsers map[string]bool // COGITO_ALLOWED_USERS：可驅動 agent 的使用者 id；空＝fail-closed 拒絕所有
 	adminUsers   map[string]bool // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
 
-	busy   map[string]bool // per-WorkDir 鎖：同目錄序列化、不同頻道並行
-	busyMu sync.Mutex
+	// running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
+	// `/stop` 取出對應頻道的 cancel 中止其 Run。
+	running   map[string]context.CancelFunc
+	runningMu sync.Mutex
 }
 
 // NewCore 建核心並向全域 senders 註冊本平台的原生發送，使 SendMessage 路由可達。
@@ -90,7 +92,7 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		autoResume:   os.Getenv("COGITO_AUTO_RESUME") == "1",
 		allowedUsers: allowed,
 		adminUsers:   admins,
-		busy:         make(map[string]bool),
+		running:      make(map[string]context.CancelFunc),
 	}
 }
 
@@ -126,24 +128,34 @@ func (c *Core) Dispatch(channelID, userID, text string) {
 	if c.tryResolveApproval(id, userID, text) {
 		return
 	}
-	// 指令 gate：help、自我進化 apply/reject、Plan Mode 切換（不佔鎖、不當成新任務）。
-	if c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) || c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
+	// 指令 gate：stop/status/model 等即時控制 + help + 自我進化 apply/reject + Plan Mode
+	// （不佔鎖、不當成新任務；stop/status/model 即便忙碌也要能處理）。
+	if c.tryStopCommand(id, text) || c.tryStatusCommand(id, text) || c.tryModelCommand(id, text) ||
+		c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) ||
+		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
+		return
+	}
+	// compress：會摺疊 session、走 goroutine（有 LLM 呼叫）；取鎖與任務序列化。命中即消費。
+	if c.tryCompressCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
-	if !c.tryAcquire(c.channelWorkDir(id)) {
-		SendMessage(id, "⏳ 上一個任務仍在進行（或正在等待審批），請先處理審批或稍候再發。")
+	workDir := c.channelWorkDir(id)
+	ctx, cancel := context.WithCancel(context.Background())
+	if !c.tryAcquire(workDir, cancel) {
+		cancel()
+		SendMessage(id, "⏳ 上一個任務仍在進行（或正在等待審批）。可用 `/stop` 中止，或稍候再發。")
 		return
 	}
 	log.Printf("[%s] 收到 %s: %s\n", c.platform, channelID, text)
-	go c.handleAgentRun(id, text)
+	go c.handleAgentRun(ctx, id, text)
 }
 
 // handleAgentRun 在背景跑一個任務：每個頻道 = 一個持久 Session（多輪記憶 + 跨頻道含磁碟隔離），
 // 成功觸發 postRun、失敗觸發 postFailure。convID 已含平台前綴。
-func (c *Core) handleAgentRun(convID, prompt string) {
+func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string) {
 	workDir := c.channelWorkDir(convID)
-	defer c.release(workDir) // 運行結束（含審批被拒/超時/崩潰）釋放鎖
+	defer c.release(workDir) // 運行結束（含審批被拒/超時/崩潰/被 /stop 取消）釋放鎖並 cancel context
 
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		SendMessage(convID, fmt.Sprintf("❌ 無法建立工作目錄: %v", err))
@@ -163,7 +175,7 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
 	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。
 	for attempt := 0; ; {
-		err := eng.Run(context.Background(), session, reporter)
+		err := eng.Run(ctx, session, reporter)
 		if err == nil {
 			session.ClearResume() // 成功 → 清跨重啟續跑計數（running 由上面的 defer 清）
 			// 收尾訊號：給頻道一個明確的「完成」與本次花費，讓對話有結束感、成本也透明。
@@ -171,6 +183,12 @@ func (c *Core) handleAgentRun(convID, prompt string) {
 			if c.postRun != nil {
 				c.postRun(context.Background(), session, prompt)
 			}
+			return
+		}
+		// 使用者 /stop 取消：乾淨收尾（不當失敗、不觸發 postFailure、不自動續跑）。
+		if errors.Is(err, context.Canceled) {
+			session.ClearResume()
+			SendMessage(convID, fmt.Sprintf("🛑 已中止本次任務（本次花費 $%.4f）。", session.CostUSD()-startCost))
 			return
 		}
 		if c.autoResume && attempt < maxAutoResume && isRecoverableErr(err) {
@@ -240,12 +258,14 @@ func (c *Core) ResumeInterrupted() {
 			s.ClearResume()
 			continue
 		}
-		if !c.tryAcquire(c.channelWorkDir(id)) {
+		ctx, cancel := context.WithCancel(context.Background())
+		if !c.tryAcquire(c.channelWorkDir(id), cancel) {
+			cancel()
 			continue // 該頻道已忙（極少見）→ 跳過，handleAgentRun 期望呼叫端已持鎖
 		}
 		s.BumpResumeAttempts()
 		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
-		go c.handleAgentRun(id, resumeNudge)
+		go c.handleAgentRun(ctx, id, resumeNudge)
 	}
 }
 
@@ -253,6 +273,11 @@ func (c *Core) ResumeInterrupted() {
 // 指令 gate 對齊——改動指令請同步這裡。大部分能力用自然語言交辦，這裡只列【框架級固定指令】。
 const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"**交辦任務**：直接打字描述任務即可（群組請 @我 或回覆我）。危險操作會請你 approve/reject。\n\n" +
+	"**執行控制**\n" +
+	"`stop` — 中止本頻道正在跑的任務\n" +
+	"`status` — 看本會話花費 / token / 歷史長度 / 模型\n" +
+	"`model` / `model <id>` — 查看 / 切換本頻道模型（`model reset` 還原預設）\n" +
+	"`compress` — 手動摺疊 context，縮短歷史省成本\n\n" +
 	"**審批（HITL）**\n" +
 	"`approve` / `reject` — 放行 / 否決待審批的高危操作（僅管理員；可帶 ID：`approve <id>`）\n\n" +
 	"**Plan Mode（長任務斷點續傳）**\n" +
@@ -273,6 +298,115 @@ func (c *Core) tryHelpCommand(convID, text string) bool {
 		return true
 	}
 	return false
+}
+
+// isRunning 回報某頻道是否有任務執行中（供 /status）。
+func (c *Core) isRunning(workDir string) bool {
+	c.runningMu.Lock()
+	_, ok := c.running[workDir]
+	c.runningMu.Unlock()
+	return ok
+}
+
+// tryStopCommand：中止本頻道正在執行的任務（`/stop`）。命中即消費（即便忙碌也要能處理——這正是重點）。
+func (c *Core) tryStopCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "stop", "/stop", "中止", "停":
+		if c.stop(c.channelWorkDir(convID)) {
+			SendMessage(convID, "🛑 正在中止本頻道的任務…")
+		} else {
+			SendMessage(convID, "ℹ️ 目前沒有正在執行的任務。")
+		}
+		return true
+	}
+	return false
+}
+
+// tryStatusCommand：顯示本會話狀態（花費/token/歷史長度/模型/Plan/忙碌）。
+func (c *Core) tryStatusCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "status", "/status", "狀態":
+		s := c.sessionFor(convID)
+		pt, ct, cost := s.Usage()
+		model := s.Model()
+		if model == "" {
+			model = "（預設）"
+		}
+		plan := "關"
+		if s.PlanMode() {
+			plan = "開"
+		}
+		state := "閒置"
+		if c.isRunning(c.channelWorkDir(convID)) {
+			state = "執行中（可 `/stop`）"
+		}
+		SendMessage(convID, fmt.Sprintf("📊 **本會話狀態**\n累計花費：$%.4f\nToken：輸入 %d / 輸出 %d\n歷史訊息：%d 則\n模型：%s\nPlan Mode：%s\n狀態：%s",
+			cost, pt, ct, s.HistoryLen(), model, plan, state))
+		return true
+	}
+	return false
+}
+
+// tryModelCommand：查看/切換本頻道模型（`model` 查看；`model <id>` 設定；`model reset` 還原預設）。
+func (c *Core) tryModelCommand(convID, text string) bool {
+	t := strings.TrimSpace(text)
+	low := strings.ToLower(t)
+	if low != "model" && low != "/model" && low != "模型" &&
+		!strings.HasPrefix(low, "model ") && !strings.HasPrefix(low, "/model ") && !strings.HasPrefix(low, "模型 ") {
+		return false
+	}
+	arg := ""
+	if i := strings.IndexByte(t, ' '); i >= 0 {
+		arg = strings.TrimSpace(t[i+1:])
+	}
+	s := c.sessionFor(convID)
+	switch {
+	case arg == "":
+		cur := s.Model()
+		if cur == "" {
+			cur = "（預設，啟動時設定）"
+		}
+		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型：%s\n切換：`model <模型id>`（如 `model claude-haiku-4-5`）；還原：`model reset`", cur))
+	case strings.EqualFold(arg, "reset"), strings.EqualFold(arg, "default"):
+		s.SetModel("")
+		SendMessage(convID, "🧠 已還原為啟動預設模型（下個任務生效）。")
+	default:
+		s.SetModel(arg)
+		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型已設為 `%s`（下個任務生效）。provider 不支援該模型時，下個任務會回錯。", arg))
+	}
+	return true
+}
+
+// tryCompressCommand：手動摺疊本會話 context（`compress`）。走 goroutine（有 LLM 呼叫）、取鎖與任務
+// 序列化——避免與正在跑的任務同時改 session。命中即消費。
+func (c *Core) tryCompressCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "compress", "/compress", "壓縮":
+	default:
+		return false
+	}
+	workDir := c.channelWorkDir(convID)
+	ctx, cancel := context.WithCancel(context.Background())
+	if !c.tryAcquire(workDir, cancel) {
+		cancel()
+		SendMessage(convID, "⏳ 任務進行中，請稍候或先 `/stop` 再壓縮。")
+		return true
+	}
+	go func() {
+		defer c.release(workDir)
+		session := c.sessionFor(convID)
+		eng := c.factory(session, &reporter{convID: convID})
+		n, err := eng.ForceSummary(ctx, session)
+		switch {
+		case err != nil:
+			SendMessage(convID, fmt.Sprintf("❌ 壓縮失敗：%v", err))
+		case n == 0:
+			SendMessage(convID, "ℹ️ 目前歷史已很短，無需壓縮。")
+		default:
+			SendMessage(convID, fmt.Sprintf("🗜️ 已把 %d 則舊訊息摺進滾動摘要，context 更精簡了。", n))
+		}
+	}()
+	return true
 }
 
 // tryConfigCommand：apply/reject config 閘——把 `cmd/bench -tune` 產出的提案參數（config.proposed.json）
@@ -444,20 +578,37 @@ func sanitizeSegment(s string) string {
 	return sb.String()
 }
 
-func (c *Core) tryAcquire(workDir string) bool {
-	c.busyMu.Lock()
-	defer c.busyMu.Unlock()
-	if c.busy[workDir] {
+// tryAcquire 取鎖並登記該任務的取消函式（供 /stop 中止）。已忙碌則回 false。
+func (c *Core) tryAcquire(workDir string, cancel context.CancelFunc) bool {
+	c.runningMu.Lock()
+	defer c.runningMu.Unlock()
+	if _, ok := c.running[workDir]; ok {
 		return false
 	}
-	c.busy[workDir] = true
+	c.running[workDir] = cancel
 	return true
 }
 
+// release 解鎖並取消 context（釋放資源；對已結束的 context 是 no-op）。
 func (c *Core) release(workDir string) {
-	c.busyMu.Lock()
-	delete(c.busy, workDir)
-	c.busyMu.Unlock()
+	c.runningMu.Lock()
+	if cancel, ok := c.running[workDir]; ok {
+		cancel()
+		delete(c.running, workDir)
+	}
+	c.runningMu.Unlock()
+}
+
+// stop 取消某頻道正在執行的任務（`/stop` 用）。回傳是否真的有任務被取消。
+// 取消後 Run 收到 ctx 取消而中止，由 handleAgentRun 的 defer release 收尾。
+func (c *Core) stop(workDir string) bool {
+	c.runningMu.Lock()
+	cancel, ok := c.running[workDir]
+	c.runningMu.Unlock()
+	if ok {
+		cancel()
+	}
+	return ok
 }
 
 // reporter 把引擎逐步進度回推到頻道（透過 SendMessage 路由）。與平台無關：訊息文本一致。

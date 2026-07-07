@@ -97,6 +97,10 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	softLanded := false // 成本軟著陸提醒只注入一次，避免每輪重複刷屏
 	turnCount := 0
 	for {
+		// 尊重外部取消（聊天端 `/stop`）——在回合邊界即時停下（回合內的 LLM 呼叫也吃 ctx 會提早中止）。
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		turnCount++
 
 		// 【硬防線①】回合數熔斷：主循環不再無上限 for{}，超過上限由框架強制中止，

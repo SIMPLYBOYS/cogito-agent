@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,6 +72,27 @@ func TestRun_MaxTurnsCircuitBreaker(t *testing.T) {
 	}
 	if fp.calls != 5 {
 		t.Errorf("應恰好跑 5 輪（第 6 輪在 Generate 前就被攔），實際 Generate 次數=%d", fp.calls)
+	}
+}
+
+// /stop：ctx 取消時 Run 在回合邊界即時返回 context.Canceled，且不再呼叫 provider。
+func TestRun_ContextCancelStops(t *testing.T) {
+	fp := &fakeProvider{}
+	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
+	eng.MaxTurns = 100
+
+	sess := ctxpkg.NewSession("cancel", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 已取消
+
+	err := eng.Run(ctx, sess, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("已取消的 ctx 應讓 Run 回 context.Canceled，got %v", err)
+	}
+	if fp.calls != 0 {
+		t.Errorf("ctx 已取消，Run 應在回合頂即返回、不呼叫 provider，實際呼叫 %d 次", fp.calls)
 	}
 }
 

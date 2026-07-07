@@ -23,6 +23,7 @@ type SessionSnapshot struct {
 	History   []schema.Message `json:"history"`
 	Summary   string           `json:"summary,omitempty"`
 	PlanMode  bool             `json:"plan_mode,omitempty"`
+	Model     string           `json:"model,omitempty"` // per-channel 模型覆蓋（`model <id>`）
 	// Running＝任務進行中；正常結束會清為 false，若程序被硬砍（OOM/SIGKILL）則留 true，
 	// 供啟動時掃出未完成任務自動續跑。ResumeAttempts 是跨重啟續跑次數（防崩潰迴圈）。
 	Running               bool    `json:"running,omitempty"`

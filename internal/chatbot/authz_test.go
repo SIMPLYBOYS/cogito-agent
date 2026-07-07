@@ -1,6 +1,7 @@
 package chatbot
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -21,7 +22,7 @@ func newCaptureCore(t *testing.T, platform string, allowed, admins []string) (*C
 		platform:     platform,
 		allowedUsers: toSet(allowed),
 		adminUsers:   toSet(admins),
-		busy:         map[string]bool{},
+		running:      map[string]context.CancelFunc{},
 	}
 	return c, func() []string {
 		mu.Lock()

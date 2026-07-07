@@ -32,6 +32,78 @@ func TestTryHelpCommand(t *testing.T) {
 	}
 }
 
+func TestTryStopCommand(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdstop", nil, nil)
+	// 沒有執行中 → 提示無任務
+	if !c.tryStopCommand("cmdstop:ch", "stop") {
+		t.Fatal("stop 應被攔截")
+	}
+	if !strings.Contains(lastOf(msgs), "沒有正在執行") {
+		t.Errorf("無任務時應提示，got %q", lastOf(msgs))
+	}
+	// 有執行中 → 中止
+	wd := c.channelWorkDir("cmdstop:ch")
+	c.tryAcquire(wd, func() {})
+	c.tryStopCommand("cmdstop:ch", "/stop")
+	if !strings.Contains(lastOf(msgs), "中止") {
+		t.Errorf("有任務時應提示中止，got %q", lastOf(msgs))
+	}
+	if c.tryStopCommand("cmdstop:ch", "幫我停車") {
+		t.Error("非指令不該被 stop 閘攔截")
+	}
+}
+
+func TestTryStatusCommand(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdstat", nil, nil)
+	if !c.tryStatusCommand("cmdstat:ch", "status") {
+		t.Fatal("status 應被攔截")
+	}
+	got := lastOf(msgs)
+	if !strings.Contains(got, "本會話狀態") || !strings.Contains(got, "累計花費") {
+		t.Errorf("status 內容錯: %q", got)
+	}
+}
+
+func TestTryModelCommand(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdmodel", nil, nil)
+	// 查看 → 顯示預設
+	if !c.tryModelCommand("cmdmodel:ch", "model") {
+		t.Fatal("model 應被攔截")
+	}
+	if !strings.Contains(lastOf(msgs), "預設") {
+		t.Errorf("查看應顯示預設，got %q", lastOf(msgs))
+	}
+	// 設定
+	c.tryModelCommand("cmdmodel:ch", "model claude-haiku-4-5")
+	if c.sessionFor("cmdmodel:ch").Model() != "claude-haiku-4-5" {
+		t.Error("model <id> 應設定 session 模型")
+	}
+	// 還原
+	c.tryModelCommand("cmdmodel:ch", "model reset")
+	if c.sessionFor("cmdmodel:ch").Model() != "" {
+		t.Error("model reset 應清空")
+	}
+	// 非指令（不以 model 開頭）
+	if c.tryModelCommand("cmdmodel:ch", "幫我看一下 model 的架構") {
+		t.Error("非指令不該被 model 閘攔截")
+	}
+}
+
+func TestTryCompressCommand_BusyRejected(t *testing.T) {
+	c, msgs := newCaptureCore(t, "cmdcomp", nil, nil)
+	wd := c.channelWorkDir("cmdcomp:ch")
+	c.tryAcquire(wd, func() {}) // 佔住鎖
+	if !c.tryCompressCommand("cmdcomp:ch", "compress") {
+		t.Fatal("compress 應被攔截")
+	}
+	if !strings.Contains(lastOf(msgs), "任務進行中") {
+		t.Errorf("忙碌時應拒絕壓縮，got %q", lastOf(msgs))
+	}
+	if c.tryCompressCommand("cmdcomp:ch", "壓一下這段話") {
+		t.Error("非指令不該被 compress 閘攔截")
+	}
+}
+
 func TestTryConfigCommand(t *testing.T) {
 	c, msgs := newCaptureCore(t, "cmdcfg", nil, nil)
 	c.workDir = t.TempDir()

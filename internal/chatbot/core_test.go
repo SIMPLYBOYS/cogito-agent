@@ -1,6 +1,7 @@
 package chatbot
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -114,22 +115,40 @@ func TestSanitizeSegment(t *testing.T) {
 
 // per-WorkDir 鎖：同一 key 互斥（序列化），不同 key 可並行；釋放後可再取得。
 func TestWorkspaceLock_PerKeyMutualExclusion(t *testing.T) {
-	b := &Core{busy: make(map[string]bool)}
+	b := &Core{running: make(map[string]context.CancelFunc)}
+	noop := func() {}
 	wdA := "/srv/ws/channels/A"
 	wdB := "/srv/ws/channels/B"
 
-	if !b.tryAcquire(wdA) {
+	if !b.tryAcquire(wdA, noop) {
 		t.Fatal("首次應取得 A")
 	}
-	if b.tryAcquire(wdA) {
+	if b.tryAcquire(wdA, noop) {
 		t.Fatal("A 忙碌中，同目錄第二次應失敗（序列化）")
 	}
-	if !b.tryAcquire(wdB) {
+	if !b.tryAcquire(wdB, noop) {
 		t.Fatal("不同目錄 B 應可並行取得")
 	}
 
 	b.release(wdA)
-	if !b.tryAcquire(wdA) {
+	if !b.tryAcquire(wdA, noop) {
 		t.Fatal("釋放後 A 應可再取得")
+	}
+}
+
+// /stop：stop 取消登記的 cancel 並回 true；沒有執行中則回 false。
+func TestStop(t *testing.T) {
+	c := &Core{running: make(map[string]context.CancelFunc)}
+	wd := "/srv/ws/channels/X"
+	if c.stop(wd) {
+		t.Fatal("沒有執行中任務時 stop 應回 false")
+	}
+	cancelled := false
+	c.tryAcquire(wd, func() { cancelled = true })
+	if !c.stop(wd) {
+		t.Fatal("有執行中任務時 stop 應回 true")
+	}
+	if !cancelled {
+		t.Fatal("stop 應呼叫該任務的 cancel")
 	}
 }

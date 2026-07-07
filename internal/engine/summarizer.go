@@ -42,6 +42,21 @@ func (e *AgentEngine) maintainSummary(ctx context.Context, session *ctxpkg.Sessi
 	log.Printf("[Summary] 已把 %d 條舊訊息摺進滾動摘要，history 收斂至末 %d 條逐字。", len(evicted), summaryTailMsgs)
 }
 
+// ForceSummary 手動觸發一次摺疊（`compress` 指令用）：忽略自動門檻，把末 summaryTailMsgs 條以外的
+// 舊訊息全部摺進滾動摘要並逐出。回傳摺疊的訊息數（0＝history 已在末 N 條內、無可摺）。
+func (e *AgentEngine) ForceSummary(ctx context.Context, session *ctxpkg.Session) (int, error) {
+	evicted := session.EvictablePrefix(summaryTailMsgs, summaryTailMsgs) // trigger=tail：超過末 N 條就摺
+	if len(evicted) == 0 {
+		return 0, nil
+	}
+	newSummary, err := e.summarize(ctx, session.Summary(), evicted)
+	if err != nil {
+		return 0, err
+	}
+	session.CommitSummary(newSummary, len(evicted))
+	return len(evicted), nil
+}
+
 // summarize 用 LLM 把 prev 摘要與 evicted 片段增量合併成新摘要。
 func (e *AgentEngine) summarize(ctx context.Context, prev string, evicted []schema.Message) (string, error) {
 	var b strings.Builder
