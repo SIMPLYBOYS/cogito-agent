@@ -201,8 +201,12 @@ func main() {
 		// WithWorktreeIsolation：isolation:worktree 的 agent 在 git worktree 隔離跑、完事序列化 apply 回主
 		// 工作區（防並行寫入相互覆蓋）。ponytail: 依賴 host executor；docker sandbox 下 bash 仍掛在 base
 		// 容器，worktree 檔案隔離與 docker bash 不完全對齊——並行寫入建議用 host 執行模式。
-		registry.Register(tools.NewSubagentTool(eng, buildSubReg(sess.WorkDir), reporter, rootDir).
-			WithWorktreeIsolation(sess.WorkDir, buildSubReg)) // skillsBaseDir=rootDir：可綁定技能進子 context
+		subTool := tools.NewSubagentTool(eng, buildSubReg(sess.WorkDir), reporter, rootDir).
+			WithWorktreeIsolation(sess.WorkDir, buildSubReg) // skillsBaseDir=rootDir：可綁定技能進子 context
+		registry.Register(subTool)
+		for _, bt := range subTool.BackgroundTools() { // subagent_result / subagent_list（查背景委派）
+			registry.Register(bt)
+		}
 
 		return eng
 	}

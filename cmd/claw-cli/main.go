@@ -125,8 +125,12 @@ func main() {
 		r.Register(tools.NewEditFileTool(wd))
 		return r
 	}
-	registry.Register(tools.NewSubagentTool(eng, buildSubReg(workDir), reporter, workDir).
-		WithWorktreeIsolation(workDir, buildSubReg))
+	subTool := tools.NewSubagentTool(eng, buildSubReg(workDir), reporter, workDir).
+		WithWorktreeIsolation(workDir, buildSubReg)
+	registry.Register(subTool)
+	for _, bt := range subTool.BackgroundTools() { // subagent_result / subagent_list（查背景委派）
+		registry.Register(bt)
+	}
 
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})

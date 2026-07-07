@@ -64,6 +64,8 @@ type SubagentTool struct {
 	// 兩者為 nil/空時 isolation 靜默降級為共享工作區。
 	baseWorkDir string
 	regFactory  func(workDir string) Registry
+
+	subMgr *SubagentManager // 背景子 agent 池（background=true 走這裡；共用給查詢工具）
 }
 
 // skillsBaseDir 是含 .claw/skills 與 .claw/agents 的目錄（須與主 agent 的索引同源）。
@@ -75,8 +77,13 @@ func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter int
 		reporter:    reporter,
 		skillLoader: ctxpkg.NewSkillLoader(skillsBaseDir),
 		agentLoader: ctxpkg.NewAgentLoader(skillsBaseDir),
+		subMgr:      NewSubagentManager(runner),
 	}
 }
+
+// BackgroundTools 回傳查詢背景子 agent 的工具（subagent_result / subagent_list），與本工具共用同一
+// SubagentManager。cmd 端把它們一併註冊，模型才查得到 background=true 委派的結果。
+func (t *SubagentTool) BackgroundTools() []BaseTool { return t.subMgr.Tools() }
 
 // WithWorktreeIsolation 開啟 worktree 隔離能力：baseWorkDir＝session 工作區，regFactory 依目錄建工具超集
 // （與傳入 subagentRegistry 同款，但 rooted 在指定目錄）。未呼叫則 isolation:worktree 降級為共享工作區。
@@ -95,7 +102,7 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 	if idx := t.agentLoader.Index(); idx != "" {
 		desc += "\n可用的 agent_type（不指定則為預設探路者，唯讀探索）：\n" + idx
 	}
-	desc += "可選 skill 參數：綁定技能後其完整正文只載入子 context，適合需要長篇操作指南的任務。"
+	desc += "可選 skill 參數：綁定技能後其完整正文只載入子 context。可選 background=true：丟背景非同步跑、立即回一個 ID，之後用 subagent_result 查結果（適合可先繼續、稍後再取的探索）。"
 	return schema.ToolDefinition{
 		Name:        t.Name(),
 		Description: desc,
@@ -114,6 +121,10 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 					"type":        "string",
 					"description": "（可選）要綁定給子智能體的技能名稱，須與 System Prompt『技能索引』中的名稱一致。指定後該技能正文只進子 context。",
 				},
+				"background": map[string]interface{}{
+					"type":        "boolean",
+					"description": "（可選）true＝丟背景非同步跑、立即回傳 ID（用 subagent_result 查結果）；預設 false＝同步等到回報。背景模式在共享工作區跑（不做 worktree 隔離）。",
+				},
 			},
 			"required": []string{"task_prompt"},
 		},
@@ -124,6 +135,7 @@ type subagentArgs struct {
 	TaskPrompt string `json:"task_prompt"`
 	AgentType  string `json:"agent_type"`
 	Skill      string `json:"skill"`
+	Background bool   `json:"background"`
 }
 
 func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -153,6 +165,38 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	reg := t.registry.Subset(toolset)
 
+	// 綁定技能：完整正文只載入子 context。失敗＝error-as-observation。
+	var skillBody string
+	if input.Skill != "" {
+		body, err := t.skillLoader.ReadSkill(input.Skill)
+		if err != nil {
+			return fmt.Errorf("綁定技能失敗: %v", err).Error(), nil
+		}
+		skillBody = body
+		log.Printf("[Subagent] 📎 綁定技能 [%s]（注入 %d 字元正文至子 context）\n", input.Skill, len(body))
+	}
+
+	// 背景模式：丟 SubagentManager 非同步跑（共享工作區、silent、不做 worktree 隔離），立即回 ID。
+	if input.Background {
+		if t.subMgr == nil {
+			return "背景子 agent 未啟用（本部署未接背景池）。", nil
+		}
+		id, serr := t.subMgr.Spawn(SubTask{
+			Prompt:       input.TaskPrompt,
+			SkillBody:    skillBody,
+			SystemPrompt: def.Prompt,
+			Model:        def.Model,
+			MaxTokens:    effortToMaxTokens(def.Effort),
+			Registry:     reg,
+			Reporter:     nil, // 背景＝silent，用 subagent_result 取結果
+		}, role)
+		if serr != nil {
+			return serr.Error(), nil
+		}
+		log.Printf("[Subagent] 🌀 背景委派 [%s] → %s\n", role, id)
+		return fmt.Sprintf("🌀 已在背景啟動子 agent [%s]（ID: %s）。之後用 `subagent_result`（id=%s）查結果，或 `subagent_list` 看全部。", role, id, id), nil
+	}
+
 	// worktree 隔離（可選）：isolation:worktree 且能力已裝配時，在 base 的 git worktree 裡跑，工具 rooted
 	// 在 worktree；完事把 diff 序列化 apply 回主工作區。非 git repo / 未裝配則靜默降級為共享工作區。
 	var mergeBack func() string
@@ -179,17 +223,6 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			}
 			log.Printf("[Subagent] 🌿 worktree 隔離：%s\n", wt)
 		}
-	}
-
-	// 綁定技能：解析技能名取完整正文，注入子 agent 隔離 context。失敗則 error-as-observation。
-	var skillBody string
-	if input.Skill != "" {
-		body, err := t.skillLoader.ReadSkill(input.Skill)
-		if err != nil {
-			return fmt.Errorf("綁定技能失敗: %v", err).Error(), nil
-		}
-		skillBody = body
-		log.Printf("[Subagent] 📎 綁定技能 [%s]（注入 %d 字元正文至子 context）\n", input.Skill, len(body))
 	}
 
 	log.Printf("[Subagent] 🚀 主 Agent 發起委派！正在拉起 [%s]: [%s]...\n", role, input.TaskPrompt)
