@@ -40,6 +40,10 @@ type PostRunHook func(ctx context.Context, session *ctxpkg.Session, taskPrompt s
 // PostFailureHook 在任務【失敗】後呼叫（live Reflexion）。可為 nil。
 type PostFailureHook func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string)
 
+// LearnHook 手動蒸餾技能（`learn` 指令）：從本會話軌跡反思出一個【提案】技能（進暫存區、gated）。
+// 回傳提案技能名（空＝不值得保存，非錯誤）。可為 nil（未接則 /learn 提示未啟用）。
+type LearnHook func(ctx context.Context, session *ctxpkg.Session) (skillName string, err error)
+
 // senders：platform → 該平台的原生發送函式。讓 SendMessage 能用命名空間 convID 路由回正確傳輸層，
 // 使審批/提案通知在「同進程多平台」下也送對人。ponytail: 全域 sync.Map 足矣（傳輸層數量極少）。
 var senders sync.Map
@@ -62,6 +66,7 @@ type Core struct {
 	factory     EngineFactory
 	postRun     PostRunHook
 	postFailure PostFailureHook
+	learn       LearnHook
 
 	autoResume bool // 暫時性中斷後自動續跑（COGITO_AUTO_RESUME=1 開）
 
@@ -109,6 +114,7 @@ func parseUserSet(s string) map[string]bool {
 
 func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
 func (c *Core) SetPostFailureHook(h PostFailureHook) { c.postFailure = h }
+func (c *Core) SetLearnHook(h LearnHook)             { c.learn = h }
 
 // convID 把傳輸層的原生頻道 ID 加上平台前綴，成為全域唯一的會話標識。
 func (c *Core) convID(channelID string) string { return c.platform + ":" + channelID }
@@ -135,8 +141,8 @@ func (c *Core) Dispatch(channelID, userID, text string) {
 		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
 		return
 	}
-	// compress：會摺疊 session、走 goroutine（有 LLM 呼叫）；取鎖與任務序列化。命中即消費。
-	if c.tryCompressCommand(id, text) {
+	// compress / learn：會摺疊 session 或蒸餾技能，走 goroutine（有 LLM 呼叫）、取鎖與任務序列化。命中即消費。
+	if c.tryCompressCommand(id, text) || c.tryLearnCommand(id, text) {
 		return
 	}
 	// 會話忙碌時拒絕新任務，避免併發 Run 汙染同一 session。
@@ -277,7 +283,8 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"`stop` — 中止本頻道正在跑的任務\n" +
 	"`status` — 看本會話花費 / token / 歷史長度 / 模型\n" +
 	"`model` / `model <id>` — 查看 / 切換本頻道模型（`model reset` 還原預設）\n" +
-	"`compress` — 手動摺疊 context，縮短歷史省成本\n\n" +
+	"`compress` — 手動摺疊 context，縮短歷史省成本\n" +
+	"`learn` — 從本次對話蒸餾一個【提案】技能（過 skillgate 把關才生效）\n\n" +
 	"**審批（HITL）**\n" +
 	"`approve` / `reject` — 放行 / 否決待審批的高危操作（僅管理員；可帶 ID：`approve <id>`）\n\n" +
 	"**Plan Mode（長任務斷點續傳）**\n" +
@@ -404,6 +411,39 @@ func (c *Core) tryCompressCommand(convID, text string) bool {
 			SendMessage(convID, "ℹ️ 目前歷史已很短，無需壓縮。")
 		default:
 			SendMessage(convID, fmt.Sprintf("🗜️ 已把 %d 則舊訊息摺進滾動摘要，context 更精簡了。", n))
+		}
+	}()
+	return true
+}
+
+// tryLearnCommand：手動從本會話蒸餾一個【提案】技能（`learn`）。走 goroutine（有 LLM 呼叫）、取鎖序列化。
+func (c *Core) tryLearnCommand(convID, text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "learn", "/learn", "學習":
+	default:
+		return false
+	}
+	if c.learn == nil {
+		SendMessage(convID, "ℹ️ 技能蒸餾未接（本部署未啟用）。")
+		return true
+	}
+	workDir := c.channelWorkDir(convID)
+	ctx, cancel := context.WithCancel(context.Background())
+	if !c.tryAcquire(workDir, cancel) {
+		cancel()
+		SendMessage(convID, "⏳ 任務進行中，請稍候或先 `/stop` 再 learn。")
+		return true
+	}
+	go func() {
+		defer c.release(workDir)
+		name, err := c.learn(ctx, c.sessionFor(convID))
+		switch {
+		case err != nil:
+			SendMessage(convID, fmt.Sprintf("❌ 蒸餾技能失敗：%v", err))
+		case name == "":
+			SendMessage(convID, "ℹ️ 這段對話沒有值得沉澱成可複用技能的流程。")
+		default:
+			SendMessage(convID, fmt.Sprintf("📚 已從本次對話蒸餾出【提案技能】`%s`（進暫存區、未生效）。用 `go run ./cmd/skillgate` 把關晉升後才會被 agent 使用。", name))
 		}
 	}()
 	return true

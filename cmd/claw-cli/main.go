@@ -37,6 +37,7 @@ func main() {
 	sessionPtr := flag.String("session", "cli-session", "會話 ID，支持斷點續傳")
 	planPtr := flag.Bool("plan", false, "開啟 Plan Mode：狀態外部化到 PLAN.md / TODO.md")
 	verifyPtr := flag.String("verify", "", "goal 循環：驗證 bash 指令（退出碼 0 = 目標達成）。設了即跑到通過或用盡次數")
+	judgePtr := flag.String("verify-judge", "", "goal 循環：用 LLM 依此【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）。與 -verify 二擇一")
 	attemptsPtr := flag.Int("max-attempts", 5, "goal 循環最大嘗試次數")
 	flag.Parse()
 
@@ -131,8 +132,8 @@ func main() {
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	var runErr error
-	if *verifyPtr != "" {
-		runErr = runGoalLoop(eng, sess, reporter, *verifyPtr, workDir, *attemptsPtr)
+	if *verifyPtr != "" || *judgePtr != "" {
+		runErr = runGoalLoop(eng, sess, reporter, *verifyPtr, *judgePtr, workDir, *attemptsPtr)
 	} else {
 		runErr = eng.Run(context.Background(), sess, reporter)
 	}
@@ -197,10 +198,11 @@ func main() {
 	fmt.Println("==================================================")
 }
 
-// runGoalLoop 是 /goal 式的循環：跑 agent → 用 bash verify 判定目標是否達成（退出碼 0）→
-// 沒達成就把 verify 的輸出當反饋追加進對話、重試，直到通過或用盡次數。
-// ponytail: verify 輸出直接當下一輪反饋，不另叫 LLM 反思（省一次 API）。要更聰明的教訓再接 eval.ReflectOnFailure。
-func runGoalLoop(eng *engine.AgentEngine, sess *ctxpkg.Session, reporter engine.Reporter, verifyCmd, workDir string, maxAttempts int) error {
+// runGoalLoop 是 /goal 式的循環：跑 agent → 驗收目標是否達成 → 沒達成就把評語當反饋追加進對話、
+// 重試，直到通過或用盡次數。驗收兩種模式（judgeCriteria 非空優先）：
+//   - bash：跑 verifyCmd，退出碼 0 = 達成（適合可程式驗證的任務）。
+//   - LLM judge：用 judgeCriteria 讓模型判定產出是否達標（適合寫文件/設計等 bash 難驗的任務）。
+func runGoalLoop(eng *engine.AgentEngine, sess *ctxpkg.Session, reporter engine.Reporter, verifyCmd, judgeCriteria, workDir string, maxAttempts int) error {
 	if maxAttempts < 1 {
 		maxAttempts = 1
 	}
@@ -208,18 +210,38 @@ func runGoalLoop(eng *engine.AgentEngine, sess *ctxpkg.Session, reporter engine.
 		if err := eng.Run(context.Background(), sess, reporter); err != nil {
 			return err
 		}
-		out, ok := goalVerify(verifyCmd, workDir)
+
+		var ok bool
+		var feedback string
+		if judgeCriteria != "" {
+			done, reason, jerr := eng.JudgeGoal(context.Background(), sess, judgeCriteria)
+			if jerr != nil {
+				feedback = "驗收器暫時失敗（" + jerr.Error() + "），請確保產出完整明確。"
+			} else {
+				ok, feedback = done, reason
+			}
+		} else {
+			var out string
+			out, ok = goalVerify(verifyCmd, workDir)
+			feedback = strings.TrimSpace(out)
+		}
+
 		if ok {
-			log.Printf("[goal] ✅ 第 %d 次達成目標（`%s` 退出碼 0）", attempt, verifyCmd)
+			log.Printf("[goal] ✅ 第 %d 次達成目標：%s", attempt, feedback)
 			return nil
 		}
-		log.Printf("[goal] ❌ 第 %d/%d 次驗證未過：%s", attempt, maxAttempts, strings.TrimSpace(out))
+		log.Printf("[goal] ❌ 第 %d/%d 次未達成：%s", attempt, maxAttempts, feedback)
 		if attempt < maxAttempts {
-			sess.Append(schema.Message{Role: schema.RoleUser, Content: fmt.Sprintf(
-				"目標驗證未通過：執行 `%s` 退出碼非 0，輸出：\n%s\n請據此修正後繼續，直到驗證通過。", verifyCmd, out)})
+			var nudge string
+			if judgeCriteria != "" {
+				nudge = fmt.Sprintf("目標驗收未通過（標準：%s）。評語：%s\n請據此修正後繼續，直到達成。", judgeCriteria, feedback)
+			} else {
+				nudge = fmt.Sprintf("目標驗證未通過：執行 `%s` 退出碼非 0，輸出：\n%s\n請據此修正後繼續，直到驗證通過。", verifyCmd, feedback)
+			}
+			sess.Append(schema.Message{Role: schema.RoleUser, Content: nudge})
 		}
 	}
-	return fmt.Errorf("達到最大嘗試次數 %d，目標仍未通過驗證 `%s`", maxAttempts, verifyCmd)
+	return fmt.Errorf("達到最大嘗試次數 %d，目標仍未達成", maxAttempts)
 }
 
 // goalVerify 在 workDir 跑一條 bash 驗證指令，退出碼 0 視為目標達成。

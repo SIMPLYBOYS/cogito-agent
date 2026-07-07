@@ -1,8 +1,11 @@
 package chatbot
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 )
 
 // try*Command 是自我進化的 apply/reject 閘，原本 0% 覆蓋。這裡驗證「無提案」分支與
@@ -101,6 +104,29 @@ func TestTryCompressCommand_BusyRejected(t *testing.T) {
 	}
 	if c.tryCompressCommand("cmdcomp:ch", "壓一下這段話") {
 		t.Error("非指令不該被 compress 閘攔截")
+	}
+}
+
+func TestTryLearnCommand(t *testing.T) {
+	// 未接 hook → 提示未啟用，但仍消費指令
+	c, msgs := newCaptureCore(t, "cmdlearn", nil, nil)
+	if !c.tryLearnCommand("cmdlearn:ch", "learn") {
+		t.Fatal("learn 應被攔截")
+	}
+	if !strings.Contains(lastOf(msgs), "未接") {
+		t.Errorf("未接 hook 應提示，got %q", lastOf(msgs))
+	}
+	if c.tryLearnCommand("cmdlearn:ch", "學一下這門技術") {
+		t.Error("非指令不該被 learn 閘攔截")
+	}
+
+	// 接了 hook 但忙碌 → 拒絕
+	c2, msgs2 := newCaptureCore(t, "cmdlearn2", nil, nil)
+	c2.learn = func(context.Context, *ctxpkg.Session) (string, error) { return "x", nil }
+	c2.tryAcquire(c2.channelWorkDir("cmdlearn2:ch"), func() {})
+	c2.tryLearnCommand("cmdlearn2:ch", "learn")
+	if !strings.Contains(lastOf(msgs2), "任務進行中") {
+		t.Errorf("忙碌時 learn 應拒絕，got %q", lastOf(msgs2))
 	}
 }
 

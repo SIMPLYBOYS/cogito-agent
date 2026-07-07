@@ -292,6 +292,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
    | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |
    | `compress` | 手動摺疊 context（把舊訊息摺進滾動摘要），縮短歷史省成本 |
+   | `learn` | 從本次對話蒸餾一個【提案】技能（進暫存區，過 `skillgate` 把關才生效） |
    | `approve` / `reject`（可帶 taskID） | 放行 / 拒絕被危險指令審批攔下的工具調用（僅 `COGITO_ADMIN_USERS`） |
    | `apply memory` / `reject memory` | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄） |
    | `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
@@ -309,6 +310,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `-session` | `cli-session` | 會話 ID，配 `COGITO_SESSION_DIR` 可斷點續傳 |
    | `-plan` | `false` | 開 Plan Mode |
    | `-verify` | — | goal 循環：驗證 bash 指令（退出碼 0 = 達成），設了就跑到通過或用盡 |
+   | `-verify-judge` | — | goal 循環：用 LLM 依【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）；與 `-verify` 二擇一 |
    | `-max-attempts` | `5` | goal 循環最大嘗試次數 |
 
 機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度實時回覆到對應會話。

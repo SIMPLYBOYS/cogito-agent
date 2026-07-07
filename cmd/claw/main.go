@@ -273,6 +273,22 @@ func main() {
 	bot.SetPostRunHook(postRun)
 	bot.SetPostFailureHook(postFailure)
 
+	// `learn` 手動蒸餾技能：獨立於自動 skill_synth 的 gating（explicit 使用者意圖，一律可用）；
+	// 產物仍只進暫存區，須 skillgate 把關才生效。同一 hook 掛給 Slack 與 Telegram。
+	learnSynth := evolve.NewSkillSynthesizer(llmProvider, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
+	learnHook := func(ctx context.Context, session *ctxpkg.Session) (string, error) {
+		history := session.GetWorkingMemory(0)
+		if len(history) == 0 {
+			return "", nil
+		}
+		path, err := learnSynth.Reflect(ctx, firstUserContent(history), history)
+		if err != nil || path == "" {
+			return "", err
+		}
+		return filepath.Base(filepath.Dir(path)), nil // <slug>/SKILL.md → slug
+	}
+	bot.SetLearnHook(learnHook)
+
 	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停傳輸層（websocket/長輪詢隨 ctx 取消），再 flush OTel span。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -283,6 +299,7 @@ func main() {
 		tg := telegrambot.NewTelegramBot(factory, rootDir)
 		tg.SetPostRunHook(postRun)
 		tg.SetPostFailureHook(postFailure)
+		tg.SetLearnHook(learnHook)
 		go tg.Start(ctx)
 		tg.ResumeInterrupted() // 跨重啟續跑：續本次被硬砍中斷的 Telegram 任務（需 AUTO_RESUME + SESSION_DIR）
 	}
@@ -306,6 +323,16 @@ func main() {
 	if c, ok := executor.(interface{ Close() error }); ok {
 		_ = c.Close() // 移除 per-session sandbox 容器（docker 模式）
 	}
+}
+
+// firstUserContent 取歷史裡第一則使用者訊息內容（作為 /learn 蒸餾時的「任務」上下文）。
+func firstUserContent(history []schema.Message) string {
+	for _, m := range history {
+		if m.Role == schema.RoleUser && m.ToolCallID == "" {
+			return m.Content
+		}
+	}
+	return "（本次對話）"
 }
 
 // memoryProposalMsg 組裝「提案記憶」通知：直接列出內容 + 一鍵 apply/reject 指令（閘在 Slack 內，免去 cat 檔案）。
