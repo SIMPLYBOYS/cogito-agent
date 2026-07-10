@@ -8,6 +8,8 @@
 
 `cogito-agent` 是一個輕量級的自主智能體（Agent）框架。它把一個由 Anthropic Claude 驅動的 Agent 引擎接入 Slack / Telegram：你 @機器人或私聊它，它就會在鎖定的工作目錄內自主執行任務，並把思考過程、工具調用和結果實時回推到會話中。
 
+你可以把它當成一名**進駐團隊的數字員工**：常駐你的 IM、記得你們聊過的事（session 跨重啟持久 + 長期記憶）、做危險操作前會請示（審批）、花了多少錢有帳可查（成本追蹤）；接到複雜任務時，它會派出自己的專家隊——planner、code-reviewer、security-auditor、implementer 等[具名子 agent](#具名子-agentclawagentsmd)——並行分工、審查糾錯，最後整合回報。一個員工，背後一整隊專才。
+
 > 這個專案是什麼、不是什麼，以及它的差異化與發展優先序，見 [POSITIONING.md](POSITIONING.md)。
 
 ## Demo
@@ -431,6 +433,8 @@ go run ./cmd/claw-cli -prompt "..."
 ### 具名子 agent（`.claw/agents/*.md`）
 
 把「單一探路者」擴成一組專才：在 `<workspace>/.claw/agents/<name>.md` 用 frontmatter 定義角色，主 agent 呼叫 `spawn_subagent` 時帶 `agent_type` 即可派出。複用同一套隔離委派 + 能力沙箱機制，可並行派多路。
+
+這就是導言說的「數字員工背後的專家隊」：員工只有一個（進駐 IM 的主 agent），專才是它按需派遣的臨時編組——角色**定義**持久（本目錄的 `.md`），**實例**用完即棄、記憶外部化（工作區檔案 / 技能 / `.claw/memory`），不留常駐狀態，每次派遣都乾淨可重現。
 
 ```markdown
 ---
