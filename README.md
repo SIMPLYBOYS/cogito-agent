@@ -416,6 +416,10 @@ go run ./cmd/claw-cli -session fix-bug \
 
 # 心跳：不在 app 內造排程器——OS 的 cron 就是心跳。一行 crontab 每早 8 點跑（-session 持久化＝跨次累積的「脊柱」）：
 # 0 8 * * 1-5  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session daily-triage -prompt "拉昨日 CI 失敗，挑出可修的，逐一處理"
+
+# 定期覆盤：每週一早上審閱近 7 天互動，蒸餾技能/慣例提案（retrospect 技能＝覆盤 playbook，
+# 產物只進 skills-proposed/ 與 AGENTS.proposed.md 提案通道，人工放行才生效）：
+# 0 8 * * 1  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session retrospect -prompt "用 read_skill 讀 retrospect 技能，照著覆盤近 7 天"
 ```
 
 ### 切換 LLM Provider
