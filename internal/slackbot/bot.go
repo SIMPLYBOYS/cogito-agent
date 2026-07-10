@@ -115,7 +115,7 @@ func (b *SlackBot) Start(ctx context.Context) {
 					continue
 				}
 				if ev.ChannelType == "im" {
-					b.core.Dispatch(ev.Channel, ev.User, strings.TrimSpace(ev.Text))
+					b.core.DispatchDM(ev.Channel, ev.User, strings.TrimSpace(ev.Text))
 				}
 			}
 		}

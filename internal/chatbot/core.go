@@ -63,6 +63,20 @@ func SendMessage(convID, text string) {
 	}
 }
 
+// lastRoute：連結身分（"user:<canonical>"）→ 最後一次來訊的實際 convID（"platform:rawID"）。
+// 跨平台 DM 連續性的回覆路由：共享 session 的出訊（回報/審批/goal 通知）送到使用者最後說話的平台。
+var lastRoute sync.Map
+
+func init() {
+	// "user" 偽平台 sender：把連結身分的出訊轉發到 lastRoute 記錄的實際平台。
+	// 查無路由＝重啟後尚無入站，靜默丟棄（下次使用者開口即恢復）。
+	senders.Store("user", func(canonical, text string) {
+		if r, ok := lastRoute.Load("user:" + canonical); ok {
+			SendMessage(r.(string), text)
+		}
+	})
+}
+
 // Core 是傳輸無關的核心。每個傳輸層建一個，傳入自己的 platform 名與原生 send。
 type Core struct {
 	platform    string // 命名空間前綴；也用於工作目錄分層，杜絕跨平台碰撞
@@ -74,8 +88,9 @@ type Core struct {
 
 	autoResume bool // 暫時性中斷後自動續跑（COGITO_AUTO_RESUME=1 開）
 
-	allowedUsers map[string]bool // COGITO_ALLOWED_USERS：可驅動 agent 的使用者 id；空＝fail-closed 拒絕所有
-	adminUsers   map[string]bool // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
+	allowedUsers map[string]bool   // COGITO_ALLOWED_USERS：可驅動 agent 的使用者 id；空＝fail-closed 拒絕所有
+	adminUsers   map[string]bool   // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
+	userLink     map[string]string // COGITO_USER_LINK：平台 user id → canonical 身分；DM 跨平台連續性用
 
 	// running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
 	// `/stop` 取出對應頻道的 cancel 中止其 Run。
@@ -101,8 +116,29 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		autoResume:   os.Getenv("COGITO_AUTO_RESUME") == "1",
 		allowedUsers: allowed,
 		adminUsers:   admins,
+		userLink:     parseUserLink(os.Getenv("COGITO_USER_LINK")),
 		running:      make(map[string]context.CancelFunc),
 	}
+}
+
+// parseUserLink 解析 COGITO_USER_LINK：逗號分隔多組，每組用 = 連接「同一人」在各平台的 user id，
+// 組內第一個 id 即 canonical。如 "771163423=U0AABBCC" → 兩個 id 都映射到 "771163423"。
+// 這是跨平台 DM 連續性的信任宣告：必須由營運者顯式配置，系統不做任何猜測。
+func parseUserLink(s string) map[string]string {
+	link := make(map[string]string)
+	for _, group := range strings.Split(s, ",") {
+		canon := ""
+		for _, id := range strings.Split(group, "=") {
+			if id = strings.TrimSpace(id); id == "" {
+				continue
+			}
+			if canon == "" {
+				canon = id
+			}
+			link[id] = canon
+		}
+	}
+	return link
 }
 
 // parseUserSet 解析逗號分隔的 user id 清單成集合（去空白、略過空項）。
@@ -127,7 +163,32 @@ func (c *Core) convID(channelID string) string { return c.platform + ":" + chann
 // 先過授權閘（fail-closed：不在 allowlist 一律拒絕），再依序試審批 / 記憶閘 / 關係閘口令
 // （命中即消費、不佔鎖）；否則當新任務取鎖後背景開跑。
 func (c *Core) Dispatch(channelID, userID, text string) {
-	id := c.convID(channelID)
+	c.dispatch(channelID, userID, text, false)
+}
+
+// DispatchDM 同 Dispatch，但標記來源是私聊——僅 DM 參與跨平台連續性（COGITO_USER_LINK）。
+// 群組不合併：頻道的 context 屬於頻道，不屬於個人。
+func (c *Core) DispatchDM(channelID, userID, text string) {
+	c.dispatch(channelID, userID, text, true)
+}
+
+// stateID 計算會話狀態 key（session / 工作目錄 / 忙碌鎖共用它）：已連結使用者的 DM 歸一成
+// "user:<canonical>"——同一人在 Telegram/Slack 私聊共用同一份對話狀態；其餘維持平台 convID。
+func (c *Core) stateID(userID, convID string, isDM bool) string {
+	if isDM {
+		if canon, ok := c.userLink[userID]; ok {
+			return "user:" + canon
+		}
+	}
+	return convID
+}
+
+func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
+	id := c.stateID(userID, c.convID(channelID), isDM)
+	if strings.HasPrefix(id, "user:") {
+		// 記錄回覆路由：這個共享身分的出訊（含審批/goal 通知）之後都送到「最後說話的平台」。
+		lastRoute.Store(id, c.convID(channelID))
+	}
 	// 【硬防線】入口授權：未授權者一律擋在門外——這是「開放 bot」唯一能安全的前提。
 	if !c.allowedUsers[userID] {
 		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
@@ -290,7 +351,9 @@ func (c *Core) ResumeInterrupted() {
 	for _, s := range ctxpkg.GlobalSessionMgr.ListInterrupted() {
 		id := s.ID
 		if !strings.HasPrefix(id, c.platform+":") {
-			continue // 只續本平台的；別的平台由它自己的 core 處理
+			// 只續本平台的；別的平台由它自己的 core 處理。連結身分（"user:"）的 session 不屬於
+			// 任何平台、重啟後 lastRoute 也已失憶——不自動續跑，使用者下次開口即從斷點接續。
+			continue
 		}
 		if s.ResumeAttempts() >= maxCrossResume {
 			SendMessage(id, "⚠️ 上次中斷的任務已連續多次自動續跑仍未完成，已停止自動續跑。回覆任意訊息可手動接續。")

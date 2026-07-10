@@ -166,7 +166,11 @@ func (b *TelegramBot) Start(ctx context.Context) {
 				b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。打 `help` 看完整指令。")
 				continue
 			}
-			b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
+			if m.Chat.Type == "private" {
+				b.core.DispatchDM(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
+			} else {
+				b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
+			}
 		}
 	}
 }
