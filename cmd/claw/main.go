@@ -73,6 +73,7 @@ func main() {
 	// 沙箱執行器：COGITO_SANDBOX=docker 時 bash 命令丟進隔離容器（OS 級硬邊界），否則宿主機直跑。
 	executor := sandbox.FromEnv()
 	log.Printf("[sandbox] bash 執行模式: %s", sandbox.Describe(executor))
+	sandbox.WarnIfHost(executor) // bot＝開放入口：host 直跑時打醒目警告（見 WarnIfHost 的理由）
 
 	// session 持久化：設 COGITO_SESSION_DIR 即把對話歷史/費用落地磁碟，重啟後按頻道 ID 復原。
 	if store, dir := ctxpkg.StoreFromEnv(); store != nil {
