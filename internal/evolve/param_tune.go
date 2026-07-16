@@ -183,6 +183,22 @@ func ApplyProposedConfig(root string) ([]string, error) {
 		return nil, nil
 	}
 
+	// 對【整份】結果 clamp，不能只 clamp 各提案值：起點 k 來自 doc.Current，那是【磁碟上的提案檔】
+	// 讀來的，同樣不可信。只 clamp 提案的話，一個塞了 {"current":{"max_cost_usd":99999}} 的提案檔
+	// 配上任一個合法提案，就能讓 99999 原封不動落進 config.json——成本熔斷實質關閉。
+	// 信任邊界是「寫進磁碟的東西不可信」，不是「提案不可信」。
+	// 只 clamp【已設值】：0 的語意是「不覆蓋，用引擎預設」（見 cmd/claw/main.go 的 `if k.X > 0`），
+	// 無條件 clamp 會把「不覆蓋」悄悄變成「max_turns=10 / max_cost=$0.5」，反而收緊了限制。
+	if k.MaxTurns != 0 {
+		k.MaxTurns = clampInt(k.MaxTurns, minTurns, maxTurns)
+	}
+	if k.MaxConcurrentTools != 0 {
+		k.MaxConcurrentTools = clampInt(k.MaxConcurrentTools, minConcurrency, maxConcurrency)
+	}
+	if k.MaxCostUSD != 0 {
+		k.MaxCostUSD = clampFloat(k.MaxCostUSD, minCostUSD, maxCostUSD)
+	}
+
 	if err := os.MkdirAll(clawDir, 0o755); err != nil {
 		return nil, err
 	}

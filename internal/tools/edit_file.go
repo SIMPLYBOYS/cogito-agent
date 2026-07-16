@@ -122,7 +122,7 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	// 「先 read_file 重讀」的救援指南——改字串前先看 internal/context/recovery.go。
 	// 這裡是【還沒搜就放棄】的退化情形（old_text 比整個檔案還長），與 matchCount==0 不同：
 	// 只說「找不到」會誤導模型去微調縮排重試，故把實際事實（行數對比）講出來。
-	if len(oldLines) == 0 || len(contentLines) < len(oldLines) {
+	if len(contentLines) < len(oldLines) { // strings.Split 永不回空 slice，故不必檢查 len(oldLines)==0
 		return "", fmt.Errorf("找不到該代碼片段：old_text 共 %d 行，多於檔案的 %d 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
 			len(oldLines), len(contentLines))
 	}
@@ -152,7 +152,9 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	}
 
 	if matchCount == 0 {
-		return "", fmt.Errorf("在文件中未找到 old_text，請檢查內容和縮進")
+		// 走到這裡代表 L1~L4（精確 → 換行正規化 → TrimSpace → 逐行去縮排）全部沒中，所以【不是】
+		// 縮排或空白問題——把這件事說出來，才不會誘導模型微調空白盲目重試（非同構重試死循環的燃料）。
+		return "", fmt.Errorf("在文件中未找到 old_text：已嘗試精確比對、換行正規化、去縮排逐行比對，皆無匹配——調整縮排/空白再試沒有用，是內容本身與檔案現況不符")
 	}
 	if matchCount > 1 {
 		return "", fmt.Errorf("模糊匹配到了 %d 處代碼，請提供更多上下文以定位", matchCount)

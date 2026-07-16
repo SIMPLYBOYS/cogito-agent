@@ -13,6 +13,11 @@ import (
 	"time"
 )
 
+// maxResponseBytes 是單次 JSON 回應的讀取上限。正常 MCP 回應（含大型 tools/list）遠小於此；
+// 設上限是因為 httpClient 刻意不設 client 級 timeout（會殺掉合法的長 SSE 串流），故無限 body
+// 沒有別的東西擋得住——一個故障或惡意的 server 就能把整個 bot 進程 OOM 掉。
+const maxResponseBytes = 32 << 20 // 32 MiB
+
 // httpTransport 走 MCP 的 Streamable HTTP 傳輸（spec 2025-03-26+）：每個 JSON-RPC 訊息是一個 POST，
 // 回應可能是單個 application/json，或一段 text/event-stream（SSE）。session 以 Mcp-Session-Id 維持，
 // 後續請求帶上協商出的 MCP-Protocol-Version。只做 client→server 的請求/通知（不開 GET 長串流）。
@@ -115,7 +120,16 @@ func (h *httpTransport) call(ctx context.Context, method string, params any) (js
 			return nil, fmt.Errorf("mcp[%s] %s: %w", h.name, method, err)
 		}
 	} else {
-		body, _ := io.ReadAll(resp.Body)
+		// 上限：擋故障/惡意 server 回無限 body 打爆記憶體（配上無 client timeout，bot 無法自救）。
+		// 錯誤路徑（上面）本來就有 LimitReader(2048)，成功路徑卻沒有——保護不對稱是漏的，不是有意的。
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+		if err != nil {
+			return nil, fmt.Errorf("mcp[%s] %s: 讀取回應失敗: %w", h.name, method, err)
+		}
+		if len(body) > maxResponseBytes {
+			return nil, fmt.Errorf("mcp[%s] %s: 回應超過 %d MiB 上限，已中止（server 故障或惡意？）",
+				h.name, method, maxResponseBytes>>20)
+		}
 		if err := json.Unmarshal(body, &rr); err != nil {
 			return nil, fmt.Errorf("mcp[%s] %s: 解析 JSON 回應失敗: %w", h.name, method, err)
 		}

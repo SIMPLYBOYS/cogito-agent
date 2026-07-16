@@ -31,10 +31,14 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 
 	switch toolName {
 	case "edit_file":
-		// 匹配 fuzzyReplace 手寫的固定報錯
+		// 匹配 fuzzyReplace 手寫的固定報錯。【字串耦合警告】這些 pattern 必須對得上
+		// internal/tools/edit_file.go 的實際錯誤字串；改任一邊都要跑 recovery_test.go
+		// （不能用 typed sentinel error：tools 已 import context，反向 import 會成環）。
 		if strings.Contains(rawError, "在文件中未找到 old_text") || strings.Contains(rawError, "找不到該代碼片段") {
-			hint = "你提供的 old_text 與文件當前內容不一致，或者缺少必要的縮進。請先使用 `read_file` 工具重新讀取該文件，獲取最新、準確的內容後，再重新發起編輯。"
-		} else if strings.Contains(rawError, "匹配到了多處") || strings.Contains(rawError, "提供更多上下文") {
+			// 不提「縮進」：fuzzyReplace 的 L3/L4 已用 TrimSpace 逐行比對吸收縮排差異，
+			// 能走到這裡就【不是】縮排問題——指向縮排只會誘導模型去微調縮排盲目重試。
+			hint = "你提供的 old_text 與文件當前內容不一致（可能檔案已變動，或 old_text 是憑記憶構造的）。請先使用 `read_file` 工具重新讀取該文件，獲取最新、準確的內容後，再重新發起編輯。"
+		} else if strings.Contains(rawError, "以確保唯一性") || strings.Contains(rawError, "以定位") {
 			hint = "你的 old_text 不夠具體，命中了多個相同代碼塊。請在 old_text 中增加上下相鄰的幾行代碼，以確保替換的唯一性。"
 		}
 

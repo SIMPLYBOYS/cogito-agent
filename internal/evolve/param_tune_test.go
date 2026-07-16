@@ -153,3 +153,65 @@ func TestApplyProposedConfig_NoProposalNoop(t *testing.T) {
 		t.Errorf("無提案應回 (nil,nil)，got changes=%v err=%v", changes, err)
 	}
 }
+
+// 提案檔的【基底】(doc.Current) 同樣來自磁碟、同樣不可信：原本只 clamp 各提案值，
+// 於是塞一個超界基底 + 任一合法提案，超界值就原封不動落進 config.json——成本熔斷實質關閉。
+// （能寫提案檔的人：host 模式下的 bash 本來就能；docker 模式下靠已修掉的 symlink 逃逸。
+// 而 `apply config` 只過 allowlist、不過 admin 閘，任一授權使用者都能觸發套用。）
+func TestApplyProposedConfig_ClampsMaliciousBase(t *testing.T) {
+	root := t.TempDir()
+	clawDir := filepath.Join(root, ".claw")
+
+	evil := Knobs{MaxTurns: 9999, MaxConcurrentTools: 999, MaxCostUSD: 99999}
+	// 只帶一個無關且合法的提案，把 evil 基底夾帶進去
+	proposals := []Proposal{{Knob: "max_concurrent_tools", Current: 4, Proposed: 4, Reason: "夾帶"}}
+	if _, err := WriteProposedConfig(clawDir, evil, proposals); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyProposedConfig(root); err != nil {
+		t.Fatal(err)
+	}
+
+	k, ok := LoadKnobs(root)
+	if !ok {
+		t.Fatal("應已寫出 config.json")
+	}
+	if k.MaxCostUSD > maxCostUSD {
+		t.Errorf("惡意基底的 max_cost_usd 未被 clamp: %.0f（上限 %.1f）——成本熔斷會被關掉", k.MaxCostUSD, maxCostUSD)
+	}
+	if k.MaxTurns > maxTurns {
+		t.Errorf("惡意基底的 max_turns 未被 clamp: %d（上限 %d）", k.MaxTurns, maxTurns)
+	}
+	if k.MaxConcurrentTools > maxConcurrency {
+		t.Errorf("惡意基底的 max_concurrent_tools 未被 clamp: %d（上限 %d）", k.MaxConcurrentTools, maxConcurrency)
+	}
+}
+
+// 0 的語意是「不覆蓋，用引擎預設」（cmd/claw/main.go 是 `if k.X > 0` 才套用）。
+// clamp 基底時若無條件套用，0 會被 clamp 成下限，把「不覆蓋」悄悄變成「max_turns=10 / $0.5」——
+// 反而收緊了限制。這條守著那個語意。
+func TestApplyProposedConfig_ZeroMeansUnset(t *testing.T) {
+	root := t.TempDir()
+	clawDir := filepath.Join(root, ".claw")
+
+	// 基底只設 max_turns，其餘留 0（＝不覆蓋）
+	base := Knobs{MaxTurns: 40}
+	proposals := []Proposal{{Knob: "max_turns", Current: 40, Proposed: 30, Reason: "收緊"}}
+	if _, err := WriteProposedConfig(clawDir, base, proposals); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyProposedConfig(root); err != nil {
+		t.Fatal(err)
+	}
+
+	k, _ := LoadKnobs(root)
+	if k.MaxCostUSD != 0 {
+		t.Errorf("未設的 max_cost_usd 應維持 0（不覆蓋），卻被 clamp 成 %.2f", k.MaxCostUSD)
+	}
+	if k.MaxConcurrentTools != 0 {
+		t.Errorf("未設的 max_concurrent_tools 應維持 0（不覆蓋），卻被 clamp 成 %d", k.MaxConcurrentTools)
+	}
+	if k.MaxTurns != 30 {
+		t.Errorf("有設的 max_turns 應為提案值 30，got %d", k.MaxTurns)
+	}
+}

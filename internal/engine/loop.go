@@ -312,11 +312,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				}
 
 				if reporter != nil {
-					displayOutput := finalOutput
-					if len(displayOutput) > 200 {
-						displayOutput = displayOutput[:200] + "... (已截斷)"
-					}
-					reporter.OnToolResult(ctx, call.Name, displayOutput, result.IsError)
+					reporter.OnToolResult(ctx, call.Name, capRunes(finalOutput, 200), result.IsError)
 				}
 
 				observationMsgs[idx] = schema.Message{
@@ -447,11 +443,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 				}
 
 				if r != nil {
-					display := finalOutput
-					if len(display) > 200 {
-						display = display[:200] + "... (已截斷)"
-					}
-					r.OnToolResult(ctx, fmt.Sprintf("[Subagent] %s", call.Name), display, result.IsError)
+					r.OnToolResult(ctx, fmt.Sprintf("[Subagent] %s", call.Name), capRunes(finalOutput, 200), result.IsError)
 				}
 
 				observationMsgs[idx] = schema.Message{
@@ -494,6 +486,16 @@ func (s toolSemaphore) release() {
 }
 
 // jsonStr 把任意值序列化成字串供 span 屬性用；失敗回空字串（trace 不該因序列化錯誤而中斷）。
+// capRunes 按【字元】截斷給 reporter 顯示用。不能用 s[:n] byte 切——本專案的工具報錯幾乎全是中文，
+// 在第 n 個 byte 切下去有很高機率切在多位元組字元中間，聊天端就會看到 �。
+// （對齊 chatbot/core.go 的 capRunes 與 compactor 的 rune 安全切法。）
+func capRunes(s string, max int) string {
+	if r := []rune(s); len(r) > max {
+		return string(r[:max]) + "... (已截斷)"
+	}
+	return s
+}
+
 func jsonStr(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {

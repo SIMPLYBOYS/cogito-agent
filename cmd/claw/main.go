@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
@@ -25,6 +26,10 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/telegrambot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
+
+// mcpDialTimeout 是啟動時連接單一 MCP server（含 initialize 握手 / tools/list）的上限。
+// 連不上就略過該 server，不拖垮整個 bot 啟動。
+const mcpDialTimeout = 30 * time.Second
 
 func main() {
 	cmdutil.PrintBanner() // 啟動 logo（非終端自動不印）
@@ -48,7 +53,13 @@ func main() {
 			log.Fatalf("讀取 MCP 設定失敗: %v", errCfg)
 		}
 		for _, s := range servers {
-			cl, errDial := mcp.Dial(context.Background(), s)
+			// 必須帶 deadline：httpClient 刻意不設 client 級 timeout（會殺掉合法的長 SSE 串流），
+			// 逾時全靠呼叫端的 ctx。用 context.Background() 的話，一個「接受 TCP 連線但不回應」的
+			// MCP server（機器掛了/網路黑洞/惡意）就讓 main() 永久卡在這裡——bot 靜默開不起來，
+			// 沒有 log、沒有 crash。單一 server 連不上本來就是「略過」，不該拖垮整個啟動。
+			dialCtx, cancelDial := context.WithTimeout(context.Background(), mcpDialTimeout)
+			cl, errDial := mcp.Dial(dialCtx, s)
+			cancelDial()
 			if errDial != nil {
 				log.Printf("[mcp] 連接 %q 失敗，略過: %v", s.Name, errDial)
 				continue
@@ -58,7 +69,10 @@ func main() {
 		}
 		if len(mcpClients) > 0 {
 			// 用 gateway 漸進式暴露：context 只帶輕量目錄 + 2 個 gateway 工具，而非 N 個完整 schema。
-			if gw, errGw := mcp.NewGateway(context.Background(), mcpClients); errGw != nil {
+			gwCtx, cancelGw := context.WithTimeout(context.Background(), mcpDialTimeout)
+			gw, errGw := mcp.NewGateway(gwCtx, mcpClients)
+			cancelGw()
+			if errGw != nil {
 				log.Printf("[mcp] 建立 gateway 失敗: %v", errGw)
 			} else {
 				mcpGateway = gw

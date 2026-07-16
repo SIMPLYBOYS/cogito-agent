@@ -3,6 +3,8 @@ package tools
 import (
 	"strings"
 	"testing"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 )
 
 func TestReindent(t *testing.T) {
@@ -107,5 +109,57 @@ func TestLineByLineReplace_AlreadyCorrectIndentIsStable(t *testing.T) {
 	}, "\n")
 	if got != want {
 		t.Errorf("已正確縮進的 newText 應穩定對齊\n got=%q\nwant=%q", got, want)
+	}
+}
+
+// edit_file 的錯誤字串與 context.RecoveryManager 的 pattern 是【跨套件字串耦合】（不能用 typed
+// sentinel error：tools 已 import context，反向會成環）。這條測試走【真實】的錯誤字串跑完整條鏈——
+// recovery_test.go 那邊用的是手寫字串，耦合斷了也不會紅（"匹配到了多處" 這個 pattern 就這樣死在
+// 那裡沒人發現，而 L1 多重匹配的錯誤一直拿不到救援指南）。改任一邊的用詞，這裡會紅。
+func TestEditFileErrors_AllGetRecoveryHint(t *testing.T) {
+	rm := ctxpkg.NewRecoveryManager()
+	const content = "line1\nline2\nline3\n"
+
+	cases := []struct {
+		name    string
+		old     string // 觸發該錯誤路徑的 old_text
+		wantKey string // 救援指南裡該出現的關鍵字
+	}{
+		{"L1 多重匹配", "line1\nline2\nline3\nline1\nline2\nline3", "唯一性"}, // 見下方另建的 content
+		{"完全找不到", "totally-absent-text", "read_file"},
+		{"old_text 比檔案長", strings.Repeat("x\n", 20), "read_file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := content
+			if tc.name == "L1 多重匹配" {
+				src = "dup\ndup\n" // 讓 old_text="dup" 精確命中兩處
+				tc.old = "dup"
+			}
+			_, err := fuzzyReplace(src, tc.old, "new")
+			if err == nil {
+				t.Fatalf("預期失敗，卻成功")
+			}
+			seen := rm.AnalyzeAndInject("edit_file", err.Error())
+			t.Logf("模型實際讀到：%s", seen)
+			if !strings.Contains(seen, "[系統救援指南]") {
+				t.Errorf("這條錯誤路徑拿不到救援指南（recovery.go 的 pattern 對不上）：%v", err)
+			}
+			if !strings.Contains(seen, tc.wantKey) {
+				t.Errorf("救援指南應含 %q，got: %s", tc.wantKey, seen)
+			}
+		})
+	}
+}
+
+// 走到「找不到」代表 fuzzyReplace 的 L3/L4 已經用 TrimSpace 吸收過縮排差異了，
+// 此時再叫模型「檢查縮進」是把它推回盲目重試的迴圈。
+func TestRecoveryHint_NoIndentMisdirection(t *testing.T) {
+	_, err := fuzzyReplace("line1\nline2\n", "totally-absent", "x")
+	if err == nil {
+		t.Fatal("預期失敗")
+	}
+	if seen := ctxpkg.NewRecoveryManager().AnalyzeAndInject("edit_file", err.Error()); strings.Contains(seen, "縮進") {
+		t.Errorf("救援指南不該指向縮排（L4 已逐行 TrimSpace 比對過）：%s", seen)
 	}
 }
