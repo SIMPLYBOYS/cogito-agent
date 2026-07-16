@@ -115,3 +115,57 @@ func TestUserRouteForwarding(t *testing.T) {
 	}
 	SendMessage("user:unknown", "x") // 查無路由：靜默丟棄、不得 panic
 }
+
+// 平台限定名單：user id 名單原本只存裸 id，一個 id 在【每個】平台都生效。今天安全純屬 ID 空間
+// 不重疊的巧合（Telegram 純數字 / Slack U 開頭）；加入第三個平台（Discord snowflake 也是純數字）
+// 那天，一個 Discord 使用者的 ID 只要等於某個白名單裡的 Telegram ID 就直接獲得授權。
+func TestScopedUserSets(t *testing.T) {
+	// 模擬「Telegram 的 771163423 被授權」，而 Discord 有個同號使用者
+	t.Setenv("COGITO_ALLOWED_USERS", "telegram:771163423, U0BARE")
+	t.Setenv("COGITO_ADMIN_USERS", "telegram:771163423")
+	tg := NewCore("telegram", t.TempDir(), nil, func(string, string) {})
+	dc := NewCore("discord", t.TempDir(), nil, func(string, string) {})
+
+	// 限定平台：只有 telegram 那個 771163423 過得了
+	if !tg.isAllowed("771163423") {
+		t.Error("telegram:771163423 應被授權")
+	}
+	if dc.isAllowed("771163423") {
+		t.Error("Discord 上的同號使用者不該因 ID 碰撞獲得授權——這正是平台限定要防的")
+	}
+	if !tg.isAdmin("771163423") {
+		t.Error("telegram:771163423 應是管理員")
+	}
+	if dc.isAdmin("771163423") {
+		t.Error("Discord 同號者不該獲得審批權")
+	}
+
+	// 裸 id：向後相容——任何平台皆生效（既有 .env 不必改）
+	if !tg.isAllowed("U0BARE") || !dc.isAllowed("U0BARE") {
+		t.Error("裸 id 應在任何平台生效（向後相容）")
+	}
+	// 不在名單者一律拒絕
+	if tg.isAllowed("stranger") || dc.isAllowed("stranger") {
+		t.Error("不在名單者不該被授權")
+	}
+}
+
+// userLink 同樣支援平台限定：Discord 同號者不得繼承他人的 DM session。
+func TestScopedUserLink(t *testing.T) {
+	t.Setenv("COGITO_USER_LINK", "telegram:771163423=slack:U0AABBCC")
+	tg := NewCore("telegram", t.TempDir(), nil, func(string, string) {})
+	sl := NewCore("slack", t.TempDir(), nil, func(string, string) {})
+	dc := NewCore("discord", t.TempDir(), nil, func(string, string) {})
+
+	want := "user:telegram:771163423"
+	if got := tg.stateID("771163423", tg.convID("771163423"), true); got != want {
+		t.Errorf("telegram 應歸一到 %q，got %q", want, got)
+	}
+	if got := sl.stateID("U0AABBCC", sl.convID("D1"), true); got != want {
+		t.Errorf("slack 應歸一到同一把 key %q，got %q", want, got)
+	}
+	// Discord 同號者：不在 link 裡，維持自己的平台 session，不得繼承
+	if got := dc.stateID("771163423", dc.convID("771163423"), true); got != "discord:771163423" {
+		t.Errorf("Discord 同號者不該繼承他人的共享 session，got %q", got)
+	}
+}

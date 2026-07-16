@@ -132,6 +132,10 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 // parseUserLink 解析 COGITO_USER_LINK：逗號分隔多組，每組用 = 連接「同一人」在各平台的 user id，
 // 組內第一個 id 即 canonical。如 "771163423=U0AABBCC" → 兩個 id 都映射到 "771163423"。
 // 這是跨平台 DM 連續性的信任宣告：必須由營運者顯式配置，系統不做任何猜測。
+//
+// 條目同樣支援「platform:id」限定（如 "telegram:771163423=slack:U0AABBCC"），理由見 inSet。
+// 注意：改用限定形式會讓 canonical 從 "771163423" 變成 "telegram:771163423"，即【換一把 session
+// key】——既有的共享 session 不會自動搬過去（新 key、新工作目錄，等於重新開始）。
 func parseUserLink(s string) map[string]string {
 	link := make(map[string]string)
 	for _, group := range strings.Split(s, ",") {
@@ -150,6 +154,7 @@ func parseUserLink(s string) map[string]string {
 }
 
 // parseUserSet 解析逗號分隔的 user id 清單成集合（去空白、略過空項）。
+// 條目可為「platform:id」（只在該平台生效）或裸「id」（任何平台皆生效）——見 isAllowed。
 func parseUserSet(s string) map[string]bool {
 	set := make(map[string]bool)
 	for _, p := range strings.Split(s, ",") {
@@ -159,6 +164,23 @@ func parseUserSet(s string) map[string]bool {
 	}
 	return set
 }
+
+// inSet 是所有「user id 名單」查詢的唯一入口：先試【限定平台】的 "platform:id"，再退回裸 id。
+//
+// 【為何需要平台限定】user id 名單原本只存裸 id，於是一個 id 在【每個】平台都生效。今天安全純屬
+// 巧合——Telegram 是純數字、Slack 以 U/W/B 開頭，ID 空間不重疊。但加入第三個平台的那天（Discord
+// 的 snowflake 也是純數字），一個 Discord 使用者的 ID 只要等於某個白名單裡的 Telegram ID，就會
+// 【直接獲得授權】——這是授權邊界被跨平台 ID 碰撞繞過，不是理論問題。
+//
+// 裸 id 維持「任何平台皆生效」以向後相容既有 .env（不強迫所有人改設定）；要精確就寫
+// "telegram:123456789"。兩種形式可混用。
+func (c *Core) inSet(set map[string]bool, userID string) bool {
+	return set[c.platform+":"+userID] || set[userID]
+}
+
+// isAllowed / isAdmin：入口授權與審批權的唯一判準（都吃平台限定，見 inSet）。
+func (c *Core) isAllowed(userID string) bool { return c.inSet(c.allowedUsers, userID) }
+func (c *Core) isAdmin(userID string) bool   { return c.inSet(c.adminUsers, userID) }
 
 func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
 func (c *Core) SetPostFailureHook(h PostFailureHook) { c.postFailure = h }
@@ -184,6 +206,10 @@ func (c *Core) DispatchDM(channelID, userID, text string) {
 // "user:<canonical>"——同一人在 Telegram/Slack 私聊共用同一份對話狀態；其餘維持平台 convID。
 func (c *Core) stateID(userID, convID string, isDM bool) string {
 	if isDM {
+		// 與 inSet 同一套規則：先試限定平台，再退回裸 id（向後相容）。
+		if canon, ok := c.userLink[c.platform+":"+userID]; ok {
+			return "user:" + canon
+		}
 		if canon, ok := c.userLink[userID]; ok {
 			return "user:" + canon
 		}
@@ -199,7 +225,7 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	// 否則被拒者仍能改寫共享身分的狀態。拒絕訊息直送 conv（訊息來源）而非 stateID——它是對「這則
 	// 訊息」的回應，不該經 lastRoute 路由（送錯人，且未授權者若無路由會被靜默丟棄，而告知對方
 	// 自己的 user ID 正是這則訊息唯一的用途）。
-	if !c.allowedUsers[userID] {
+	if !c.isAllowed(userID) {
 		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
 		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。請管理員將它加入 COGITO_ALLOWED_USERS 後再試。", userID))
 		return
@@ -734,7 +760,7 @@ func (c *Core) tryResolveApproval(convID, userID, text string) bool {
 	}
 
 	// 命中口令但非管理員：消費掉並拒絕，別讓發起者自我放行。
-	if !c.adminUsers[userID] {
+	if !c.isAdmin(userID) {
 		log.Printf("[%s] 🚫 非管理員 %s 嘗試 %s，已拒絕\n", c.platform, userID, lower)
 		SendMessage(convID, "🚫 只有管理員可以 approve/reject 高危操作。")
 		return true

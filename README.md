@@ -247,11 +247,14 @@ cp .env.example .env
 | `COGITO_ALLOWED_USERS` | **（服務端務必設）** 可驅動 agent 的 user id 白名單（逗號分隔）。不設＝fail-closed 拒絕所有入站。Telegram＝數字 id、Slack＝`U` 開頭 |
 | `COGITO_ADMIN_USERS` | （選填）可 `approve`/`reject` 高危操作者（逗號分隔）；不設＝回退為 `COGITO_ALLOWED_USERS`。設它以做到「發起者≠批准者」 |
 | `COGITO_USER_LINK` | （選填）**DM 跨平台連續性**：宣告同一人在各平台的 user id（`=` 連接一組、逗號分隔多組，如 `771163423=U0AABBCC`）。設了之後這個人在 Telegram / Slack 的**私聊**共用同一份對話狀態（session/工作目錄/忙碌鎖）——Telegram 問到一半換 Slack 接著問，歷史都在；回覆與審批通知送到最後說話的平台。群組不合併（頻道 context 屬於頻道）。必須顯式配置——這是信任宣告，系統不猜 |
+
+> **平台限定（上面三個名單通用）**：條目可寫 `platform:id`（只在該平台生效）或裸 `id`（任何平台皆生效，向後相容既有設定）。**建議加前綴**——裸 id 在每個平台都生效，今天安全只因 Telegram（純數字）與 Slack（`U` 開頭）的 ID 空間恰好不重疊；接入第三個平台那天（如 Discord 的 snowflake 也是純數字），一個同號的陌生人就會**直接通過授權閘**。例：`COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`。注意 `COGITO_USER_LINK` 改用前綴會換掉 session key，既有共享 session 不會自動搬移。
 | `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | （選填）未登記模型的 fallback 估價（美元/百萬 token），讓成本熔斷對非 Claude 端點仍生效；不設＝opus 級 5/25 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
 | `OTEL_TRACES_EXPORTER` | （選填）設為 `console` 時把 span 印到終端（本地除錯，不需後端） |
 | `COGITO_MCP_CONFIG` | （選填）`.mcp.json` 路徑；載入並連接外部 MCP 工具伺服器 |
+| `COGITO_MCP_TIMEOUT` | （選填）單次 MCP 工具呼叫的秒數上限，預設 300（5 分鐘）。這是**防吊死的 backstop** 而非效能政策——遠端工具合法地可能很慢，但「接受連線卻不回應」的 server 會永久佔住引擎的併發令牌（回合/成本熔斷只在回合**之間**檢查，救不了卡在單次呼叫裡的任務）。設 `0` = 不限（回到舊行為） |
 
 ### MCP 工具伺服器（選填）
 

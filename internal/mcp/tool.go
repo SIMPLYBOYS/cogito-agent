@@ -3,10 +3,35 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
+
+// defaultCallTimeout 是單次遠端 MCP 工具呼叫的上限。刻意設得寬鬆——遠端工具合法地可能很慢
+// （首次查詢要下載並轉換資料集之類）。這不是效能政策，是【防吊死】的 backstop：
+// httpTransport 刻意不設 client 級 timeout（會殺掉合法的長 SSE 串流），逾時全靠呼叫端的 ctx，
+// 而 chatbot 那條路只給了 WithCancel、沒有 deadline。於是一個「接受連線但不回應」的 server
+// 會讓這次呼叫【永久】卡住，同時永久佔住 engine 的併發信號量令牌——最後把整個工具池卡死，
+// 而回合/成本熔斷只在回合【之間】檢查，救不了卡在單次工具呼叫裡的任務。
+const defaultCallTimeout = 300 * time.Second
+
+// callTimeout 讀 COGITO_MCP_TIMEOUT（秒）。<=0 表示不限（回到舊行為，自負風險）。
+func callTimeout() time.Duration {
+	if v := os.Getenv("COGITO_MCP_TIMEOUT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n <= 0 {
+				return 0
+			}
+			return time.Duration(n) * time.Second
+		}
+	}
+	return defaultCallTimeout
+}
 
 // mcpTool 把一個遠端 MCP 工具適配成本專案的 tools.BaseTool。對外暴露的名字加上 server 前綴
 // （避免與內建工具/其他 server 撞名），但呼叫遠端時用原始名 remoteName。
@@ -39,8 +64,22 @@ func (t *mcpTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 			return "", fmt.Errorf("MCP 工具參數解析失敗: %w", err)
 		}
 	}
+	// 防吊死 backstop（見 defaultCallTimeout）。gateway 的 mcp_call_tool 也走這條 Execute，故一處即涵蓋。
+	d := callTimeout()
+	if d > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, d)
+		defer cancel()
+	}
 	out, err := t.client.callTool(ctx, t.remoteName, argMap)
 	if err != nil {
+		// 超時要講清楚是誰、多久、以及「重試同一個呼叫沒有用」——否則模型只會看到一句
+		// context deadline exceeded，然後盲目重試把時間再燒一次。
+		if d > 0 && errors.Is(err, context.DeadlineExceeded) {
+			return "", fmt.Errorf("MCP 工具 %s 超過 %s 未回應，已中止（該 server 可能吊住或該查詢過重）。"+
+				"重試同一個呼叫多半會再等一次同樣久——請改用別的方式取得資訊，或縮小查詢範圍。"+
+				"（營運者可用 COGITO_MCP_TIMEOUT 秒數調整此上限）", t.exposedName, d)
+		}
 		return "", err
 	}
 	// gateway 的 mcp_call_tool 也走這條 Execute，故一處包裝即涵蓋兩條路徑。
