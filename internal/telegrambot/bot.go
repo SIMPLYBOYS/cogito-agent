@@ -42,10 +42,27 @@ func NewTelegramBot(factory chatbot.EngineFactory, workDir string) *TelegramBot 
 	b := &TelegramBot{token: token, client: &http.Client{Timeout: (pollTimeoutSec + 15) * time.Second}}
 	// 取自身 id/username：群組裡用來判斷「有沒有在叫我」並剝掉 @提及（對齊 Slack 的 AuthTest）。
 	if err := b.fetchIdentity(); err != nil {
-		log.Fatalf("Telegram getMe 失敗，請檢查 TELEGRAM_BOT_TOKEN: %v", err)
+		log.Fatalf("Telegram getMe 失敗，請檢查 TELEGRAM_BOT_TOKEN: %s", b.scrubErr(err))
 	}
 	b.core = chatbot.NewCore(platform, workDir, factory, b.send)
 	return b
+}
+
+// scrubErr 把錯誤訊息裡的 bot token 遮掉，供記 log 用。
+//
+// 【為何需要】Telegram 的 API 把 token 放在 URL path（apiBase+token+"/getUpdates"），而 http.Client
+// 失敗時回的 *url.Error 其 Error() 會帶【完整 URL】。於是一句 log.Printf("%v", err) 就把 token 印進
+// log——getUpdates 更是每 3 秒重試的無限迴圈，一段網路中斷就能刷滿。log 進了聚合器/被 cat/貼進
+// issue，token 就等於公開（可完全接管該 bot）。所有會印出 client 錯誤的地方【一律】走這裡。
+func (b *TelegramBot) scrubErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if b.token == "" {
+		return msg
+	}
+	return strings.ReplaceAll(msg, b.token, "***")
 }
 
 // fetchIdentity 以 getMe 取本 bot 的 id 與 username，並編好剝提及的 regexp。
@@ -107,7 +124,7 @@ func (b *TelegramBot) postMessage(id int64, text, parseMode string) bool {
 	payload, _ := json.Marshal(m)
 	resp, err := b.client.Post(apiBase+b.token+"/sendMessage", "application/json", bytes.NewReader(payload))
 	if err != nil {
-		log.Printf("[Telegram] 消息發送失敗: %v\n", err)
+		log.Printf("[Telegram] 消息發送失敗: %s\n", b.scrubErr(err))
 		return false
 	}
 	defer resp.Body.Close()
@@ -147,7 +164,7 @@ func (b *TelegramBot) Start(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("[Telegram] getUpdates 出錯，3 秒後重試: %v\n", err)
+			log.Printf("[Telegram] getUpdates 出錯，3 秒後重試: %s\n", b.scrubErr(err))
 			time.Sleep(3 * time.Second)
 			continue
 		}
