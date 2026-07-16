@@ -118,8 +118,13 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	contentLines := strings.Split(content, "\n")
 	oldLines := strings.Split(strings.TrimSpace(oldText), "\n")
 
+	// 注意：前綴「找不到該代碼片段」被 context.RecoveryManager 以 strings.Contains 匹配以注入
+	// 「先 read_file 重讀」的救援指南——改字串前先看 internal/context/recovery.go。
+	// 這裡是【還沒搜就放棄】的退化情形（old_text 比整個檔案還長），與 matchCount==0 不同：
+	// 只說「找不到」會誤導模型去微調縮排重試，故把實際事實（行數對比）講出來。
 	if len(oldLines) == 0 || len(contentLines) < len(oldLines) {
-		return "", fmt.Errorf("找不到該代碼片段")
+		return "", fmt.Errorf("找不到該代碼片段：old_text 共 %d 行，多於檔案的 %d 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
+			len(oldLines), len(contentLines))
 	}
 
 	for i := range oldLines {

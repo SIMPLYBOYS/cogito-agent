@@ -19,6 +19,11 @@ func TestRecoveryManager_AnalyzeAndInject(t *testing.T) {
 	}{
 		{"edit_file 未找到 old_text", "edit_file", "edit_file 失敗: 在文件中未找到 old_text", true, "read_file"},
 		{"edit_file 找不到片段", "edit_file", "找不到該代碼片段", true, "read_file"},
+		// 退化情形（old_text 比檔案還長）的實際訊息帶了行數事實——前綴仍須命中救援規則。
+		// 這條鎖住 edit_file.go 與本檔的字串耦合：改了那邊的用詞、忘了這邊，這裡會紅。
+		{"edit_file 片段超過檔案行數", "edit_file",
+			"找不到該代碼片段：old_text 共 9 行，多於檔案的 3 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
+			true, "read_file"},
 		{"edit_file 多處匹配", "edit_file", "old_text 匹配到了多處，請提供更多上下文", true, "唯一性"},
 		{"read_file 文件不存在", "read_file", "open /x/y: no such file or directory", true, "ls -la"},
 		{"write_file 權限不足", "write_file", "open /etc/x: Permission denied", true, "權限"},
