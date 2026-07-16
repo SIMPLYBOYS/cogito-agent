@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -77,9 +78,11 @@ func (t *BashTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "命令執行成功，無終端輸出。", nil
 	}
 
+	// 按【字元】截斷：bash 輸出常含中文（編譯錯誤、log），byte 切會切壞 UTF-8。
 	const maxLen = 8000
-	if len(outputStr) > maxLen {
-		return fmt.Sprintf("%s\n\n...[終端輸出過長，已截斷至前 %d 字節]...", outputStr[:maxLen], maxLen), nil
+	if utf8.RuneCountInString(outputStr) > maxLen {
+		return fmt.Sprintf("%s\n\n...[終端輸出過長，已截斷至前 %d 字元]...",
+			schema.TruncRunes(outputStr, maxLen, ""), maxLen), nil
 	}
 
 	return outputStr, nil

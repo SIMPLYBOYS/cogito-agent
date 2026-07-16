@@ -156,10 +156,9 @@ func extractJSON(s string) string {
 func oneLine(s string) string {
 	s = strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " ")
 	s = strings.TrimSpace(s)
-	if len(s) > 200 {
-		return s[:200] + "…"
-	}
-	return s
+	// 按字元切：這會寫進技能檔的 YAML frontmatter（description:），中文被 byte 切成非法
+	// UTF-8 會直接汙染產出的技能檔。
+	return schema.TruncRunes(s, 200, "…")
 }
 
 func slug(name string) string {

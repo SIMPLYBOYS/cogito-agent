@@ -281,9 +281,7 @@ func parseRetryAfter(v string) time.Duration {
 	return 0
 }
 
+// truncate 截 API 回應給錯誤訊息用。按字元切——回應可能含中文，byte 切會產生非法 UTF-8。
 func truncate(s string, max int) string {
-	if len(s) > max {
-		return s[:max] + "…"
-	}
-	return s
+	return schema.TruncRunes(s, max, "…")
 }

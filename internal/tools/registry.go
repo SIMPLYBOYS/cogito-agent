@@ -149,9 +149,5 @@ const maxPreviewChars = 2000
 
 // truncate 按 rune 截斷（非 byte），避免切到中文多位元組字元中間。
 func truncate(s string, max int) string {
-	r := []rune(s)
-	if len(r) > max {
-		return string(r[:max]) + "..."
-	}
-	return s
+	return schema.TruncRunes(s, max, "...")
 }

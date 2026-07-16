@@ -72,10 +72,7 @@ func renderTranscript(history []schema.Message, maxChars int) string {
 
 func oneLine(s string, max int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
-	if len([]rune(s)) > max {
-		return string([]rune(s)[:max]) + "…"
-	}
-	return s
+	return schema.TruncRunes(s, max, "…")
 }
 
 func extractJSON(s string) string {

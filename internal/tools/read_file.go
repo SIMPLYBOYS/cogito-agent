@@ -60,16 +60,21 @@ func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	defer file.Close()
 
-	content, err := io.ReadAll(file)
+	// 只讀「上限 + 一點」而不是整檔：原本 io.ReadAll 把整個檔案吃進記憶體才截斷到 8000，
+	// 那個上限只限制【回給 LLM 的量】、不限制【讀進記憶體的量】——agent 自己用 bash 造一個
+	// 2GB 的 log 再 read_file 它，就是 2GB 常駐（且 read_file 不算危險操作，走不到審批）。
+	// 多讀的餘量是為了判斷「有沒有被截斷」；UTF-8 一字最多 4 bytes，故以 4 倍上限為界。
+	const maxRunes = 8000
+	const readLimit = maxRunes*4 + 1
+	content, err := io.ReadAll(io.LimitReader(file, readLimit))
 	if err != nil {
 		return "", fmt.Errorf("讀取文件內容失敗: %w", err)
 	}
 
-	const maxLen = 8000
-	if len(content) > maxLen {
-		truncatedMsg := fmt.Sprintf("%s\n\n...[由於內容過長，已被系統截斷至前 %d 字節]...", string(content[:maxLen]), maxLen)
-		return truncatedMsg, nil
+	// 按【字元】截斷：byte 切會切在多位元組字元中間，讀中文檔就吐非法 UTF-8 給模型。
+	s := string(content)
+	if truncated := schema.TruncRunes(s, maxRunes, ""); truncated != s {
+		return fmt.Sprintf("%s\n\n...[由於內容過長，已被系統截斷至前 %d 字元]...", truncated, maxRunes), nil
 	}
-
-	return string(content), nil
+	return s, nil
 }

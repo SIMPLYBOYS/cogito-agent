@@ -842,10 +842,7 @@ func (r *reporter) OnToolResult(ctx context.Context, toolName, result string, is
 
 // capRunes rune-safe 截斷（不切壞多位元組字元），超長補省略標記。
 func capRunes(s string, max int) string {
-	if r := []rune(s); len(r) > max {
-		return string(r[:max]) + "…（已截斷）"
-	}
-	return s
+	return schema.TruncRunes(s, max, "…（已截斷）")
 }
 
 // argPreview 把工具參數壓成單行預覽：去換行 + rune-safe 截斷，用於聊天進度回報。

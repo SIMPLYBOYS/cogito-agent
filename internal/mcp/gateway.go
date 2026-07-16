@@ -66,12 +66,9 @@ func (g *Gateway) Tools() []tools.BaseTool {
 func oneLine(s string, max int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r", " "), "\n", " "))
 	if i := strings.Index(s, ". "); i > 0 && i < max {
-		return s[:i+1] // 取第一句
+		return s[:i+1] // 取第一句（i 是 ". " 的 byte 位置，切在 ASCII 邊界上，安全）
 	}
-	if len([]rune(s)) > max {
-		return string([]rune(s)[:max]) + "…"
-	}
-	return s
+	return schema.TruncRunes(s, max, "…")
 }
 
 // ---- mcp_call_tool ----
