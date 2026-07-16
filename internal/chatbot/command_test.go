@@ -47,6 +47,7 @@ func TestTryStopCommand(t *testing.T) {
 	// 有執行中 → 中止
 	wd := c.channelWorkDir("cmdstop:ch")
 	c.tryAcquire(wd, func() {})
+	t.Cleanup(func() { c.release(wd) }) // running 是 package 級的：不還原則 -count=2 撞殘留
 	c.tryStopCommand("cmdstop:ch", "/stop")
 	if !strings.Contains(lastOf(msgs), "中止") {
 		t.Errorf("有任務時應提示中止，got %q", lastOf(msgs))
@@ -96,6 +97,7 @@ func TestTryCompressCommand_BusyRejected(t *testing.T) {
 	c, msgs := newCaptureCore(t, "cmdcomp", nil, nil)
 	wd := c.channelWorkDir("cmdcomp:ch")
 	c.tryAcquire(wd, func() {}) // 佔住鎖
+	t.Cleanup(func() { c.release(wd) })
 	if !c.tryCompressCommand("cmdcomp:ch", "compress") {
 		t.Fatal("compress 應被攔截")
 	}
@@ -124,6 +126,7 @@ func TestTryLearnCommand(t *testing.T) {
 	c2, msgs2 := newCaptureCore(t, "cmdlearn2", nil, nil)
 	c2.learn = func(context.Context, *ctxpkg.Session) (string, error) { return "x", nil }
 	c2.tryAcquire(c2.channelWorkDir("cmdlearn2:ch"), func() {})
+	t.Cleanup(func() { c2.release(c2.channelWorkDir("cmdlearn2:ch")) })
 	c2.tryLearnCommand("cmdlearn2:ch", "learn")
 	if !strings.Contains(lastOf(msgs2), "任務進行中") {
 		t.Errorf("忙碌時 learn 應拒絕，got %q", lastOf(msgs2))
@@ -143,6 +146,7 @@ func TestTryGoalCommand(t *testing.T) {
 
 	// 設 goal：先佔鎖走 busy 分支（不實跑，免 factory），驗證目標已存進 session
 	c.tryAcquire(c.channelWorkDir(conv), func() {})
+	t.Cleanup(func() { c.release(c.channelWorkDir(conv)) })
 	if !c.tryGoalCommand(conv, "goal 通過所有測試") {
 		t.Fatal("goal <text> 應被攔截")
 	}

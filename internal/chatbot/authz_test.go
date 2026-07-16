@@ -1,7 +1,7 @@
 package chatbot
 
 import (
-	"context"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -22,7 +22,7 @@ func newCaptureCore(t *testing.T, platform string, allowed, admins []string) (*C
 		platform:     platform,
 		allowedUsers: toSet(allowed),
 		adminUsers:   toSet(admins),
-		running:      map[string]context.CancelFunc{},
+		userLink:     parseUserLink(os.Getenv("COGITO_USER_LINK")), // 與 NewCore 一致，免得 helper 漂移
 	}
 	return c, func() []string {
 		mu.Lock()

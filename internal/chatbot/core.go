@@ -92,11 +92,20 @@ type Core struct {
 	adminUsers   map[string]bool   // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
 	userLink     map[string]string // COGITO_USER_LINK：平台 user id → canonical 身分；DM 跨平台連續性用
 
-	// running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
-	// `/stop` 取出對應頻道的 cancel 中止其 Run。
-	running   map[string]context.CancelFunc
-	runningMu sync.Mutex
 }
+
+// running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
+// `/stop` 取出對應頻道的 cancel 中止其 Run。
+//
+// 【為何是 package 級而非 Core 欄位】同進程可能有多個 Core（Slack + Telegram），而 COGITO_USER_LINK
+// 讓已連結使用者的 DM 在【跨 Core】共用同一個 workDir（"user:<canonical>"）。鎖若掛在 Core 上，兩個
+// Core 各鎖各的 → 同一份 session 被併發 Run → history 交錯出 tool_use 沒配對 tool_result 的壞歷史並
+// 落盤（該 session 永久磚化），且 /stop 跨平台失效。workDir 路徑本就全域唯一（含 platform 前綴或
+// user_ 前綴），故共用一張表對既有 per-platform 行為零影響。與 senders / lastRoute 同一理由。
+var (
+	running   = map[string]context.CancelFunc{}
+	runningMu sync.Mutex
+)
 
 // NewCore 建核心並向全域 senders 註冊本平台的原生發送，使 SendMessage 路由可達。
 func NewCore(platform, workDir string, factory EngineFactory, rawSend func(channelID, text string)) *Core {
@@ -117,7 +126,6 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		allowedUsers: allowed,
 		adminUsers:   admins,
 		userLink:     parseUserLink(os.Getenv("COGITO_USER_LINK")),
-		running:      make(map[string]context.CancelFunc),
 	}
 }
 
@@ -184,16 +192,24 @@ func (c *Core) stateID(userID, convID string, isDM bool) string {
 }
 
 func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
-	id := c.stateID(userID, c.convID(channelID), isDM)
-	if strings.HasPrefix(id, "user:") {
-		// 記錄回覆路由：這個共享身分的出訊（含審批/goal 通知）之後都送到「最後說話的平台」。
-		lastRoute.Store(id, c.convID(channelID))
-	}
+	conv := c.convID(channelID)
+
 	// 【硬防線】入口授權：未授權者一律擋在門外——這是「開放 bot」唯一能安全的前提。
+	// 這【必須】是 dispatch 的第一件事：在它之前不做任何有副作用的動作（含記錄回覆路由），
+	// 否則被拒者仍能改寫共享身分的狀態。拒絕訊息直送 conv（訊息來源）而非 stateID——它是對「這則
+	// 訊息」的回應，不該經 lastRoute 路由（送錯人，且未授權者若無路由會被靜默丟棄，而告知對方
+	// 自己的 user ID 正是這則訊息唯一的用途）。
 	if !c.allowedUsers[userID] {
 		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
-		SendMessage(id, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。請管理員將它加入 COGITO_ALLOWED_USERS 後再試。", userID))
+		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。請管理員將它加入 COGITO_ALLOWED_USERS 後再試。", userID))
 		return
+	}
+
+	id := c.stateID(userID, conv, isDM)
+	if strings.HasPrefix(id, "user:") {
+		// 記錄回覆路由：這個共享身分的出訊（含審批/goal 通知）之後都送到「最後說話的平台」。
+		// 只有通過授權閘的入站才配改寫它。
+		lastRoute.Store(id, conv)
 	}
 	// 審批口令即便會話忙碌也要處理——這正是解開忙碌的方式。
 	if c.tryResolveApproval(id, userID, text) {
@@ -406,9 +422,9 @@ func (c *Core) tryHelpCommand(convID, text string) bool {
 
 // isRunning 回報某頻道是否有任務執行中（供 /status）。
 func (c *Core) isRunning(workDir string) bool {
-	c.runningMu.Lock()
-	_, ok := c.running[workDir]
-	c.runningMu.Unlock()
+	runningMu.Lock()
+	_, ok := running[workDir]
+	runningMu.Unlock()
 	return ok
 }
 
@@ -772,31 +788,31 @@ func sanitizeSegment(s string) string {
 
 // tryAcquire 取鎖並登記該任務的取消函式（供 /stop 中止）。已忙碌則回 false。
 func (c *Core) tryAcquire(workDir string, cancel context.CancelFunc) bool {
-	c.runningMu.Lock()
-	defer c.runningMu.Unlock()
-	if _, ok := c.running[workDir]; ok {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	if _, ok := running[workDir]; ok {
 		return false
 	}
-	c.running[workDir] = cancel
+	running[workDir] = cancel
 	return true
 }
 
 // release 解鎖並取消 context（釋放資源；對已結束的 context 是 no-op）。
 func (c *Core) release(workDir string) {
-	c.runningMu.Lock()
-	if cancel, ok := c.running[workDir]; ok {
+	runningMu.Lock()
+	if cancel, ok := running[workDir]; ok {
 		cancel()
-		delete(c.running, workDir)
+		delete(running, workDir)
 	}
-	c.runningMu.Unlock()
+	runningMu.Unlock()
 }
 
 // stop 取消某頻道正在執行的任務（`/stop` 用）。回傳是否真的有任務被取消。
 // 取消後 Run 收到 ctx 取消而中止，由 handleAgentRun 的 defer release 收尾。
 func (c *Core) stop(workDir string) bool {
-	c.runningMu.Lock()
-	cancel, ok := c.running[workDir]
-	c.runningMu.Unlock()
+	runningMu.Lock()
+	cancel, ok := running[workDir]
+	runningMu.Unlock()
 	if ok {
 		cancel()
 	}

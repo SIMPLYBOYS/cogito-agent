@@ -1,7 +1,6 @@
 package chatbot
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -115,10 +114,12 @@ func TestSanitizeSegment(t *testing.T) {
 
 // per-WorkDir 鎖：同一 key 互斥（序列化），不同 key 可並行；釋放後可再取得。
 func TestWorkspaceLock_PerKeyMutualExclusion(t *testing.T) {
-	b := &Core{running: make(map[string]context.CancelFunc)}
+	b := &Core{}
 	noop := func() {}
 	wdA := "/srv/ws/channels/A"
 	wdB := "/srv/ws/channels/B"
+	// running 是 package 級的（跨 Core 共用），測試結束要還原，否則 -count=2 重跑會撞到殘留。
+	t.Cleanup(func() { b.release(wdA); b.release(wdB) })
 
 	if !b.tryAcquire(wdA, noop) {
 		t.Fatal("首次應取得 A")
@@ -138,8 +139,10 @@ func TestWorkspaceLock_PerKeyMutualExclusion(t *testing.T) {
 
 // /stop：stop 取消登記的 cancel 並回 true；沒有執行中則回 false。
 func TestStop(t *testing.T) {
-	c := &Core{running: make(map[string]context.CancelFunc)}
+	c := &Core{}
 	wd := "/srv/ws/channels/X"
+	t.Cleanup(func() { c.release(wd) }) // running 是 package 級的，見上
+
 	if c.stop(wd) {
 		t.Fatal("沒有執行中任務時 stop 應回 false")
 	}
