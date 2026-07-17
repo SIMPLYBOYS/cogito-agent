@@ -47,6 +47,11 @@ go.work.sum
 # Session 持久化產物（COGITO_SESSION_DIR）：含對話歷史，勿入庫
 /sessions/
 
+# 記憶使用帳本：app 生成的 last-used/命中帳本（非原始碼）。recall 會在記憶目錄旁生成，
+# 連測試跑到 testdata 也會產生——一律不入庫。非錨定，任何目錄下皆忽略。
+memory-usage.json
+memory-usage.json.tmp
+
 # Benchmark JSON 報告（cmd/bench -out）：跑分產物，勿入庫
 /bench-reports/
 
