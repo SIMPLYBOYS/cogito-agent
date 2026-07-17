@@ -32,7 +32,7 @@
 
 **駕馭工程（失控控制）**
 - 🔒 **入口授權（fail-closed）**：Slack/Telegram 只有 `COGITO_ALLOWED_USERS` 名單內的 user id 能驅動 agent；不設＝拒絕所有人。高危審批限 `COGITO_ADMIN_USERS`，杜絕「發起者自我放行」。**上線前務必設白名單**（見 [.env.example](.env.example)）——bot 入口 + 工具執行不設限＝未授權者可 RCE。
-- 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的調用掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區的 `..` 穿越，不依賴審批。
+- 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的調用掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區——`..` 穿越、絕對路徑、**以及 symlink**（解析到最深的已存在祖先後重驗前綴），不依賴可被繞過的審批。
 - 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
 - 🚦 **三道硬防線**：回合上限、死循環指紋探測、per-task 成本熔斷。
 - ⚡ **工具併發限流** ＋ 🩹 **錯誤自愈**：報錯時注入「下一步怎麼做」的救援指南。
@@ -45,7 +45,7 @@
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
 **接入與可觀測性**
-- 💬 **多平台集成（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同進程同時跑，會話/工作目錄靠 `platform:` 前綴命名空間天然隔離；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行）。
+- 💬 **多平台集成（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同進程同時跑，會話/工作目錄**預設**靠 `platform:` 前綴命名空間隔開（設了 `COGITO_USER_LINK` 則刻意例外，見下）；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行，且跨平台生效）。
   - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @
 - 🔗 **DM 跨平台連續性**（`COGITO_USER_LINK`）：宣告同一人的各平台 id 後，Telegram 私聊問到一半換 Slack 接著問，同一份 session 歷史；回覆送到最後說話的平台提及留乾淨指令。差別僅在機制——Slack 由 Events API 事件類型（`app_mention` / `message.im`）天然區分；Telegram 無此區分，故由傳輸層自行判斷「有沒有叫到我」。
 - 📡 **實時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答實時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
@@ -300,7 +300,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    |---|---|
    | `help` / `指令` / `commands` | 顯示指令一覽 |
    | `goal <驗收標準>` | 設一個持久目標，agent 每輪完成後用 LLM judge 驗收、未達成自動續跑（封頂 5 次；受成本熔斷/回合上限保護）。`goal status`/`pause`/`resume`/`clear` 管理 |
-   | `stop` | 中止本頻道正在執行的任務（讓執行中的 Run 可取消） |
+   | `stop` | 中止本頻道正在執行的任務（讓執行中的 Run 可取消）。連結身分（`COGITO_USER_LINK`）下，從任一平台都能中止同一份共享 session 的任務 |
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
    | `model` / `model <id>` / `model reset` | 查看 / 切換本頻道模型（`reset` 還原啟動預設） |
    | `stop` | 中止本頻道正在執行的任務（可取消 context，回合邊界即時停下） |
@@ -341,6 +341,8 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 > 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景進程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
 >
 > 持久的是**檔案系統層**的狀態（套件/檔案/進程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新進程（與 host 模式「每次新 shell」一致）。要持久環境變數請寫進 `~/.bashrc` 等檔案。
+>
+> **隔離範圍（重要）**：容器關住的是 **`bash`**（含背景任務），**不是整個 agent**。`read_file` / `write_file` / `edit_file` 一律在**宿主機**執行——它們的邊界是工具層的工作區圍堵（`..`、絕對路徑、symlink 全擋），不是容器。這是刻意的分工：**容器擋「任意命令」，工具層擋「逃出工作區」**，兩者互補而非重疊。（正因如此，工具層的 symlink 解析是必要的：容器內的 bash 可以在掛載進來的 workDir 裡種一個指向宿主機的 symlink，宿主機上的檔案工具若不解 symlink 就會跟著寫出去。）審批 middleware 與兩者正交——高危命令即使在容器裡也照樣要人工放行。
 >
 > 注意：首次啟動容器若需拉映像會較慢（建議先 `docker build` 好本地映像）；目前一個 session 對應一個容器、不對單條命令再做細分。
 

@@ -314,7 +314,8 @@ func main() {
 	defer stop()
 
 	// 多平台（opt-in）：設了 TELEGRAM_BOT_TOKEN 就同時開 Telegram 長輪詢，與 Slack 同進程、共用
-	// 同一 factory 與自我進化鉤子；會話/工作目錄靠 platform 前綴命名空間天然隔離（slack: vs telegram:）。
+	// 同一 factory 與自我進化鉤子；會話/工作目錄【預設】靠 platform 前綴命名空間隔開（slack: vs
+	// telegram:），但設了 COGITO_USER_LINK 時，已連結使用者的 DM 會刻意跨平台共用同一份狀態。
 	if os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
 		tg := telegrambot.NewTelegramBot(factory, rootDir)
 		tg.SetPostRunHook(postRun)

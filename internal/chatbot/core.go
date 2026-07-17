@@ -1,7 +1,9 @@
 // Package chatbot 是【與平台無關】的「聊天 → Agent」橋接核心：指令閘（approve/apply memory/edges）、
 // 每頻道 session+磁碟隔離、per-WorkDir 鎖、跑任務管線、進度回報。Slack / Telegram 等只是薄傳輸層，
-// 各自做入站解析 + 提供一個 send 函式，其餘共用本核心。多平台同進程時靠 platform 前綴命名空間
-// （"slack:C123" vs "telegram:123"）杜絕 session / 工作目錄碰撞。
+// 各自做入站解析 + 提供一個 send 函式，其餘共用本核心。多平台同進程時，session / 工作目錄【預設】
+// 靠 platform 前綴命名空間隔開（"slack:C123" vs "telegram:123"）——但 COGITO_USER_LINK 是【刻意的
+// 例外】：已連結使用者的 DM 會歸一成 "user:<canonical>"，跨平台共用同一份狀態（見 stateID）。
+// 因此凡是掛在「狀態 key」上的東西（忙碌鎖等）都必須是 package 級、跨 Core 生效，不能是 Core 欄位。
 package chatbot
 
 import (
