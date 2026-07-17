@@ -65,20 +65,50 @@ func TestMemoryLoader_PruneArchivesOldest(t *testing.T) {
 	}
 }
 
-// LRU：被 recall 命中的記錄 mtime 應更新，使其在淘汰/索引排序中優先保留。
-func TestMemoryLoader_RecallTouchesMtime(t *testing.T) {
+// 使用帳本（#2）：被 recall 命中的記錄進帳本（最近使用 + 命中次數），並在淘汰排序中優先保留。
+func TestMemoryLoader_RecallRecordsUsageLedger(t *testing.T) {
+	root := setupMemory(t)
+	m := NewMemoryLoader(root)
+
+	m.Recall("pnpm", 1) // 命中 pnpm 那筆
+	u := m.loadUsage()
+	if e, ok := u["mem-pnpm.md"]; !ok || e.Hits < 1 || e.LastUsed.IsZero() {
+		t.Errorf("命中的記錄應記一次命中（Hits≥1、LastUsed 已設），got %+v (ok=%v)", e, ok)
+	}
+	// port 未被命中，但首次 loadAll 會把它 seed 進帳本（Hits=0，凍住 mtime 免疫日後外部碰檔）
+	if e, ok := u["mem-port.md"]; !ok || e.Hits != 0 {
+		t.Errorf("未命中的記錄應被 seed（存在且 Hits=0），got %+v (ok=%v)", e, ok)
+	}
+	// 再命中一次 → Hits 累加（供日後 LFU/#3）
+	m.Recall("pnpm", 1)
+	if m.loadUsage()["mem-pnpm.md"].Hits < 2 {
+		t.Error("重複命中應累加 Hits")
+	}
+}
+
+// #2 的賣點：帳本免疫外部碰檔。備份/rsync/編輯器把某筆記憶的【檔案 mtime】改新，不該讓它在淘汰排序
+// 中贏過「帳本記錄為剛被 agent 用到」的那筆——這正是舊版（純看 mtime）會誤判、而帳本要修掉的。
+func TestMemoryLoader_LedgerBeatsExternalMtimeTouch(t *testing.T) {
 	root := setupMemory(t)
 	memDir := filepath.Join(root, ".claw", "memory")
-	old := time.Now().Add(-48 * time.Hour)
-	for _, n := range []string{"mem-pnpm.md", "mem-port.md"} {
-		if err := os.Chtimes(filepath.Join(memDir, n), old, old); err != nil {
-			t.Fatal(err)
+	m := NewMemoryLoader(root)
+
+	m.Recall("pnpm", 1) // agent 真的用到 pnpm 那筆 → 進帳本
+
+	// 模擬外部工具「碰」了 port 那筆的檔案 mtime（把它改成未來，比帳本還新）
+	future := time.Now().Add(24 * time.Hour)
+	if err := os.Chtimes(filepath.Join(memDir, "mem-port.md"), future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	// keep=1 淘汰：該保留「agent 真的用到」的 pnpm，歸檔被外部碰檔的 port
+	archived := m.Prune(1)
+	for _, a := range archived {
+		if a == "mem-pnpm.md" {
+			t.Fatal("被 agent 用到的 pnpm 不該被淘汰（帳本應勝過外部 mtime 污染）")
 		}
 	}
-	NewMemoryLoader(root).Recall("pnpm", 1) // 命中 pnpm 那筆 → 觸碰其 mtime
-	pnpmInfo, _ := os.Stat(filepath.Join(memDir, "mem-pnpm.md"))
-	portInfo, _ := os.Stat(filepath.Join(memDir, "mem-port.md"))
-	if !pnpmInfo.ModTime().After(portInfo.ModTime()) {
-		t.Error("被 recall 命中的記錄 mtime 應更新為較新（LRU 觸碰）")
+	if _, err := os.Stat(filepath.Join(memDir, "mem-pnpm.md")); err != nil {
+		t.Error("pnpm 應仍在 memory/（帳本保護）")
 	}
 }
