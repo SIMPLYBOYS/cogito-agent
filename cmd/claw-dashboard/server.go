@@ -33,6 +33,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /runs", s.runsList)
 	mux.HandleFunc("GET /runs/{id}", s.runDetail)
 	mux.HandleFunc("GET /governance", s.governance)
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("GET /chat", s.chatGet)
 	mux.HandleFunc("POST /chat", s.chatPost)
@@ -156,6 +157,7 @@ const homeBody template.HTML = `<p class="muted">cogito 的維運面板 · 本�
 <div class="cards">
   <a class="card" href="/chat"><span class="ct">Chat →</span><span class="cd">內嵌 operator chat：就地驅動 agent 跑任務（寫入；opt-in COGITO_DASH_CHAT=1）</span></a>
   <a class="card" href="/runs"><span class="ct">Runs →</span><span class="cd">一次 query 的完整執行流：主 agent 的 ReAct 迴圈與子 agent 協同，逐步可展開</span></a>
+  <a class="card" href="/metrics"><span class="ct">Metrics →</span><span class="cd">用量觀測：總花費、各平台／各模型 token 與成本切片（自帶，不依賴 Langfuse）</span></a>
   <a class="card" href="/governance"><span class="ct">Governance →</span><span class="cd">技能／記憶／調參提案佇列與授權名單（檢視；放行動作走 chat／CLI）</span></a>
   <a class="card" href="/platform"><span class="ct">Platform →</span><span class="cd">provider／模型、通道綁定、可觀測性、執行護欄（設定檢視）</span></a>
   <a class="card" href="/status"><span class="ct">Status →</span><span class="cd">服務狀態、sessions 目錄、存取模式</span></a>
@@ -256,6 +258,13 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   table.runs td.q { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   table.runs td.num { text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); }
   table.runs td a { font-weight:600; }
+  /* metrics 長條圖（純 CSS，零 JS） */
+  .bars { display:flex; flex-direction:column; gap:9px; margin:4px 0; }
+  .brow { display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px; font-size:12.5px; }
+  .brow .blabel { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .brow .btrack { height:14px; background:var(--bg2); border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .brow .bfill { display:block; height:100%; background:linear-gradient(90deg,var(--acc2),var(--acc)); }
+  .brow .bval { color:var(--mut); font-variant-numeric:tabular-nums; white-space:nowrap; }
   .badge, .pill { display:inline-block; font-size:10.5px; letter-spacing:.03em; border-radius:5px; padding:1px 7px; margin-left:4px; }
   .pill.sub { color:var(--acc); border:1px solid var(--acc); }
   .pill.run { color:var(--acc2); border:1px solid var(--acc2); animation:pulse 1.8s ease-in-out infinite; }
@@ -265,7 +274,7 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
 <body>
 <header>
   <span class="brand"><span class="mark"></span><span class="wm">cogito<em> ops</em></span></span>
-  <nav><a href="/chat">chat</a><a href="/runs">runs</a><a href="/governance">governance</a><a href="/platform">platform</a><a href="/status">status</a></nav>
+  <nav><a href="/chat">chat</a><a href="/runs">runs</a><a href="/metrics">metrics</a><a href="/governance">governance</a><a href="/platform">platform</a><a href="/status">status</a></nav>
   <span class="env"><span class="dot{{if .Write}} write{{end}}"></span>loopback · {{if .Write}}operator（可寫入）{{else}}read-only{{end}}</span>
 </header>
 <main><h1>{{.Title}}</h1>{{.Body}}</main>
