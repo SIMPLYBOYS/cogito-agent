@@ -85,22 +85,25 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	return c, nil
 }
 
-// run 同步跑一輪 operator agent（阻塞到 agent 完成）。忙碌時回 false、不排隊。
-func (c *chatRunner) run(userMsg string) bool {
+// start 非阻塞地跑一輪 operator agent：先【同步】Append user 訊息（讓它立刻顯示），再在背景 goroutine
+// 跑 engine.Run（可能數十秒）。POST 因此立刻返回；頁面靠 meta-refresh 輪詢，running 結束就顯示回覆。
+// 忙碌（已有 run 進行中）時回 false、不排隊。mu 於 goroutine 內 Unlock（Go 允許跨 goroutine 解鎖）。
+func (c *chatRunner) start(userMsg string) bool {
 	if !c.mu.TryLock() {
 		return false
 	}
-	defer c.mu.Unlock()
 	c.running.Store(true)
-	defer c.running.Store(false)
-
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, c.workDir)
-	sess.Append(schema.Message{Role: schema.RoleUser, Content: userMsg})
-	if err := c.eng.Run(context.Background(), sess, c.reporter); err != nil {
-		c.lastErr.Store(err.Error())
-	} else {
-		c.lastErr.Store("")
-	}
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: userMsg}) // 立刻落地→GET 馬上看得到提問
+	go func() {
+		defer c.mu.Unlock()
+		defer c.running.Store(false)
+		if err := c.eng.Run(context.Background(), sess, c.reporter); err != nil {
+			c.lastErr.Store(err.Error())
+		} else {
+			c.lastErr.Store("")
+		}
+	}()
 	return true
 }
 
@@ -160,7 +163,7 @@ func (s *server) chatPost(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := strings.TrimSpace(r.FormValue("msg"))
 	if msg != "" {
-		s.chat.run(msg) // 同步：阻塞到 agent 完成；忙碌則 no-op（回 false 不排隊）
+		s.chat.start(msg) // 非阻塞：背景跑 agent，POST 立刻返回；忙碌則 no-op（回 false 不排隊）
 	}
 	http.Redirect(w, r, "/chat#end", http.StatusSeeOther) // PRG：避免重整重送；錨點捲到最新
 }
@@ -227,8 +230,9 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat .hint { color:var(--m); font-size:11.5px; }
 </style>
 <div class="chat">
+  {{if .Running}}<meta http-equiv="refresh" content="2">{{end}}
   <p class="note">operator 就地驅動 agent（session <code>operator</code>，工作區同 bot／CLI）。完整執行樹（工具調用、子 agent）見 <a href="/runs/operator">/runs/operator</a>。</p>
-  {{if .Running}}<div class="banner">⏳ agent 執行中…（本頁同步阻塞；完成後會自動更新。可另開分頁看 /runs/operator）</div>{{end}}
+  {{if .Running}}<div class="banner">⏳ agent 執行中…（背景執行，本頁每 2 秒自動重載；完成後即顯示回覆）</div>{{end}}
   {{if .LastErr}}<div class="banner">⚠️ 上次執行出錯：{{.LastErr}}</div>{{end}}
   {{if .Msgs}}<div class="thread">
     {{range .Msgs}}<div class="msg {{if .You}}you{{else}}bot{{end}}"><span class="tag">{{if .You}}你{{else}}operator agent{{end}}</span>{{.Text}}{{if .UsedTool}}<span class="used">⚙ 本回合動過工具／子 agent，詳見執行樹</span>{{end}}</div>{{end}}
