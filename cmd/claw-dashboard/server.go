@@ -43,6 +43,9 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("POST /env-config", s.envConfigSave)
+	mux.HandleFunc("POST /mcp/add", s.mcpAdd)
+	mux.HandleFunc("POST /mcp/remove", s.mcpRemove)
+	mux.HandleFunc("POST /mcp/toggle", s.mcpToggle)
 	mux.HandleFunc("GET /chat", s.chatGet)
 	mux.HandleFunc("POST /chat", s.chatPost)
 	mux.HandleFunc("POST /chat/reset", s.chatReset)
@@ -273,6 +276,8 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   form.knobs input:focus { outline:none; border-color:var(--acc); }
   form.knobs input[type=checkbox] { width:auto; max-width:none; }
   form.knobs .tog { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+  form.knobs select { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:220px; }
+  ul.gitems .acts { display:flex; gap:8px; flex:none; }
   form.knobs button { align-self:flex-start; font:inherit; font-weight:700; letter-spacing:.03em; color:#fff; background:var(--acc); border:none; border-radius:8px; padding:7px 18px; cursor:pointer; }
   form.knobs button:hover { filter:brightness(1.08); }
   /* metrics 長條圖（純 CSS，零 JS） */

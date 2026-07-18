@@ -57,6 +57,9 @@ type platformData struct {
 	// 可編輯的非祕密 env 設定（寫 .env、重啟套用）；祕密不在其列。
 	EnvFields []envField
 	Flash     string
+	// MCP servers（.mcp.json）：列出 + 增/刪/切換；env/headers 值遮罩。
+	MCPServers []mcpServerRow
+	MCPPath    string
 }
 
 type channelRow struct{ Name, Status string }
@@ -93,6 +96,8 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	d.Knobs, d.KnobsSet = evolve.LoadKnobs(s.workspace) // 已套用的執行時覆蓋（.claw/config.json）
 	d.EnvFields = loadEnvFields()
 	d.Flash = s.readFlash()
+	d.MCPPath = mcpConfigPath()
+	d.MCPServers, _ = readMCPServers(d.MCPPath)
 
 	var b bytes.Buffer
 	_ = platformTmpl.Execute(&b, d)
@@ -200,6 +205,23 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   {{range .EnvFields}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
     {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
   {{end}}<button type="submit">儲存設定（寫 .env）</button>
+</form>
+
+<h2>MCP 伺服器 <span class="muted">{{.MCPPath}} · 重啟套用</span></h2>
+{{if .MCPServers}}<ul class="gitems">{{range .MCPServers}}<li>
+  <span><b>{{.Name}}</b> <span class="badge">{{.Type}}</span>{{if .Disabled}} <span class="muted">（停用）</span>{{end}}{{if .HasSecrets}} <span class="muted">🔒 含 env/headers（值遮罩）</span>{{end}}<br><span class="muted">{{.Target}}</span></span>
+  <span class="acts">
+    <form method="POST" action="/mcp/toggle"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact ghost">{{if .Disabled}}啟用{{else}}停用{{end}}</button></form>
+    <form method="POST" action="/mcp/remove"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact ghost">移除</button></form>
+  </span>
+</li>{{end}}</ul>{{else}}<p class="muted">尚無 MCP server（或未設 .mcp.json）。</p>{{end}}
+<p class="muted">新增（僅 command／url；需要 env/headers 的 server 請手動編 <code>{{.MCPPath}}</code>，避免祕密經手表單）：</p>
+<form method="POST" action="/mcp/add" class="knobs">
+  <label>名稱 <span class="muted">英數 + -_</span><input type="text" name="name" placeholder="如 twinkle-hub"></label>
+  <label>類型<select name="type"><option value="stdio">stdio（command）</option><option value="http">http（url）</option></select></label>
+  <label>command 或 url<input type="text" name="target" placeholder="stdio: npx / http: https://…"></label>
+  <label>args <span class="muted">stdio 用，空白分隔</span><input type="text" name="args" placeholder="-y @modelcontextprotocol/server-x"></label>
+  <button type="submit">新增 server</button>
 </form>
 
 <h2>可調護欄 <span class="muted">就地編輯 · 寫入 .claw/config.json（執行時熱載，免重啟）</span></h2>
