@@ -23,9 +23,10 @@ type governanceData struct {
 	ConfigProposed string // config.proposed.json 內容（空＝無）
 	Allowed        []string
 	Admins         []string
+	Flash          string // 上次放行動作的結果（顯示一次）
 }
 
-type proposedSkill struct{ Name, Desc string }
+type proposedSkill struct{ Dir, Name, Desc string } // Dir＝資料夾名（晉升用）；Name＝顯示名（frontmatter）
 
 func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 	claw := filepath.Join(s.workspace, ".claw")
@@ -36,10 +37,107 @@ func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 		ConfigProposed: readPreview(filepath.Join(claw, evolve.ProposedConfigFileName), 2000),
 		Allowed:        parseCSVEnv("COGITO_ALLOWED_USERS"),
 		Admins:         parseCSVEnv("COGITO_ADMIN_USERS"),
+		Flash:          s.readGovFlash(),
 	}
 	var b bytes.Buffer
 	_ = govTmpl.Execute(&b, d)
-	render(w, "Governance（檢視）", template.HTML(b.String()))
+	s.render(w, "Governance", template.HTML(b.String()))
+}
+
+func (s *server) setGovFlash(msg string) { s.govFlash.Store(msg) }
+
+func (s *server) readGovFlash() string {
+	m, _ := s.govFlash.Load().(string)
+	if m != "" {
+		s.govFlash.Store("") // 顯示一次即清
+	}
+	return m
+}
+
+// governance 的放行動作皆【寫入】：CSRF 防護同 chat；dashboard 綁 loopback＝操作者在機器上＝等同
+// admin（與 chat 的信任模型一致），故不另做 per-user admin 檢查。放行後 PRG 轉回 /governance，
+// 提案消失即視覺確認，flash 補一句結果。各 apply 函式本身仍有把關（config clamp、skill Gate）。
+
+func (s *server) govApplyConfig(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	changes, err := evolve.ApplyProposedConfig(s.workspace)
+	switch {
+	case err != nil:
+		s.setGovFlash("⚠️ 套用調參失敗：" + err.Error())
+	case len(changes) == 0:
+		s.setGovFlash("無調參提案可套用。")
+	default:
+		s.setGovFlash("✓ 已套用調參：" + strings.Join(changes, "、"))
+	}
+	http.Redirect(w, r, "/governance", http.StatusSeeOther)
+}
+
+func (s *server) govApplyMemory(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	applied, err := evolve.ApplyProposedMemory(s.workspace)
+	switch {
+	case err != nil:
+		s.setGovFlash("⚠️ 套用記憶失敗：" + err.Error())
+	case applied == "":
+		s.setGovFlash("無記憶提案可套用。")
+	default:
+		s.setGovFlash("✓ 已放行記憶：" + applied)
+	}
+	http.Redirect(w, r, "/governance", http.StatusSeeOther)
+}
+
+func (s *server) govDiscardMemory(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	had, err := evolve.DiscardProposedMemory(s.workspace)
+	switch {
+	case err != nil:
+		s.setGovFlash("⚠️ 丟棄記憶失敗：" + err.Error())
+	case !had:
+		s.setGovFlash("無記憶提案可丟棄。")
+	default:
+		s.setGovFlash("✓ 已丟棄記憶提案。")
+	}
+	http.Redirect(w, r, "/governance", http.StatusSeeOther)
+}
+
+func (s *server) govPromoteSkill(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	// 防路徑穿越：只收單層資料夾名（filepath.Base 過濾掉任何 / 或 ..）。
+	if name == "" || filepath.Base(name) != name {
+		s.setGovFlash("⚠️ 無效的技能名。")
+		http.Redirect(w, r, "/governance", http.StatusSeeOther)
+		return
+	}
+	claw := filepath.Join(s.workspace, ".claw")
+	proposedDir := filepath.Join(claw, evolve.ProposedSkillsDirName, name)
+	if fi, err := os.Stat(proposedDir); err != nil || !fi.IsDir() {
+		s.setGovFlash("⚠️ 找不到提案技能：" + name)
+		http.Redirect(w, r, "/governance", http.StatusSeeOther)
+		return
+	}
+	res, err := evolve.Promote(proposedDir, filepath.Join(claw, evolve.ActiveSkillsDirName))
+	switch {
+	case err != nil:
+		s.setGovFlash("⚠️ 晉升失敗（" + name + "）：" + err.Error())
+	case !res.Passed:
+		s.setGovFlash("✗ 把關未過（" + name + "）：" + strings.Join(res.Issues, "；"))
+	default:
+		s.setGovFlash("✓ 已晉升技能：" + name)
+	}
+	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
 
 // readProposedSkills 掃 skills-proposed/*/SKILL.md，取 frontmatter 的 name/description。
@@ -61,7 +159,7 @@ func readProposedSkills(dir string) []proposedSkill {
 		if name == "" {
 			name = e.Name()
 		}
-		out = append(out, proposedSkill{Name: name, Desc: desc})
+		out = append(out, proposedSkill{Dir: e.Name(), Name: name, Desc: desc})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -108,22 +206,32 @@ func parseCSVEnv(key string) []string {
 }
 
 var govTmpl = template.Must(template.New("gov").Parse(`
-<h2>提案佇列（放行動作走 chat / CLI，本面板只檢視）</h2>
+<h2>提案佇列 <span class="muted">放行＝寫入；面板綁 loopback，操作者即 admin</span></h2>
+{{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 <p class="muted">workspace：<code>{{.Workspace}}</code></p>
 
 <h3>技能提案 <span class="muted">skills-proposed/</span></h3>
-{{if .Skills}}<ul>{{range .Skills}}<li><b>{{.Name}}</b>{{with .Desc}} — <span class="muted">{{.}}</span>{{end}}</li>{{end}}</ul>
-<p class="muted">放行：<code>go run ./cmd/skillgate -promote &lt;name&gt;</code>（把關通過才生效）</p>
+{{if .Skills}}<ul class="gitems">{{range .Skills}}<li>
+  <span><b>{{.Name}}</b>{{with .Desc}} — <span class="muted">{{.}}</span>{{end}}</span>
+  <form method="POST" action="/governance/promote-skill"><input type="hidden" name="name" value="{{.Dir}}"><button type="submit" class="gact">晉升</button></form>
+</li>{{end}}</ul>
+<p class="muted">晉升會先過確定性把關（結構＋安全），通過才移到 <code>.claw/skills/</code> 生效。</p>
 {{else}}<p class="muted">無。</p>{{end}}
 
 <h3>記憶/慣例提案 <span class="muted">AGENTS.proposed.md</span></h3>
 {{if .MemoryProposed}}<pre class="prev">{{.MemoryProposed}}</pre>
-<p class="muted">放行：在 chat 打 <code>apply memory</code>（僅 admin）</p>
+<div class="grow">
+  <form method="POST" action="/governance/apply-memory"><button type="submit" class="gact">放行記憶</button></form>
+  <form method="POST" action="/governance/discard-memory"><button type="submit" class="gact ghost">丟棄</button></form>
+</div>
 {{else}}<p class="muted">無。</p>{{end}}
 
 <h3>調參提案 <span class="muted">config.proposed.json</span></h3>
 {{if .ConfigProposed}}<pre class="prev">{{.ConfigProposed}}</pre>
-<p class="muted">放行：在 chat 打 <code>apply config</code>（僅 admin；套用時再 clamp 有界）</p>
+<div class="grow">
+  <form method="POST" action="/governance/apply-config"><button type="submit" class="gact">套用調參</button></form>
+  <span class="hint">套用時一律 clamp 有界（越界夾回）。也可到 <a href="/platform">Platform</a> 直接編輯生效值。</span>
+</div>
 {{else}}<p class="muted">無。</p>{{end}}
 
 <h2>授權名單 <span class="muted">env，只顯示 id</span></h2>

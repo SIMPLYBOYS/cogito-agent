@@ -35,9 +35,10 @@ func TestServer_Governance(t *testing.T) {
 		"跑 go test",           // 技能提案 description
 		"用 pnpm",              // 記憶提案預覽
 		"max_turns",            // 調參提案內容
-		"telegram:771163423",   // 授權名單 id
-		"apply memory",         // 放行提示連回 chat
-		"in-memory",            // 待審批誠實標示跨進程看不到
+		"telegram:771163423",           // 授權名單 id
+		"放行記憶",                     // 記憶提案的放行按鈕
+		"/governance/apply-config",     // 調參提案的放行表單 action
+		"in-memory",                    // 待審批誠實標示跨進程看不到
 	} {
 		if !strings.Contains(body, w) {
 			t.Errorf("/governance 應含 %q", w)
