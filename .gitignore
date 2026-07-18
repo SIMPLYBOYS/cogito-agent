@@ -10,6 +10,7 @@
 # go build 在倉庫根目錄留下的 cmd 入口編譯產物（應只用 go run 或 go build -o ）
 /claw
 /claw-cli
+/claw-dashboard
 /claw-demo
 /claw-demo-oom
 /claw-demo-subagent
