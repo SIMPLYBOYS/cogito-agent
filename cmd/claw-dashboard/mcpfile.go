@@ -19,11 +19,14 @@ const (
 // mcpNameRe 限制 server 名為安全識別字（英數 + -_，≤64）——它會當成工具前綴與 JSON key。
 var mcpNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
-// mcpServerRow 是 UI 顯示用（值遮罩：env/headers 可能含祕密，只標 HasSecrets、不外洩值）。
+// mcpServerRow 是 UI 顯示用。結構性欄位（type/command/url/args）可看可編輯；env/headers 只列 key、
+// 【不外洩值】——值遮罩，要改值請手動編 .mcp.json。
 type mcpServerRow struct {
-	Name, Type, Target string
-	HasSecrets         bool
-	Disabled           bool
+	Name, Type, Target   string
+	Command, URL, ArgsStr string   // 供編輯表單預填（結構性，與列表 Target 同源，不算新洩漏）
+	EnvKeys, HeaderKeys  []string // 只 key、不含 value（遮罩）
+	HasSecrets           bool
+	Disabled             bool
 }
 
 // mcpConfigPath 回目前 .mcp.json 路徑（COGITO_MCP_CONFIG，預設 ./.mcp.json）。
@@ -97,6 +100,8 @@ func readMCPServers(path string) ([]mcpServerRow, error) {
 			_ = json.Unmarshal(raw, &c)
 			rows = append(rows, mcpServerRow{
 				Name: name, Type: serverType(c), Target: serverTarget(c),
+				Command: c.Command, URL: c.URL, ArgsStr: strings.Join(c.Args, " "),
+				EnvKeys: sortedKeys(c.Env), HeaderKeys: sortedKeys(c.Headers),
 				HasSecrets: len(c.Env) > 0 || len(c.Headers) > 0, Disabled: disabled,
 			})
 		}
@@ -123,6 +128,69 @@ func serverTarget(c mcp.ServerConfig) string {
 		t += " " + strings.Join(c.Args, " ")
 	}
 	return t
+}
+
+func sortedKeys(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	ks := make([]string, 0, len(m))
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks
+}
+
+// editMCPServer 改既有 server 的【結構性】欄位（type/command/url/args），env/headers 及其他欄位【逐字
+// 保留】（連同祕密不動）。找不到回錯。切換 type 時清掉另一傳輸的專屬結構欄位，但不碰 env/headers。
+func editMCPServer(path, name, typ, target, argsStr string) error {
+	name = strings.TrimSpace(name)
+	target = strings.TrimSpace(target)
+	top, err := readMCPFile(path)
+	if err != nil {
+		return err
+	}
+	key := mcpEnabledKey
+	m := serverMap(top, key)
+	raw, ok := m[name]
+	if !ok {
+		key = mcpDisabledKey
+		m = serverMap(top, key)
+		raw, ok = m[name]
+	}
+	if !ok {
+		return fmt.Errorf("找不到 server %q", name)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil || cfg == nil {
+		cfg = map[string]any{}
+	}
+	if typ == "http" {
+		if target == "" {
+			return fmt.Errorf("http server 需要 url")
+		}
+		cfg["type"] = "http"
+		cfg["url"] = target
+		delete(cfg, "command")
+		delete(cfg, "args")
+	} else {
+		if target == "" {
+			return fmt.Errorf("stdio server 需要 command")
+		}
+		delete(cfg, "type")
+		delete(cfg, "url")
+		cfg["command"] = target
+		if fields := strings.Fields(argsStr); len(fields) > 0 {
+			cfg["args"] = fields
+		} else {
+			delete(cfg, "args")
+		}
+	}
+	newRaw, _ := json.Marshal(cfg)
+	m[name] = newRaw
+	putServerMap(top, key, m)
+	return writeMCPFile(path, top)
 }
 
 // addMCPServer 新增一個 server（僅 command/url + args——刻意不收 env/headers，避免經手祕密；需要祕密

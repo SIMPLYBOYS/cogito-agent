@@ -44,6 +44,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("POST /env-config", s.envConfigSave)
 	mux.HandleFunc("POST /mcp/add", s.mcpAdd)
+	mux.HandleFunc("POST /mcp/edit", s.mcpEdit)
 	mux.HandleFunc("POST /mcp/remove", s.mcpRemove)
 	mux.HandleFunc("POST /mcp/toggle", s.mcpToggle)
 	mux.HandleFunc("GET /chat", s.chatGet)
@@ -278,6 +279,18 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   form.knobs .tog { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
   form.knobs select { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:220px; }
   ul.gitems .acts { display:flex; gap:8px; flex:none; }
+  /* MCP server 列表（可展開編輯） */
+  .mcplist { display:flex; flex-direction:column; }
+  .mcpitem { border-bottom:1px solid var(--line); padding:9px 0; }
+  .mcprow { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  .mcprow .acts { display:flex; gap:8px; flex:none; }
+  .mcpedit { margin-top:7px; }
+  .mcpedit > summary { cursor:pointer; color:var(--acc2); font-size:12px; list-style:none; }
+  .mcpedit > summary::-webkit-details-marker { display:none; }
+  .mcpedit > summary::before { content:"▸ "; }
+  .mcpedit[open] > summary::before { content:"▾ "; }
+  .mcpedit form.knobs { margin:10px 0 4px; padding-left:12px; border-left:2px solid var(--line); max-width:560px; }
+  .mcpedit .hint { color:var(--mut); font-size:11.5px; }
   form.knobs button { align-self:flex-start; font:inherit; font-weight:700; letter-spacing:.03em; color:#fff; background:var(--acc); border:none; border-radius:8px; padding:7px 18px; cursor:pointer; }
   form.knobs button:hover { filter:brightness(1.08); }
   /* metrics 長條圖（純 CSS，零 JS） */

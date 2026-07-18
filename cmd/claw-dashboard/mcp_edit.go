@@ -23,6 +23,21 @@ func (s *server) mcpAdd(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/platform", http.StatusSeeOther)
 }
 
+func (s *server) mcpEdit(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	err := editMCPServer(mcpConfigPath(), name, r.FormValue("type"), r.FormValue("target"), r.FormValue("args"))
+	if err != nil {
+		s.setFlash("⚠️ 編輯 MCP server 失敗：" + err.Error())
+	} else {
+		s.setFlash("✓ 已更新 MCP server：" + name + "（env/headers 保留不動）——重啟後生效。")
+	}
+	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+}
+
 func (s *server) mcpRemove(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)

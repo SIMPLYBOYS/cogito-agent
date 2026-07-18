@@ -85,3 +85,51 @@ func TestMCPEdit_CSRF(t *testing.T) {
 		}
 	}
 }
+
+// editMCPServer 改結構欄位（url/command/args/type），env/headers 及其祕密【逐字保留】。
+func TestEditMCPServer_PreservesSecrets(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".mcp.json")
+	seed := `{"mcpServers":{"gh":{"type":"http","url":"https://old/mcp/","headers":{"Authorization":"Bearer sk-SECRET"}}}}`
+	if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 改 url，headers 保留
+	if err := editMCPServer(p, "gh", "http", "https://new/mcp/", ""); err != nil {
+		t.Fatal(err)
+	}
+	s := readFileStr(t, p)
+	if !strings.Contains(s, "https://new/mcp/") || strings.Contains(s, "https://old/mcp/") {
+		t.Error("url 沒正確更新")
+	}
+	if !strings.Contains(s, "Bearer sk-SECRET") {
+		t.Error("編輯後 headers 祕密遺失了！")
+	}
+
+	// 切換 http→stdio：url 清掉、command 設好、祕密仍保留
+	if err := editMCPServer(p, "gh", "stdio", "npx", "-y srv"); err != nil {
+		t.Fatal(err)
+	}
+	s2 := readFileStr(t, p)
+	if !strings.Contains(s2, "npx") || strings.Contains(s2, "https://new/mcp/") {
+		t.Error("切到 stdio 後 command/url 不對")
+	}
+	if !strings.Contains(s2, "Bearer sk-SECRET") {
+		t.Error("切換 type 後祕密仍應保留")
+	}
+
+	// 不存在 → 錯
+	if err := editMCPServer(p, "nope", "stdio", "x", ""); err == nil {
+		t.Error("不存在的 server 應回錯")
+	}
+}
+
+func readFileStr(t *testing.T, p string) string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
