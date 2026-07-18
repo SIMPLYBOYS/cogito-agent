@@ -14,13 +14,18 @@ import (
 	"os"
 	"strings"
 
+	"github.com/joho/godotenv"
+
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 )
 
 func main() {
+	_ = godotenv.Load() // 讀 .env，讓 dashboard 與 bot 看到同一份設定（COGITO_SESSION_DIR / ALLOWED_USERS…）。須先於 flag 預設取值。
+
 	// 預設綁 loopback。非 loopback 綁定會被 fail-closed 守衛擋下（remote-auth 尚未實作，見 guard.go）。
 	addr := flag.String("addr", "127.0.0.1:8091", "監聽位址（預設僅本機 loopback；remote 存取需 auth，尚未實作）")
 	sessions := flag.String("sessions", os.Getenv("COGITO_SESSION_DIR"), "session 目錄（預設取自 COGITO_SESSION_DIR）")
+	workspace := flag.String("workspace", "./workspace", "workspace 根目錄（找 .claw/ 的提案佇列用）")
 	flag.Parse()
 
 	insecure := os.Getenv("COGITO_DASH_INSECURE") == "1"
@@ -45,7 +50,7 @@ func main() {
 	if strings.HasPrefix(disp, ":") {
 		disp = "localhost" + disp
 	}
-	srv := newServer(store, *sessions)
-	log.Printf("🛠️  cogito operator dashboard 已啟動（唯讀）：http://%s（sessions：%q）", disp, *sessions)
+	srv := newServer(store, *sessions, *workspace)
+	log.Printf("🛠️  cogito operator dashboard 已啟動（唯讀）：http://%s（sessions：%q，workspace：%q）", disp, *sessions, *workspace)
 	log.Fatal(http.ListenAndServe(*addr, srv))
 }

@@ -13,23 +13,23 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/replay"
 )
 
-// server 持有 session store（可為 nil＝未設 sessions 目錄）與生效目錄。全唯讀。
+// server 持有 session store（可為 nil＝未設 sessions 目錄）、生效目錄、workspace 根（找 .claw/ 用）。全唯讀。
 type server struct {
-	store ctxpkg.SessionStore
-	dir   string
+	store     ctxpkg.SessionStore
+	dir       string
+	workspace string
 }
 
 // newServer 組出 operator dashboard 的路由。用自己的 mux（不碰 http.DefaultServeMux——避免任何被
 // import 的套件如 pprof/expvar 偷塞 handler）。用 Go 1.22 路由樣式（`/runs/{id}`）。
-func newServer(store ctxpkg.SessionStore, dir string) http.Handler {
-	s := &server{store: store, dir: dir}
+func newServer(store ctxpkg.SessionStore, dir, workspace string) http.Handler {
+	s := &server{store: store, dir: dir, workspace: workspace}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /runs", s.runsList)
 	mux.HandleFunc("GET /runs/{id}", s.runDetail)
-	mux.HandleFunc("GET /governance", handleStub("Governance（治理檢視）",
-		"C2：待審批 / 提案佇列 / 授權用戶——檢視（動作留 chat）"))
+	mux.HandleFunc("GET /governance", s.governance)
 	return mux
 }
 
@@ -139,12 +139,6 @@ func metaOf(snap *ctxpkg.SessionSnapshot) replay.Meta {
 	}
 }
 
-func handleStub(title, note string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		render(w, title, template.HTML(`<p class="muted">`+template.HTMLEscapeString(note)+`</p>`))
-	}
-}
-
 const homeBody template.HTML = `<p>cogito 的維運面板。本階段唯讀、僅本機。</p>
 <ul>
   <li><a href="/runs">Runs</a> — 一次 query 的執行流（主 agent + 子 agent 協同）</li>
@@ -176,6 +170,8 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   a { color:var(--acc); } .muted { color:var(--mut); } code { color:var(--mut); }
   ul { padding-left:20px; } li { margin:4px 0; }
   dl.kv { display:grid; grid-template-columns:auto 1fr; gap:6px 16px; } dl.kv dt { color:var(--mut); } dl.kv dd { margin:0; }
+  h2 { font-size:16px; margin:22px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; } h3 { font-size:14px; margin:14px 0 6px; }
+  pre.prev { white-space:pre-wrap; word-break:break-word; font-size:12.5px; color:var(--mut); border-left:2px solid var(--line); padding:6px 10px; max-height:280px; overflow:auto; }
   table.runs { width:100%; border-collapse:collapse; font-size:13.5px; } table.runs th { text-align:left; color:var(--mut); font-weight:normal; border-bottom:1px solid var(--line); padding:6px 8px; }
   table.runs td { border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top; } table.runs td.q { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .badge { color:var(--acc); border:1px solid var(--acc); border-radius:4px; padding:0 5px; font-size:11px; margin-left:4px; }
