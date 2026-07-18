@@ -72,7 +72,9 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 
 	// 外部 MCP 工具（設了 COGITO_MCP_CONFIG 才啟用）：與 bot/cli 同一條路，經 gateway 漸進式暴露
 	// （mcp_call_tool / mcp_describe_tool + 輕量目錄），連不上的 server 略過、不擋 chat 啟動。
-	registerMCPGateway(registry)
+	// gateway 建一次，主 agent 與子 agent 共用（見下方 buildSubReg）。
+	mcpGW := buildMCPGateway()
+	registerGatewayTools(registry, mcpGW)
 
 	eng := engine.NewAgentEngine(tracked, registry, false, false)
 
@@ -86,6 +88,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 		r.Register(tools.NewBashToolWithExecutor(wd, executor))
 		r.Register(tools.NewWriteFileTool(wd))
 		r.Register(tools.NewEditFileTool(wd))
+		registerGatewayTools(r, mcpGW) // 子 agent 也能用 MCP（如研究型子 agent 查 twinkle-hub）
 		return r
 	}
 	subTool := tools.NewSubagentTool(eng, buildSubReg(workDir), reporter, workDir).
@@ -100,19 +103,18 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	return c, nil
 }
 
-// registerMCPGateway 把 COGITO_MCP_CONFIG 指定的外部 MCP 伺服器連上、經 gateway 註冊進 registry
-// （2 個 gateway 工具 + 輕量目錄，漸進式暴露）。與 bot（cmd/claw）同一套邏輯搬過來：未設 config 就
-// 不做；連不上的 server 略過，不擋 chat 啟動。連線是行程級長壽命的（由 gateway/tools 鏈保活，行程
-// 結束 OS 回收 stdio 子進程）。
-func registerMCPGateway(registry tools.Registry) {
+// buildMCPGateway 連上 COGITO_MCP_CONFIG 指定的外部 MCP 伺服器並建 gateway（漸進式暴露）。與 bot
+// 同一套：未設 config 回 nil；連不上的 server 略過，不擋 chat 啟動。連線是行程級長壽命的（由 gateway/
+// tools 鏈保活，行程結束 OS 回收 stdio 子進程）。回傳 gateway 供主 agent 與子 agent 共用同一組連線。
+func buildMCPGateway() *mcp.Gateway {
 	cfgPath := os.Getenv("COGITO_MCP_CONFIG")
 	if cfgPath == "" {
-		return
+		return nil
 	}
 	servers, err := mcp.LoadConfig(cfgPath)
 	if err != nil {
 		log.Printf("[mcp] 讀取設定失敗，operator chat 不載 MCP: %v", err)
-		return
+		return nil
 	}
 	var clients []*mcp.Client
 	for _, s := range servers {
@@ -127,19 +129,29 @@ func registerMCPGateway(registry tools.Registry) {
 		log.Printf("[mcp] 已連接 server %q", s.Name)
 	}
 	if len(clients) == 0 {
-		return
+		return nil
 	}
 	gwCtx, cancel := context.WithTimeout(context.Background(), mcpDialTimeout)
 	gw, errGw := mcp.NewGateway(gwCtx, clients)
 	cancel()
 	if errGw != nil {
 		log.Printf("[mcp] 建立 gateway 失敗: %v", errGw)
+		return nil
+	}
+	log.Printf("[mcp] operator chat gateway 就緒：%d 個外部工具（主 agent 與子 agent 皆可用）經 mcp_call_tool 漸進式暴露", gw.Count())
+	return gw
+}
+
+// registerGatewayTools 把 gateway 的 2 個工具（mcp_call_tool / mcp_describe_tool）註冊進一個 registry。
+// nil-safe。同一組 gateway 工具可註冊進多個 registry（主 + 各子 agent），共用底層連線（transport 有
+// mutex 序列化，多路並發安全）。
+func registerGatewayTools(r tools.Registry, gw *mcp.Gateway) {
+	if gw == nil {
 		return
 	}
 	for _, gt := range gw.Tools() {
-		registry.Register(gt)
+		r.Register(gt)
 	}
-	log.Printf("[mcp] operator chat gateway 就緒：%d 個外部工具經 mcp_call_tool 漸進式暴露", gw.Count())
 }
 
 // start 非阻塞地跑一輪 operator agent：先【同步】Append user 訊息（讓它立刻顯示），再在背景 goroutine
