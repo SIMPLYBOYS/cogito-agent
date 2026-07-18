@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/agentkit"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
@@ -95,13 +96,8 @@ func main() {
 	}
 
 	registry := tools.NewRegistry()
-	registry.Register(tools.NewReadFileTool(workDir))
-	registry.Register(tools.NewWriteFileTool(workDir))
-	registry.Register(tools.NewBashToolWithExecutor(workDir, executor))
-	registry.Register(tools.NewEditFileTool(workDir))
-	registry.Register(tools.NewReadSkillTool(workDir)) // 技能按需載入（CLI 工作區即技能來源）
-	registry.Register(tools.NewRecallTool(workDir))    // 長期記憶按需檢索（CLI 工作區即記憶來源）
-	registry.Register(tools.NewBarChartTool())         // 數據可視化：等寬長條圖
+	// 核心工具集（skillMemDir=workDir：CLI 工作區即技能/記憶來源）。
+	agentkit.RegisterCoreTools(registry, workDir, workDir, executor)
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
 		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, sess)) // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
 	}
@@ -119,20 +115,11 @@ func main() {
 	// spawn_subagent（含 worktree 隔離）：CLI 也能委派具名子 agent（.claw/agents/*.md）。子 agent
 	// 工具超集依目錄重建，isolation:worktree 的 agent 在 git worktree 隔離跑、完事 apply 回 workDir。
 	// 註冊在 eng 之後：registry 是 eng 持有的同一物件，之後掛的工具 eng 仍看得到。
-	buildSubReg := func(wd string) tools.Registry {
-		r := tools.NewRegistry()
-		r.Register(tools.NewReadFileTool(wd))
-		r.Register(tools.NewBashToolWithExecutor(wd, executor))
-		r.Register(tools.NewWriteFileTool(wd))
-		r.Register(tools.NewEditFileTool(wd))
-		return r
-	}
-	subTool := tools.NewSubagentTool(eng, buildSubReg(workDir), reporter, workDir).
-		WithWorktreeIsolation(workDir, buildSubReg)
-	registry.Register(subTool)
-	for _, bt := range subTool.BackgroundTools() { // subagent_result / subagent_list（查背景委派）
-		registry.Register(bt)
-	}
+	agentkit.WireSubagent(registry, eng, workDir, agentkit.SubagentOpts{
+		Executor:      executor,
+		SkillsBaseDir: workDir,
+		Reporter:      reporter,
+	})
 
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
