@@ -101,9 +101,9 @@ var runsListTmpl = template.Must(template.New("runs").Parse(`{{if not .}}<p clas
 {{range .}}<tr>
   <td><a href="{{.Link}}">{{.ID}}</a></td>
   <td class="q" title="{{.Query}}">{{.Query}}</td>
-  <td>{{.Turns}}</td>
-  <td>${{printf "%.4f" .Cost}}</td>
-  <td>{{if .Sub}}<span class="badge">subagent</span>{{end}}{{if .Running}}<span class="badge">執行中</span>{{end}}</td>
+  <td class="num">{{.Turns}}</td>
+  <td class="num">${{printf "%.4f" .Cost}}</td>
+  <td>{{if .Sub}}<span class="pill sub">subagent</span>{{end}}{{if .Running}}<span class="pill run">執行中</span>{{end}}</td>
   <td class="muted">{{.Updated}}</td>
 </tr>{{end}}
 </tbody></table>{{end}}`))
@@ -139,12 +139,12 @@ func metaOf(snap *ctxpkg.SessionSnapshot) replay.Meta {
 	}
 }
 
-const homeBody template.HTML = `<p>cogito 的維運面板。本階段唯讀、僅本機。</p>
-<ul>
-  <li><a href="/runs">Runs</a> — 一次 query 的執行流（主 agent + 子 agent 協同）</li>
-  <li><a href="/governance">Governance</a> — 待審批 / 提案 / 授權用戶（檢視）</li>
-  <li><a href="/status">Status</a> — 服務狀態</li>
-</ul>`
+const homeBody template.HTML = `<p class="muted">cogito 的維運面板 · 本階段唯讀、僅本機</p>
+<div class="cards">
+  <a class="card" href="/runs"><span class="ct">Runs →</span><span class="cd">一次 query 的完整執行流：主 agent 的 ReAct 迴圈與子 agent 協同，逐步可展開</span></a>
+  <a class="card" href="/governance"><span class="ct">Governance →</span><span class="cd">技能／記憶／調參提案佇列與授權名單（檢視；放行動作走 chat／CLI）</span></a>
+  <a class="card" href="/status"><span class="ct">Status →</span><span class="cd">服務狀態、sessions 目錄、存取模式</span></a>
+</div>`
 
 // render 用單一 base layout 包正文。CSP 嚴（無外部資源、無 inline script；style 允許 inline 供 base 與
 // run 片段的 <style>）。深淺色自適應。body 以 template.HTML 傳入，呼叫端須確保已跳脫。
@@ -160,23 +160,81 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · cogito ops</title>
 <style>
-  :root { color-scheme: light dark; --fg:#1a1a1a; --bg:#fdfdfc; --mut:#777; --acc:#b24a32; --line:#e5e3df; }
-  @media (prefers-color-scheme: dark) { :root { --fg:#e7d8c9; --bg:#141110; --mut:#8a7566; --acc:#e8734a; --line:#2a2320; } }
-  * { box-sizing:border-box; } body { margin:0; font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--fg); background:var(--bg); }
-  header { border-bottom:1px solid var(--line); padding:14px 20px; display:flex; gap:18px; align-items:baseline; }
-  header b { color:var(--acc); } header nav a { color:var(--fg); text-decoration:none; margin-right:14px; opacity:.8; }
-  header nav a:hover { opacity:1; text-decoration:underline; }
-  main { padding:20px; max-width:960px; } h1 { font-size:19px; margin:0 0 14px; }
-  a { color:var(--acc); } .muted { color:var(--mut); } code { color:var(--mut); }
-  ul { padding-left:20px; } li { margin:4px 0; }
-  dl.kv { display:grid; grid-template-columns:auto 1fr; gap:6px 16px; } dl.kv dt { color:var(--mut); } dl.kv dd { margin:0; }
-  h2 { font-size:16px; margin:22px 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; } h3 { font-size:14px; margin:14px 0 6px; }
-  pre.prev { white-space:pre-wrap; word-break:break-word; font-size:12.5px; color:var(--mut); border-left:2px solid var(--line); padding:6px 10px; max-height:280px; overflow:auto; }
-  table.runs { width:100%; border-collapse:collapse; font-size:13.5px; } table.runs th { text-align:left; color:var(--mut); font-weight:normal; border-bottom:1px solid var(--line); padding:6px 8px; }
-  table.runs td { border-bottom:1px solid var(--line); padding:6px 8px; vertical-align:top; } table.runs td.q { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .badge { color:var(--acc); border:1px solid var(--acc); border-radius:4px; padding:0 5px; font-size:11px; margin-left:4px; }
+  :root {
+    color-scheme: light dark;
+    --bg:#faf7f2; --bg2:#f3ede4; --fg:#241d18; --mut:#8a7362; --line:#e4ddd2;
+    --acc:#b24a32; --acc2:#a8641f; --ok:#5e8a4a; --glow:rgba(178,74,50,.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#14100e; --bg2:#1b1512; --fg:#ece0d4; --mut:#9c8676; --line:#2c2420;
+      --acc:#e8734a; --acc2:#e0a45a; --ok:#86b06e; --glow:rgba(232,115,74,.16);
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--fg); background:var(--bg);
+    font:14.5px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace; font-variant-ligatures:none; }
+  a { color:var(--acc); text-decoration:none; } a:hover { text-decoration:underline; }
+  .muted { color:var(--mut); }
+  code { font:inherit; font-size:.92em; color:var(--acc2); background:color-mix(in srgb,var(--acc2) 12%,transparent);
+    border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  /* masthead */
+  header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:20px;
+    padding:12px 22px; border-bottom:1px solid var(--line);
+    background:color-mix(in srgb,var(--bg) 86%,transparent); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); }
+  header .brand { display:flex; align-items:center; gap:10px; }
+  header .mark { width:18px; height:18px; border-radius:4px;
+    background:linear-gradient(135deg,var(--acc2),var(--acc)); box-shadow:0 0 15px var(--glow); }
+  header .wm { font-weight:700; letter-spacing:.16em; text-transform:uppercase; font-size:14px; }
+  header .wm em { color:var(--acc); font-style:normal; }
+  header nav { display:flex; gap:3px; }
+  header nav a { color:var(--mut); padding:4px 11px; border-radius:6px; letter-spacing:.03em; }
+  header nav a:hover { color:var(--fg); background:var(--bg2); text-decoration:none; }
+  header .env { margin-left:auto; display:flex; align-items:center; gap:7px; color:var(--mut);
+    font-size:11.5px; letter-spacing:.05em; }
+  header .env .dot { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  main { padding:28px 22px 64px; max-width:1000px; margin:0 auto; }
+  h1 { font-size:20px; font-weight:700; margin:0 0 6px; text-wrap:balance; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.13em; color:var(--mut); font-weight:600;
+    margin:32px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--line); }
+  h3 { font-size:13.5px; font-weight:600; margin:20px 0 8px; }
+  h3 .muted { font-weight:400; }
+  ul { padding-left:20px; } li { margin:5px 0; }
+  dl.kv { display:grid; grid-template-columns:auto 1fr; gap:9px 20px; margin:0; }
+  dl.kv dt { color:var(--mut); } dl.kv dd { margin:0; }
+  /* route cards */
+  .cards { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); margin:20px 0; }
+  .card { display:flex; flex-direction:column; gap:5px; border:1px solid var(--line); border-radius:10px;
+    padding:15px 16px; background:var(--bg2); color:var(--fg);
+    transition:border-color .15s,transform .15s,box-shadow .15s; }
+  .card:hover { border-color:var(--acc); box-shadow:0 5px 22px var(--glow); transform:translateY(-1px); text-decoration:none; }
+  .card .ct { font-weight:700; letter-spacing:.03em; }
+  .card .cd { color:var(--mut); font-size:12.5px; }
+  /* preview */
+  pre.prev { white-space:pre-wrap; word-break:break-word; font-size:12.5px; color:var(--mut); background:var(--bg2);
+    border:1px solid var(--line); border-left:2px solid var(--acc2); border-radius:7px; padding:10px 12px;
+    max-height:300px; overflow:auto; }
+  /* runs table */
+  table.runs { width:100%; border-collapse:collapse; font-size:13px; }
+  table.runs th { text-align:left; color:var(--mut); font-weight:500; font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.09em; border-bottom:1px solid var(--line); padding:8px 10px; }
+  table.runs td { border-bottom:1px solid var(--line); padding:9px 10px; vertical-align:top; }
+  table.runs tbody tr { transition:background .12s; }
+  table.runs tbody tr:hover { background:var(--bg2); }
+  table.runs td.q { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  table.runs td.num { text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); }
+  table.runs td a { font-weight:600; }
+  .badge, .pill { display:inline-block; font-size:10.5px; letter-spacing:.03em; border-radius:5px; padding:1px 7px; margin-left:4px; }
+  .pill.sub { color:var(--acc); border:1px solid var(--acc); }
+  .pill.run { color:var(--acc2); border:1px solid var(--acc2); animation:pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.4; } }
+  @media (prefers-reduced-motion: reduce) { .pill.run { animation:none; } }
 </style></head>
 <body>
-<header><b>cogito ops</b> <nav><a href="/runs">Runs</a><a href="/governance">Governance</a><a href="/status">Status</a></nav></header>
+<header>
+  <span class="brand"><span class="mark"></span><span class="wm">cogito<em> ops</em></span></span>
+  <nav><a href="/runs">runs</a><a href="/governance">governance</a><a href="/status">status</a></nav>
+  <span class="env"><span class="dot"></span>loopback · read-only</span>
+</header>
 <main><h1>{{.Title}}</h1>{{.Body}}</main>
 </body></html>`))

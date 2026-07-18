@@ -86,7 +86,7 @@ func TestServer_RunsWithRealStore(t *testing.T) {
 		t.Fatalf("/runs/{id} → %d", rec2.Code)
 	}
 	detail := rec2.Body.String()
-	for _, w := range []string{"spawn_subagent", "code-reviewer", "審查完成", "搞定"} {
+	for _, w := range []string{"委派子 agent", "code-reviewer", "審查完成", "搞定"} {
 		if !strings.Contains(detail, w) {
 			t.Errorf("/runs/{id} 執行樹應含 %q", w)
 		}
