@@ -54,6 +54,9 @@ type platformData struct {
 	Knobs    evolve.Knobs
 	Limits   evolve.KnobLimits
 	KnobsSet bool
+	// 可編輯的非祕密 env 設定（寫 .env、重啟套用）；祕密不在其列。
+	EnvFields []envField
+	Flash     string
 }
 
 type channelRow struct{ Name, Status string }
@@ -88,6 +91,8 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Limits = evolve.Limits()
 	d.Knobs, d.KnobsSet = evolve.LoadKnobs(s.workspace) // 已套用的執行時覆蓋（.claw/config.json）
+	d.EnvFields = loadEnvFields()
+	d.Flash = s.readFlash()
 
 	var b bytes.Buffer
 	_ = platformTmpl.Execute(&b, d)
@@ -152,7 +157,8 @@ func firstNonEmpty(vals ...string) string {
 }
 
 var platformTmpl = template.Must(template.New("platform").Parse(`
-<p class="muted">實際驅動 agent 的平台設定（皆 env 驅動）。祕密只顯示有無、不露值；此頁唯讀，改設定在 bot 端 <code>.env</code>。</p>
+<p class="muted">實際驅動 agent 的平台設定（皆 env 驅動）。祕密只顯示有無、不露值；非祕密設定可在下方就地編輯。</p>
+{{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 
 <h2>LLM Provider</h2>
 {{if .ProviderErr}}<p class="warn">⚠️ {{.ProviderErr}}</p>{{end}}
@@ -188,7 +194,15 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   <dt>單輪工具併發上限</dt><dd>{{.MaxConcurrent}} <span class="muted">（信號量，防瞬間打爆下游）</span></dd>
 </dl>
 
-<h2>可調護欄 <span class="muted">就地編輯 · 寫入 .claw/config.json</span></h2>
+<h2>可編輯設定 <span class="muted">非祕密 · 就地寫 .env · 重啟套用</span></h2>
+<p class="warn">⚠️ 寫入 <code>.env</code>（祕密行逐字不動）。env 在 bot 啟動時讀，故【重啟】才套用；金鑰／token 不在此編輯（見上方遮罩檢視）。</p>
+<form method="POST" action="/env-config" class="knobs">
+  {{range .EnvFields}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
+    {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
+  {{end}}<button type="submit">儲存設定（寫 .env）</button>
+</form>
+
+<h2>可調護欄 <span class="muted">就地編輯 · 寫入 .claw/config.json（執行時熱載，免重啟）</span></h2>
 <p class="warn">⚠️ 此為【寫入】。bot 每輪重讀；0＝用上方引擎預設。送出值一律 clamp 在安全區間。{{if .KnobsSet}}目前有覆蓋生效。{{else}}目前無覆蓋（全用預設）。{{end}}</p>
 <form method="POST" action="/config" class="knobs">
   <label>單次 Run 回合上限 <span class="muted">{{.Limits.MinTurns}}–{{.Limits.MaxTurns}}；0=預設</span>

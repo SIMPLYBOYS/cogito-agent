@@ -37,19 +37,19 @@ func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 		ConfigProposed: readPreview(filepath.Join(claw, evolve.ProposedConfigFileName), 2000),
 		Allowed:        parseCSVEnv("COGITO_ALLOWED_USERS"),
 		Admins:         parseCSVEnv("COGITO_ADMIN_USERS"),
-		Flash:          s.readGovFlash(),
+		Flash:          s.readFlash(),
 	}
 	var b bytes.Buffer
 	_ = govTmpl.Execute(&b, d)
 	s.render(w, "Governance", template.HTML(b.String()))
 }
 
-func (s *server) setGovFlash(msg string) { s.govFlash.Store(msg) }
+func (s *server) setFlash(msg string) { s.flash.Store(msg) }
 
-func (s *server) readGovFlash() string {
-	m, _ := s.govFlash.Load().(string)
+func (s *server) readFlash() string {
+	m, _ := s.flash.Load().(string)
 	if m != "" {
-		s.govFlash.Store("") // 顯示一次即清
+		s.flash.Store("") // 顯示一次即清
 	}
 	return m
 }
@@ -66,11 +66,11 @@ func (s *server) govApplyConfig(w http.ResponseWriter, r *http.Request) {
 	changes, err := evolve.ApplyProposedConfig(s.workspace)
 	switch {
 	case err != nil:
-		s.setGovFlash("⚠️ 套用調參失敗：" + err.Error())
+		s.setFlash("⚠️ 套用調參失敗：" + err.Error())
 	case len(changes) == 0:
-		s.setGovFlash("無調參提案可套用。")
+		s.setFlash("無調參提案可套用。")
 	default:
-		s.setGovFlash("✓ 已套用調參：" + strings.Join(changes, "、"))
+		s.setFlash("✓ 已套用調參：" + strings.Join(changes, "、"))
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
@@ -83,11 +83,11 @@ func (s *server) govApplyMemory(w http.ResponseWriter, r *http.Request) {
 	applied, err := evolve.ApplyProposedMemory(s.workspace)
 	switch {
 	case err != nil:
-		s.setGovFlash("⚠️ 套用記憶失敗：" + err.Error())
+		s.setFlash("⚠️ 套用記憶失敗：" + err.Error())
 	case applied == "":
-		s.setGovFlash("無記憶提案可套用。")
+		s.setFlash("無記憶提案可套用。")
 	default:
-		s.setGovFlash("✓ 已放行記憶：" + applied)
+		s.setFlash("✓ 已放行記憶：" + applied)
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
@@ -100,11 +100,11 @@ func (s *server) govDiscardMemory(w http.ResponseWriter, r *http.Request) {
 	had, err := evolve.DiscardProposedMemory(s.workspace)
 	switch {
 	case err != nil:
-		s.setGovFlash("⚠️ 丟棄記憶失敗：" + err.Error())
+		s.setFlash("⚠️ 丟棄記憶失敗：" + err.Error())
 	case !had:
-		s.setGovFlash("無記憶提案可丟棄。")
+		s.setFlash("無記憶提案可丟棄。")
 	default:
-		s.setGovFlash("✓ 已丟棄記憶提案。")
+		s.setFlash("✓ 已丟棄記憶提案。")
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
@@ -117,25 +117,25 @@ func (s *server) govPromoteSkill(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	// 防路徑穿越：只收單層資料夾名（filepath.Base 過濾掉任何 / 或 ..）。
 	if name == "" || filepath.Base(name) != name {
-		s.setGovFlash("⚠️ 無效的技能名。")
+		s.setFlash("⚠️ 無效的技能名。")
 		http.Redirect(w, r, "/governance", http.StatusSeeOther)
 		return
 	}
 	claw := filepath.Join(s.workspace, ".claw")
 	proposedDir := filepath.Join(claw, evolve.ProposedSkillsDirName, name)
 	if fi, err := os.Stat(proposedDir); err != nil || !fi.IsDir() {
-		s.setGovFlash("⚠️ 找不到提案技能：" + name)
+		s.setFlash("⚠️ 找不到提案技能：" + name)
 		http.Redirect(w, r, "/governance", http.StatusSeeOther)
 		return
 	}
 	res, err := evolve.Promote(proposedDir, filepath.Join(claw, evolve.ActiveSkillsDirName))
 	switch {
 	case err != nil:
-		s.setGovFlash("⚠️ 晉升失敗（" + name + "）：" + err.Error())
+		s.setFlash("⚠️ 晉升失敗（" + name + "）：" + err.Error())
 	case !res.Passed:
-		s.setGovFlash("✗ 把關未過（" + name + "）：" + strings.Join(res.Issues, "；"))
+		s.setFlash("✗ 把關未過（" + name + "）：" + strings.Join(res.Issues, "；"))
 	default:
-		s.setGovFlash("✓ 已晉升技能：" + name)
+		s.setFlash("✓ 已晉升技能：" + name)
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }

@@ -21,7 +21,7 @@ type server struct {
 	dir       string
 	workspace string
 	chat      *chatRunner
-	govFlash  atomic.Value // string：上次 governance 放行動作的結果，GET 時顯示一次即清
+	flash     atomic.Value // string：上次寫入動作（放行／設定）的結果，GET 時顯示一次即清
 }
 
 // newServer 組出 operator dashboard 的路由。用自己的 mux（不碰 http.DefaultServeMux——避免任何被
@@ -42,6 +42,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("POST /config", s.configSave)
+	mux.HandleFunc("POST /env-config", s.envConfigSave)
 	mux.HandleFunc("GET /chat", s.chatGet)
 	mux.HandleFunc("POST /chat", s.chatPost)
 	mux.HandleFunc("POST /chat/reset", s.chatReset)
@@ -270,6 +271,8 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   form.knobs label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
   form.knobs input { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:200px; }
   form.knobs input:focus { outline:none; border-color:var(--acc); }
+  form.knobs input[type=checkbox] { width:auto; max-width:none; }
+  form.knobs .tog { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
   form.knobs button { align-self:flex-start; font:inherit; font-weight:700; letter-spacing:.03em; color:#fff; background:var(--acc); border:none; border-radius:8px; padding:7px 18px; cursor:pointer; }
   form.knobs button:hover { filter:brightness(1.08); }
   /* metrics 長條圖（純 CSS，零 JS） */
