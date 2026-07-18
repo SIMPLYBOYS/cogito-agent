@@ -139,6 +139,7 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 
 		if t.session != nil {
 			t.session.RecordUsage(promptTokens, completionTokens, cost)
+			t.session.SetModelUsed(t.modelName) // 記實際用過的模型（供用量按模型切片；只在變更時落盤）
 			// 用 CostUSD() 在鎖保護下讀取，避免與並發 RecordUsage 對裸欄位 TotalCostUSD 的 data race。
 			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.CostUSD())
 		}

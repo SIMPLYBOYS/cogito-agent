@@ -27,6 +27,9 @@ type Session struct {
 	// model 是本會話（頻道）的模型覆蓋——per-channel 切換（`model <id>`），空＝沿用啟動預設。
 	// factory 建引擎時讀它，經 provider.Configurable 換模型（便宜任務走小模型、推理走大模型）。
 	model string
+	// modelUsed 是本 session 實際（最近一次）跑在哪個模型 id，由 CostTracker 計費時記錄。與 model
+	// 不同：沒設覆蓋時 model 為空，但 modelUsed 仍記得跑在哪個模型——這才是「用量按模型切片」該用的欄位。
+	modelUsed string
 	// goal 是本會話的持久目標（`goal <text>`）：每次 goal 任務完成後用 LLM judge 驗收，未達成自動續跑。
 	// 空＝無 goal；goalPaused＝保留目標但暫停自動續跑。
 	goal       string
@@ -69,6 +72,7 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		summary:               snap.Summary,
 		planMode:              snap.PlanMode,
 		model:                 snap.Model,
+		modelUsed:             snap.ModelUsed,
 		goal:                  snap.Goal,
 		goalPaused:            snap.GoalPaused,
 		running:               snap.Running,
@@ -93,6 +97,7 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		Summary:               s.summary,
 		PlanMode:              s.planMode,
 		Model:                 s.model,
+		ModelUsed:             s.modelUsed,
 		Goal:                  s.goal,
 		GoalPaused:            s.goalPaused,
 		Running:               s.running,
@@ -213,6 +218,21 @@ func (s *Session) Model() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.model
+}
+
+// SetModelUsed 記錄本 session 實際跑在哪個模型（CostTracker 每次計費時呼叫）。只在【變更時】落盤，
+// 避免每次 API 呼叫都多寫一次。與 SetModel（覆蓋意圖）分開：這是「實際用過的模型」，供用量按模型切片。
+func (s *Session) SetModelUsed(model string) {
+	if model == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.modelUsed == model {
+		return
+	}
+	s.modelUsed = model
+	s.persistLocked()
 }
 
 // SetModel 設定本會話的模型覆蓋並落盤（`model <id>` 指令用；空字串＝清除、回預設）。

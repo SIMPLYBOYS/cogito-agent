@@ -57,9 +57,13 @@ func (s *server) metrics(w http.ResponseWriter, r *http.Request) {
 		tok := snap.TotalPromptTokens + snap.TotalCompletionTokens
 
 		accum(plat, platformOf(id), snap.TotalCostUSD, tok)
-		m := snap.Model
+		// 模型：優先用「實際跑過的模型」（CostTracker 記的）；退回 per-channel 覆蓋；再退回早期未記錄。
+		m := snap.ModelUsed
 		if m == "" {
-			m = "（未記錄）"
+			m = snap.Model
+		}
+		if m == "" {
+			m = "（早期未記錄）"
 		}
 		accum(model, m, snap.TotalCostUSD, tok)
 	}
