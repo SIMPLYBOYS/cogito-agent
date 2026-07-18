@@ -24,6 +24,13 @@ const (
 	costSoftLandingRatio      = 0.8 // 成本軟著陸水位：花費達上限此比例即提醒模型停工具、立刻交付
 )
 
+// 導出框架層預設護欄值，供 dashboard 等唯讀檢視顯示（不改變引擎行為；引擎仍用上面的內部常數）。
+const (
+	DefaultMaxTurns           = defaultMaxTurns
+	DefaultMaxCostUSD         = defaultMaxCostUSD
+	DefaultMaxConcurrentTools = defaultMaxConcurrentTools
+)
+
 // 引擎對 workspace 無狀態（workspace 跟著 Session 走）。
 // compactor —— 每次發 LLM 前做字符級壓縮（OOM 防線）。
 // PlanMode —— 狀態外部化（PLAN.md / TODO.md）開關，透傳給 composer。
