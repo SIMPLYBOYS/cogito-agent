@@ -99,10 +99,14 @@ func (c *chatRunner) start(userMsg string) bool {
 	c.hub.begin()
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, c.workDir)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: userMsg}) // 立刻落地→GET 馬上看得到提問
+	// delta sink：主迴圈的 LLM 文字 token 增量 → hub「delta」事件 → 瀏覽器逐字顯示。
+	ctx := engine.WithStreamSink(context.Background(), func(delta string) {
+		c.hub.push(evJSON("delta", delta))
+	})
 	go func() {
 		defer c.mu.Unlock()
 		defer c.hub.end()
-		if err := c.eng.Run(context.Background(), sess, c.reporter); err != nil {
+		if err := c.eng.Run(ctx, sess, c.reporter); err != nil {
 			c.lastErr.Store(err.Error())
 			c.hub.push(evJSON("error", "執行出錯："+err.Error()))
 		} else {
@@ -238,6 +242,9 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat .ev.error { color:var(--a); border-left-color:var(--a); }
   .chat .ev.msg { color:var(--fg); border-left-color:var(--a); }
   .chat .ev.msg .ic { color:var(--a); }
+  .chat .ev.msg.streaming .tx::after { content:'▋'; color:var(--a); animation:blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  @media (prefers-reduced-motion: reduce) { .chat .ev.msg.streaming .tx::after { animation:none; } }
   .chat form.composer { display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--ln); padding-top:16px; }
   .chat textarea { width:100%; resize:vertical; font:inherit; font-size:14px; color:var(--fg); background:var(--p);
     border:1px solid var(--ln); border-radius:8px; padding:10px 12px; }

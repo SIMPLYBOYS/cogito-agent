@@ -86,16 +86,34 @@ func (t *CostTracker) Configure(model string, maxTokens int) provider.LLMProvide
 
 func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
 	startTime := time.Now()
-
 	respMsg, err := t.nextProvider.Generate(ctx, msgs, availableTools)
-
-	latency := time.Since(startTime)
-
 	if err != nil {
-		log.Printf("[Tracker] ❌ API 調用失敗，耗時: %v\n", latency)
+		log.Printf("[Tracker] ❌ API 調用失敗，耗時: %v\n", time.Since(startTime))
 		return respMsg, err
 	}
+	t.account(respMsg, time.Since(startTime))
+	return respMsg, nil
+}
 
+// GenerateStream 轉發到內層 provider 的串流生成（若支援），並對回傳的完整 Message 做與 Generate 相同的
+// 記帳（Usage 在串流結束時已由 SDK 累積齊全）。內層不支援串流則退回一次性 Generate（不影響計費）。
+func (t *CostTracker) GenerateStream(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition, onDelta func(string)) (*schema.Message, error) {
+	sp, ok := t.nextProvider.(provider.StreamingProvider)
+	if !ok {
+		return t.Generate(ctx, msgs, availableTools)
+	}
+	startTime := time.Now()
+	respMsg, err := sp.GenerateStream(ctx, msgs, availableTools, onDelta)
+	if err != nil {
+		log.Printf("[Tracker] ❌ API 串流調用失敗，耗時: %v\n", time.Since(startTime))
+		return respMsg, err
+	}
+	t.account(respMsg, time.Since(startTime))
+	return respMsg, nil
+}
+
+// account 對一次成功回應計價、記錄 log 與 session 用量。Generate 與 GenerateStream 共用。
+func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 	if respMsg.Usage != nil {
 		promptTokens := respMsg.Usage.PromptTokens
 		completionTokens := respMsg.Usage.CompletionTokens
@@ -127,6 +145,4 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 	} else {
 		log.Printf("[Tracker] ⚠️ API 調用完成，但未返回 Usage 數據 | 耗時: %v\n", latency)
 	}
-
-	return respMsg, nil
 }

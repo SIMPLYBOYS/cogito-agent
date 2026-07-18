@@ -55,6 +55,39 @@ func (p *ClaudeProvider) Configure(model string, maxTokens int) LLMProvider {
 }
 
 func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
+	resp, err := p.client.Messages.New(ctx, p.buildParams(msgs, availableTools))
+	if err != nil {
+		return nil, fmt.Errorf("Claude/Zhipu API 請求失敗: %w", err)
+	}
+	return extractMessage(resp.Content, resp.Usage), nil
+}
+
+// GenerateStream 與 Generate 等價，但走 Anthropic 的 SSE 串流：邊接收邊把「文字」token 增量餵給 onDelta
+// （供 UI 逐字顯示），最後把整段回應（含 tool calls / Usage）組裝成 Message 回傳——引擎主迴圈邏輯不變。
+// tool_use 的參數以 JSON 增量串流，由 SDK 的 Accumulate 累積，不進 onDelta（onDelta 只吐純文字）。
+func (p *ClaudeProvider) GenerateStream(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition, onDelta func(string)) (*schema.Message, error) {
+	stream := p.client.Messages.NewStreaming(ctx, p.buildParams(msgs, availableTools))
+	var acc anthropic.Message
+	for stream.Next() {
+		event := stream.Current()
+		if err := acc.Accumulate(event); err != nil {
+			return nil, fmt.Errorf("Claude 串流累積失敗: %w", err)
+		}
+		if ev, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
+			if td, ok := ev.Delta.AsAny().(anthropic.TextDelta); ok && td.Text != "" && onDelta != nil {
+				onDelta(td.Text)
+			}
+		}
+	}
+	if err := stream.Err(); err != nil {
+		return nil, fmt.Errorf("Claude 串流請求失敗: %w", err)
+	}
+	return extractMessage(acc.Content, acc.Usage), nil
+}
+
+// buildParams 把統一歷史 + 工具定義組成 Anthropic 請求參數（含 prompt caching 斷點）。Generate 與
+// GenerateStream 共用，確保串流與非串流的請求構造完全一致。
+func (p *ClaudeProvider) buildParams(msgs []schema.Message, availableTools []schema.ToolDefinition) anthropic.MessageNewParams {
 	anthropicMsgs, systemPrompt := buildAnthropicMessages(msgs)
 
 	var anthropicTools []anthropic.ToolUnionParam
@@ -118,16 +151,15 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		}
 	}
 
-	resp, err := p.client.Messages.New(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("Claude/Zhipu API 請求失敗: %w", err)
-	}
+	return params
+}
 
-	resultMsg := &schema.Message{
-		Role: schema.RoleAssistant,
-	}
+// extractMessage 把 Anthropic 回應的 content blocks + usage 轉成統一的 schema.Message。Generate（一次
+// 回傳的 resp）與 GenerateStream（Accumulate 出的 message）內容結構相同，故共用。
+func extractMessage(content []anthropic.ContentBlockUnion, usage anthropic.Usage) *schema.Message {
+	resultMsg := &schema.Message{Role: schema.RoleAssistant}
 
-	for _, block := range resp.Content {
+	for _, block := range content {
 		switch block.Type {
 		case "text":
 			resultMsg.Content += block.Text
@@ -142,16 +174,16 @@ func (p *ClaudeProvider) Generate(ctx context.Context, msgs []schema.Message, av
 	}
 
 	// 提取 Token 消耗（Anthropic 用 Input/OutputTokens 命名），供 CostTracker 計費
-	if resp.Usage.InputTokens > 0 || resp.Usage.OutputTokens > 0 || resp.Usage.CacheReadInputTokens > 0 {
+	if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.CacheReadInputTokens > 0 {
 		resultMsg.Usage = &schema.Usage{
-			PromptTokens:        int(resp.Usage.InputTokens),
-			CompletionTokens:    int(resp.Usage.OutputTokens),
-			CacheReadTokens:     int(resp.Usage.CacheReadInputTokens),
-			CacheCreationTokens: int(resp.Usage.CacheCreationInputTokens),
+			PromptTokens:        int(usage.InputTokens),
+			CompletionTokens:    int(usage.OutputTokens),
+			CacheReadTokens:     int(usage.CacheReadInputTokens),
+			CacheCreationTokens: int(usage.CacheCreationInputTokens),
 		}
 	}
 
-	return resultMsg, nil
+	return resultMsg
 }
 
 // buildAnthropicMessages 把統一的 schema.Message 歷史轉換為 Anthropic 的 MessageParam 序列，

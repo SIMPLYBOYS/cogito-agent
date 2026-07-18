@@ -239,7 +239,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		if observability.Enabled() {
 			actSpan.AddAttribute("langfuse.observation.input", jsonStr(compactedContext))
 		}
-		actionResp, err := e.provider.Generate(actCtx, compactedContext, availableTools)
+		actionResp, err := e.generateAction(actCtx, compactedContext, availableTools)
 		if actionResp != nil {
 			if actionResp.Usage != nil {
 				actSpan.AddAttribute("gen_ai.usage.input_tokens", actionResp.Usage.PromptTokens)

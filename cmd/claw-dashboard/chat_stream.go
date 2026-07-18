@@ -112,7 +112,7 @@ func (s *server) chatStream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-time.After(150 * time.Millisecond):
+		case <-time.After(60 * time.Millisecond): // 逐字串流：小 tick 讓 token 增量順滑冒出
 		}
 	}
 }
@@ -129,19 +129,32 @@ const chatJSSrc = `(function () {
   var live = document.getElementById('live');
   if (!live) return;
   var ICON = { turn:'⟳', think:'◌', tool:'▸', result:'✓', error:'✗', msg:'◆' };
+  var cur = null; // 正在逐字串流的 msg 泡（delta 累進、msg/其他事件收尾）
+  function row(kind, text) {
+    var r = document.createElement('div'); r.className = 'ev ' + kind;
+    var ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ICON[kind] || '·';
+    var tx = document.createElement('span'); tx.className = 'tx'; tx.textContent = text;
+    r.appendChild(ic); r.appendChild(tx); live.appendChild(r); return r;
+  }
+  function endStream() { if (cur) { cur.classList.remove('streaming'); cur = null; } }
+  function scroll() { window.scrollTo(0, document.body.scrollHeight); }
   var es = new EventSource('/chat/stream');
   es.onmessage = function (e) {
     var ev; try { ev = JSON.parse(e.data); } catch (x) { return; }
-    var row = document.createElement('div');
-    row.className = 'ev ' + ev.kind;
-    var ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ICON[ev.kind] || '·';
-    var tx = document.createElement('span'); tx.className = 'tx'; tx.textContent = ev.label;
-    row.appendChild(ic); row.appendChild(tx);
-    live.appendChild(row);
-    window.scrollTo(0, document.body.scrollHeight);
+    if (ev.kind === 'delta') {                       // 逐字：累進當前 msg 泡
+      if (!cur) { cur = row('msg', ''); cur.className = 'ev msg streaming'; }
+      cur.querySelector('.tx').textContent += ev.label;
+      scroll(); return;
+    }
+    if (ev.kind === 'msg') {                          // 訊息定稿：收尾串流泡（不重複）
+      if (cur) { cur.querySelector('.tx').textContent = ev.label; endStream(); }
+      else { row('msg', ev.label); }
+      scroll(); return;
+    }
+    endStream(); row(ev.kind, ev.label); scroll();    // 其他事件：先收尾串流泡再插入
   };
   es.addEventListener('done', function () {
-    es.close();
+    es.close(); endStream();
     var b = document.getElementById('runbanner');
     if (b) { b.className = 'banner done'; b.textContent = '✓ 完成'; }
     var f = document.getElementById('composer');
