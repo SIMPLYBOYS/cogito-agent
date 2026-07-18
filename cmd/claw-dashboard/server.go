@@ -35,6 +35,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /governance", s.governance)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /platform", s.platform)
+	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("GET /chat", s.chatGet)
 	mux.HandleFunc("POST /chat", s.chatPost)
 	mux.HandleFunc("POST /chat/reset", s.chatReset)
@@ -258,6 +259,13 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   table.runs td.q { max-width:360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   table.runs td.num { text-align:right; font-variant-numeric:tabular-nums; color:var(--mut); }
   table.runs td a { font-weight:600; }
+  /* 護欄編輯表單（零 JS） */
+  form.knobs { display:flex; flex-direction:column; gap:13px; max-width:540px; margin:6px 0; }
+  form.knobs label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  form.knobs input { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:200px; }
+  form.knobs input:focus { outline:none; border-color:var(--acc); }
+  form.knobs button { align-self:flex-start; font:inherit; font-weight:700; letter-spacing:.03em; color:#fff; background:var(--acc); border:none; border-radius:8px; padding:7px 18px; cursor:pointer; }
+  form.knobs button:hover { filter:brightness(1.08); }
   /* metrics 長條圖（純 CSS，零 JS） */
   .bars { display:flex; flex-direction:column; gap:9px; margin:4px 0; }
   .brow { display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px; font-size:12.5px; }

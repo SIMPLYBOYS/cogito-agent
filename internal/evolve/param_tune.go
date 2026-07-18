@@ -140,6 +140,46 @@ func LoadKnobs(root string) (Knobs, bool) {
 	return k, true
 }
 
+// KnobLimits 是三個護欄旋鈕的合法區間（供 UI 顯示與提示；WriteActiveKnobs 用同一組邊界 clamp）。
+type KnobLimits struct {
+	MinTurns, MaxTurns             int
+	MinConcurrency, MaxConcurrency int
+	MinCostUSD, MaxCostUSD         float64
+}
+
+// Limits 回傳護欄旋鈕的合法區間。
+func Limits() KnobLimits {
+	return KnobLimits{minTurns, maxTurns, minConcurrency, maxConcurrency, minCostUSD, maxCostUSD}
+}
+
+// WriteActiveKnobs 直接寫【已套用】的執行期參數（config.json），供 dashboard 等就地編輯——不經提案流。
+// 每個【已設】值一律 clamp 到安全邊界（0＝不覆蓋、用引擎預設，與 LoadKnobs 消費端 `if k.X > 0` 語意
+// 一致）；信任邊界是「落地磁碟的值不可信」，故寫前必 clamp（即便呼叫端送了 max_cost=99999 也擋在界內）。
+// 回傳實際寫入（clamp 後）的 Knobs。
+func WriteActiveKnobs(root string, k Knobs) (Knobs, error) {
+	if k.MaxTurns != 0 {
+		k.MaxTurns = clampInt(k.MaxTurns, minTurns, maxTurns)
+	}
+	if k.MaxConcurrentTools != 0 {
+		k.MaxConcurrentTools = clampInt(k.MaxConcurrentTools, minConcurrency, maxConcurrency)
+	}
+	if k.MaxCostUSD != 0 {
+		k.MaxCostUSD = clampFloat(k.MaxCostUSD, minCostUSD, maxCostUSD)
+	}
+	clawDir := filepath.Join(root, ".claw")
+	if err := os.MkdirAll(clawDir, 0o755); err != nil {
+		return k, err
+	}
+	out, err := json.MarshalIndent(k, "", "  ")
+	if err != nil {
+		return k, err
+	}
+	if err := os.WriteFile(filepath.Join(clawDir, ActiveConfigFileName), out, 0o644); err != nil {
+		return k, fmt.Errorf("寫入 config.json 失敗: %w", err)
+	}
+	return k, nil
+}
+
 // ApplyProposedConfig 把提案參數過【人工閘】套用：讀 config.proposed.json，以其 current 為基底套上每條
 // proposal 的 proposed 值，寫入 config.json（引擎啟動時會讀），並刪除提案檔。回傳每條「knob old→new」摘要。
 // 套用時一律再 clamp 在有界範圍（雙保險——即便有人手改提案檔也繞不過安全上限）。無提案回 (nil, nil)。

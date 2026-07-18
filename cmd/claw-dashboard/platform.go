@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 )
 
 // platformData 是 /platform 頁的唯讀資料：實際驅動 agent 的平台設定（全 env 驅動，本專案無集中 config
@@ -49,6 +50,10 @@ type platformData struct {
 	MemorySynth string
 	SkillSynth  string
 	KGSynth     string
+	// 可調護欄（.claw/config.json）：執行時覆蓋引擎預設，可就地編輯。
+	Knobs    evolve.Knobs
+	Limits   evolve.KnobLimits
+	KnobsSet bool
 }
 
 type channelRow struct{ Name, Status string }
@@ -81,10 +86,12 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 		{"Slack", boundStatus(envSet("SLACK_BOT_TOKEN") && envSet("SLACK_APP_TOKEN"))},
 		{"Telegram", boundStatus(envSet("TELEGRAM_BOT_TOKEN"))},
 	}
+	d.Limits = evolve.Limits()
+	d.Knobs, d.KnobsSet = evolve.LoadKnobs(s.workspace) // 已套用的執行時覆蓋（.claw/config.json）
 
 	var b bytes.Buffer
 	_ = platformTmpl.Execute(&b, d)
-	render(w, "Platform（設定檢視）", template.HTML(b.String()))
+	s.render(w, "Platform（設定檢視）", template.HTML(b.String()))
 }
 
 // resolveProviderInto 鏡像 provider.FromEnv 的選擇邏輯（唯讀，不建構 provider、不因缺 key 報錯）。
@@ -180,6 +187,18 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   <dt>單次 Run 成本熔斷</dt><dd>${{printf "%.2f" .MaxCostUSD}} <span class="muted">（達 80% 先軟著陸提醒交付）</span></dd>
   <dt>單輪工具併發上限</dt><dd>{{.MaxConcurrent}} <span class="muted">（信號量，防瞬間打爆下游）</span></dd>
 </dl>
+
+<h2>可調護欄 <span class="muted">就地編輯 · 寫入 .claw/config.json</span></h2>
+<p class="warn">⚠️ 此為【寫入】。bot 每輪重讀；0＝用上方引擎預設。送出值一律 clamp 在安全區間。{{if .KnobsSet}}目前有覆蓋生效。{{else}}目前無覆蓋（全用預設）。{{end}}</p>
+<form method="POST" action="/config" class="knobs">
+  <label>單次 Run 回合上限 <span class="muted">{{.Limits.MinTurns}}–{{.Limits.MaxTurns}}；0=預設</span>
+    <input type="number" name="max_turns" value="{{.Knobs.MaxTurns}}" min="0" max="{{.Limits.MaxTurns}}"></label>
+  <label>單輪工具併發上限 <span class="muted">{{.Limits.MinConcurrency}}–{{.Limits.MaxConcurrency}}；0=預設</span>
+    <input type="number" name="max_concurrent" value="{{.Knobs.MaxConcurrentTools}}" min="0" max="{{.Limits.MaxConcurrency}}"></label>
+  <label>單次 Run 成本熔斷（USD） <span class="muted">{{printf "%.1f" .Limits.MinCostUSD}}–{{printf "%.1f" .Limits.MaxCostUSD}}；0=預設</span>
+    <input type="number" step="0.01" name="max_cost" value="{{printf "%.2f" .Knobs.MaxCostUSD}}" min="0" max="{{.Limits.MaxCostUSD}}"></label>
+  <button type="submit">儲存護欄</button>
+</form>
 
 <h2>自我進化 <span class="muted">提案佇列見 <a href="/governance">Governance</a></span></h2>
 <dl class="kv">
