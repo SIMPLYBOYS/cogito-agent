@@ -123,6 +123,25 @@ func (s *Session) Append(msgs ...schema.Message) {
 	s.persistLocked()
 }
 
+// Reset 清空對話，開始新的一輪：歷史、摘要、目標、用量全歸零（保留 ID / WorkDir / CreatedAt）。
+// 供「新對話」用——例如 operator dashboard 要甩掉被舊結論污染的上下文（如工具能力變更前的過時判斷），
+// 讓下一個任務在乾淨脈絡下重新評估。落地持久化。
+func (s *Session) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.history = nil
+	s.summary = ""
+	s.goal = ""
+	s.goalPaused = false
+	s.running = false
+	s.resumeAttempts = 0
+	s.TotalPromptTokens = 0
+	s.TotalCompletionTokens = 0
+	s.TotalCostUSD = 0
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
 // GetWorkingMemory 返回短期工作記憶：末尾 limit 條的滑動窗口。
 // 關鍵防禦：若窗口首條是 ToolResult（RoleUser + ToolCallID），說明它對應的
 // assistant tool_use 已被截斷在窗口外——把"無主的 tool_result"發給 LLM API 會報錯，

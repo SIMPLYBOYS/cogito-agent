@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -145,5 +146,34 @@ func TestChatJS_Served(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "EventSource") {
 		t.Error("/chat.js 應含 EventSource 客戶端")
+	}
+}
+
+// POST /chat/reset 清空 operator session（新對話）；跨站被 CSRF 擋。
+func TestChatReset_ClearsSession(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := ctxpkg.NewFileSessionStore(dir)
+	ctxpkg.GlobalSessionMgr.SetStore(store)
+	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, dir)
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "污染歷史"})
+	srv := newServer(store, dir, dir, &chatRunner{hub: &sseHub{}, workDir: dir})
+
+	req := httptest.NewRequest("POST", "/chat/reset", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 303 {
+		t.Fatalf("reset → %d，want 303", rec.Code)
+	}
+	if sess.HistoryLen() != 0 {
+		t.Error("reset 後 operator session 應清空")
+	}
+
+	req2 := httptest.NewRequest("POST", "/chat/reset", nil)
+	req2.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, req2)
+	if rec2.Code != 403 {
+		t.Errorf("跨站 reset 應 403，got %d", rec2.Code)
 	}
 }

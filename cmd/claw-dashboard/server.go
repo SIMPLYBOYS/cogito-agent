@@ -36,6 +36,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("GET /chat", s.chatGet)
 	mux.HandleFunc("POST /chat", s.chatPost)
+	mux.HandleFunc("POST /chat/reset", s.chatReset)
 	mux.HandleFunc("GET /chat.js", s.chatJS)
 	mux.HandleFunc("GET /chat/stream", s.chatStream)
 	return mux

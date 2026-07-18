@@ -230,6 +230,24 @@ func (s *server) chatPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/chat#end", http.StatusSeeOther) // PRG：避免重整重送；錨點捲到最新
 }
 
+// chatReset 清空 operator session，開始新對話（甩掉舊上下文，例如工具能力變更前的過時結論）。
+// 執行中不清（避免抽掉正在跑的 agent 的歷史）。CSRF 防護同 chatPost。
+func (s *server) chatReset(w http.ResponseWriter, r *http.Request) {
+	if s.chat == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	if !s.chat.hub.isRunning() {
+		ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, s.chat.workDir).Reset()
+		s.chat.lastErr.Store("")
+	}
+	http.Redirect(w, r, "/chat", http.StatusSeeOther)
+}
+
 // chatView / bubble 是 chat 頁的精簡對話視圖：只呈現 user 提問 + agent 最終回覆（工具調用/子 agent 的
 // 完整執行樹在 /runs/operator，不在此重造）。usedTools 標記該回合動過工具，提示去看執行樹。
 type chatView struct {
@@ -271,8 +289,11 @@ func toBubbles(history []schema.Message) []bubble {
 
 var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat { --a:var(--acc); --a2:var(--acc2); --m:var(--mut); --ln:var(--line); --p:var(--bg2); }
-  .chat .note { color:var(--m); font-size:12.5px; margin:0 0 14px; }
+  .chat .note { color:var(--m); font-size:12.5px; margin:0 0 10px; }
   .chat .note a { font-weight:600; }
+  .chat .resetform { margin:0 0 16px; }
+  .chat button.reset { font:inherit; font-size:12px; color:var(--m); background:transparent; border:1px solid var(--ln); border-radius:6px; padding:3px 11px; cursor:pointer; }
+  .chat button.reset:hover { color:var(--a); border-color:var(--a); }
   .chat .banner { border:1px solid var(--a); border-radius:7px; padding:8px 12px; margin-bottom:14px; color:var(--a); font-size:13px; }
   .chat .banner.done { color:var(--ok,#86b06e); border-color:var(--ok,#86b06e); }
   .chat .thread { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
@@ -313,6 +334,7 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
 <div class="chat">
   {{if .Running}}<noscript><meta http-equiv="refresh" content="3"></noscript>{{end}}
   <p class="note">operator 就地驅動 agent（session <code>operator</code>，工作區同 bot／CLI）。完整執行樹（工具調用、子 agent）見 <a href="/runs/operator">/runs/operator</a>。</p>
+  {{if and .Msgs (not .Running)}}<form method="POST" action="/chat/reset" class="resetform"><button type="submit" class="reset">＋ 新對話（清空上下文）</button></form>{{end}}
   {{if .LastErr}}{{if not .Running}}<div class="banner">⚠️ 上次執行出錯：{{.LastErr}}</div>{{end}}{{end}}
   {{if .Msgs}}<div class="thread">
     {{range .Msgs}}<div class="msg {{if .You}}you{{else}}bot{{end}}"><span class="tag">{{if .You}}你{{else}}operator agent{{end}}</span>{{.Text}}{{if .UsedTool}}<span class="used">⚙ 本回合動過工具／子 agent，詳見執行樹</span>{{end}}</div>{{end}}
