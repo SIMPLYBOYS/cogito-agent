@@ -4,20 +4,27 @@ import (
 	"bytes"
 	"context"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
+
+// mcpDialTimeout 是啟動時連接單一 MCP server（含握手 / tools/list）的上限，與 bot 一致。
+const mcpDialTimeout = 30 * time.Second
 
 // operatorSessionID 是內嵌 operator chat 專用的 session id，與 IM/CLI 的 session 隔開，不撞歷史。
 const operatorSessionID = "operator"
@@ -63,6 +70,10 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 		registry.Register(tt)
 	}
 
+	// 外部 MCP 工具（設了 COGITO_MCP_CONFIG 才啟用）：與 bot/cli 同一條路，經 gateway 漸進式暴露
+	// （mcp_call_tool / mcp_describe_tool + 輕量目錄），連不上的 server 略過、不擋 chat 啟動。
+	registerMCPGateway(registry)
+
 	eng := engine.NewAgentEngine(tracked, registry, false, false)
 
 	hub := &sseHub{}
@@ -87,6 +98,48 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	c := &chatRunner{eng: eng, reporter: reporter, hub: hub, workDir: workDir}
 	c.lastErr.Store("")
 	return c, nil
+}
+
+// registerMCPGateway 把 COGITO_MCP_CONFIG 指定的外部 MCP 伺服器連上、經 gateway 註冊進 registry
+// （2 個 gateway 工具 + 輕量目錄，漸進式暴露）。與 bot（cmd/claw）同一套邏輯搬過來：未設 config 就
+// 不做；連不上的 server 略過，不擋 chat 啟動。連線是行程級長壽命的（由 gateway/tools 鏈保活，行程
+// 結束 OS 回收 stdio 子進程）。
+func registerMCPGateway(registry tools.Registry) {
+	cfgPath := os.Getenv("COGITO_MCP_CONFIG")
+	if cfgPath == "" {
+		return
+	}
+	servers, err := mcp.LoadConfig(cfgPath)
+	if err != nil {
+		log.Printf("[mcp] 讀取設定失敗，operator chat 不載 MCP: %v", err)
+		return
+	}
+	var clients []*mcp.Client
+	for _, s := range servers {
+		dialCtx, cancel := context.WithTimeout(context.Background(), mcpDialTimeout)
+		cl, errDial := mcp.Dial(dialCtx, s)
+		cancel()
+		if errDial != nil {
+			log.Printf("[mcp] 連接 %q 失敗，略過: %v", s.Name, errDial)
+			continue
+		}
+		clients = append(clients, cl)
+		log.Printf("[mcp] 已連接 server %q", s.Name)
+	}
+	if len(clients) == 0 {
+		return
+	}
+	gwCtx, cancel := context.WithTimeout(context.Background(), mcpDialTimeout)
+	gw, errGw := mcp.NewGateway(gwCtx, clients)
+	cancel()
+	if errGw != nil {
+		log.Printf("[mcp] 建立 gateway 失敗: %v", errGw)
+		return
+	}
+	for _, gt := range gw.Tools() {
+		registry.Register(gt)
+	}
+	log.Printf("[mcp] operator chat gateway 就緒：%d 個外部工具經 mcp_call_tool 漸進式暴露", gw.Count())
 }
 
 // start 非阻塞地跑一輪 operator agent：先【同步】Append user 訊息（讓它立刻顯示），再在背景 goroutine
