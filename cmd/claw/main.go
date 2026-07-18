@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/agentkit"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
-	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
@@ -43,43 +43,11 @@ func main() {
 	}
 	log.Printf("[provider] model=%s", modelName)
 
-	// 載入並連接 MCP 伺服器（設了 COGITO_MCP_CONFIG 才啟用）：外部 MCP 工具會註冊進每個會話的
-	// registry。連線是程式級長壽命的，優雅關閉時統一 Close。連不上的 server 略過、不影響啟動。
-	var mcpClients []*mcp.Client
-	var mcpGateway *mcp.Gateway
-	if cfgPath := os.Getenv("COGITO_MCP_CONFIG"); cfgPath != "" {
-		servers, errCfg := mcp.LoadConfig(cfgPath)
-		if errCfg != nil {
-			log.Fatalf("讀取 MCP 設定失敗: %v", errCfg)
-		}
-		for _, s := range servers {
-			// 必須帶 deadline：httpClient 刻意不設 client 級 timeout（會殺掉合法的長 SSE 串流），
-			// 逾時全靠呼叫端的 ctx。用 context.Background() 的話，一個「接受 TCP 連線但不回應」的
-			// MCP server（機器掛了/網路黑洞/惡意）就讓 main() 永久卡在這裡——bot 靜默開不起來，
-			// 沒有 log、沒有 crash。單一 server 連不上本來就是「略過」，不該拖垮整個啟動。
-			dialCtx, cancelDial := context.WithTimeout(context.Background(), mcpDialTimeout)
-			cl, errDial := mcp.Dial(dialCtx, s)
-			cancelDial()
-			if errDial != nil {
-				log.Printf("[mcp] 連接 %q 失敗，略過: %v", s.Name, errDial)
-				continue
-			}
-			mcpClients = append(mcpClients, cl)
-			log.Printf("[mcp] 已連接 server %q", s.Name)
-		}
-		if len(mcpClients) > 0 {
-			// 用 gateway 漸進式暴露：context 只帶輕量目錄 + 2 個 gateway 工具，而非 N 個完整 schema。
-			gwCtx, cancelGw := context.WithTimeout(context.Background(), mcpDialTimeout)
-			gw, errGw := mcp.NewGateway(gwCtx, mcpClients)
-			cancelGw()
-			if errGw != nil {
-				log.Printf("[mcp] 建立 gateway 失敗: %v", errGw)
-			} else {
-				mcpGateway = gw
-				log.Printf("[mcp] gateway 就緒：%d 個外部工具經 mcp_call_tool 漸進式暴露", gw.Count())
-			}
-		}
-	}
+	// 載入並連接 MCP 伺服器（設了 COGITO_MCP_CONFIG 才啟用）：外部 MCP 工具經 gateway 漸進式暴露、
+	// 註冊進每個會話的 registry。連線是程式級長壽命的，優雅關閉時統一 Close（見結尾）。連不上的
+	// server 略過、不影響啟動。改用 agentkit.LoadMCPGateway（與 cli/dashboard 同一套）——壞設定改
+	// 成 warn+略過、不再 log.Fatal 拖垮整個 bot（一個 MCP 設定筆誤不該讓服務所有頻道全掛）。
+	mcpGateway, mcpClients := agentkit.LoadMCPGateway(mcpDialTimeout)
 
 	rootDir, _ := os.Getwd()
 	rootDir += "/workspace" // 工作區根目錄；各頻道隔離到其下 channels/<id> 子目錄（見 bot.channelWorkDir）
@@ -139,21 +107,13 @@ func main() {
 
 	factory := func(sess *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine {
 		registry := tools.NewRegistry()
-		registry.Register(tools.NewReadFileTool(sess.WorkDir))
-		registry.Register(tools.NewWriteFileTool(sess.WorkDir))
-		registry.Register(tools.NewBashToolWithExecutor(sess.WorkDir, executor))
-		registry.Register(tools.NewEditFileTool(sess.WorkDir))
-		registry.Register(tools.NewReadSkillTool(rootDir)) // 技能按需載入：與技能索引同源（根 workspace）
-		registry.Register(tools.NewRecallTool(rootDir))    // 長期記憶按需檢索：與記憶索引同源（根 workspace）
-		registry.Register(tools.NewBarChartTool())         // 數據可視化：等寬長條圖（聊天平台 render 成對齊圖）
-		if selfEvolveEnabled() {                           // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
+		// 核心工具集：檔案讀寫/bash/編輯 rooted 在 sess.WorkDir（per-channel 磁碟隔離）；技能與長期
+		// 記憶 rooted 在 rootDir（與索引同源、全 bot 共用資產）。
+		agentkit.RegisterCoreTools(registry, sess.WorkDir, rootDir, executor)
+		if selfEvolveEnabled() { // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
 			registry.Register(tools.NewConsolidateTool(llmProvider, rootDir, sess))
 		}
-		if mcpGateway != nil { // 外部 MCP 工具經 gateway 漸進式暴露（2 個工具 + 輕量目錄）
-			for _, gt := range mcpGateway.Tools() {
-				registry.Register(gt)
-			}
-		}
+		agentkit.RegisterMCPTools(registry, mcpGateway) // 外部 MCP 工具經 gateway 漸進式暴露
 		// 背景任務工具（bash_background/task_output/task_kill/task_list）：每會話一個 TaskManager
 		// （session 級作用域），rooted 在該會話 WorkDir、共用同一沙箱 executor。
 		tm := tools.NewTaskManager(executor, sess.WorkDir)
@@ -203,26 +163,16 @@ func main() {
 		// agent（須在 .claw/agents/<name>.md 的 tools 明確宣告才拿得到；預設探路者只取唯讀子集，見
 		// defaultSubagentTools）。無 spawn_subagent（杜絕遞迴）。同掛審批——子 agent 的危險 bash /
 		// 敏感寫入也要人工放行。抽成 factory 以支援 worktree 隔離（依 worktree 目錄重建同款工具）。
-		buildSubReg := func(wd string) tools.Registry {
-			r := tools.NewRegistry()
-			r.Register(tools.NewReadFileTool(wd))
-			r.Register(tools.NewBashToolWithExecutor(wd, executor))
-			r.Register(tools.NewWriteFileTool(wd))
-			r.Register(tools.NewEditFileTool(wd))
-			r.Use(approval)
-			r.Use(timing)
-			return r
-		}
-		// 把本請求的 reporter 接進子智能體：子 agent 的逐步進度（以「[Subagent] …」前綴回報）串流回頻道。
-		// WithWorktreeIsolation：isolation:worktree 的 agent 在 git worktree 隔離跑、完事序列化 apply 回主
-		// 工作區（防並行寫入相互覆蓋）。ponytail: 依賴 host executor；docker sandbox 下 bash 仍掛在 base
-		// 容器，worktree 檔案隔離與 docker bash 不完全對齊——並行寫入建議用 host 執行模式。
-		subTool := tools.NewSubagentTool(eng, buildSubReg(sess.WorkDir), reporter, rootDir).
-			WithWorktreeIsolation(sess.WorkDir, buildSubReg) // skillsBaseDir=rootDir：可綁定技能進子 context
-		registry.Register(subTool)
-		for _, bt := range subTool.BackgroundTools() { // subagent_result / subagent_list（查背景委派）
-			registry.Register(bt)
-		}
+		// 子智能體工具池（超集）：read/bash 供探索、write/edit 供實作型具名 agent；同掛 approval/timing
+		// 中介層（子 agent 的危險 bash / 敏感寫入也要人工放行、計時）。reporter 串進子 agent（進度以
+		// 「[Subagent] …」前綴回報回頻道）。WithWorktreeIsolation 在 WireSubagent 內：isolation:worktree
+		// 的 agent 在 git worktree 隔離跑、完事序列化 apply 回主工作區。skillsBaseDir=rootDir。
+		agentkit.WireSubagent(registry, eng, sess.WorkDir, agentkit.SubagentOpts{
+			Executor:      executor,
+			SkillsBaseDir: rootDir,
+			Reporter:      reporter,
+			Middleware:    []tools.MiddlewareFunc{approval, timing},
+		})
 
 		return eng
 	}
