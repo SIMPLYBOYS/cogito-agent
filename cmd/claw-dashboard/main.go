@@ -13,11 +13,14 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 )
 
 func main() {
 	// 預設綁 loopback。非 loopback 綁定會被 fail-closed 守衛擋下（remote-auth 尚未實作，見 guard.go）。
 	addr := flag.String("addr", "127.0.0.1:8091", "監聽位址（預設僅本機 loopback；remote 存取需 auth，尚未實作）")
+	sessions := flag.String("sessions", os.Getenv("COGITO_SESSION_DIR"), "session 目錄（預設取自 COGITO_SESSION_DIR）")
 	flag.Parse()
 
 	insecure := os.Getenv("COGITO_DASH_INSECURE") == "1"
@@ -28,11 +31,21 @@ func main() {
 		log.Printf("[claw-dashboard] ⚠️ COGITO_DASH_INSECURE=1：綁定 %q 且【無認證】對外曝光，自負風險。", *addr)
 	}
 
+	// 唯讀：只讀既有 session 檔。未設目錄 → store 為 nil，/runs 顯示提示。
+	var store ctxpkg.SessionStore
+	if *sessions != "" {
+		if fs, err := ctxpkg.NewFileSessionStore(*sessions); err != nil {
+			log.Printf("[claw-dashboard] ⚠️ 開啟 session 目錄 %q 失敗：%v（runs 將為空）", *sessions, err)
+		} else {
+			store = fs
+		}
+	}
+
 	disp := *addr
 	if strings.HasPrefix(disp, ":") {
 		disp = "localhost" + disp
 	}
-	srv := newServer()
-	log.Printf("🛠️  cogito operator dashboard 已啟動（唯讀）：http://%s", disp)
+	srv := newServer(store, *sessions)
+	log.Printf("🛠️  cogito operator dashboard 已啟動（唯讀）：http://%s（sessions：%q）", disp, *sessions)
 	log.Fatal(http.ListenAndServe(*addr, srv))
 }
