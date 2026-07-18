@@ -73,7 +73,10 @@ type transport interface {
 // Client 是單一 MCP 伺服器的連線（傳輸無關的外殼）。上層 initialize/listTools/callTool 走 transport。
 type Client struct {
 	Name string
-	t    transport
+	// Instructions 是 server 在 initialize 握手回傳的【使用指引】（可選、可能很長）。承載「這些工具
+	// 該怎麼用」的脈絡（如查詢語法、常見流程）。經 gateway 的 mcp_describe_tool 按需提供給 agent。
+	Instructions string
+	t            transport
 }
 
 // newClient 以 stdio 傳輸建立 Client（傳入已接好的讀寫端）；供測試以 in-process 假 server 注入。
@@ -87,12 +90,20 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 
 // initialize 完成 MCP 握手：initialize 請求 + notifications/initialized 通知。
 func (c *Client) initialize(ctx context.Context) error {
-	if _, err := c.t.call(ctx, "initialize", map[string]any{
+	raw, err := c.t.call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "cogito-agent", "version": "0.1.0"},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
+	}
+	// 抓 server 級使用指引（可選）：供 gateway 按需（describe 時）餵給 agent。解析失敗不致命。
+	var res struct {
+		Instructions string `json:"instructions"`
+	}
+	if json.Unmarshal(raw, &res) == nil {
+		c.Instructions = strings.TrimSpace(res.Instructions)
 	}
 	return c.t.notify(ctx, "notifications/initialized", nil)
 }

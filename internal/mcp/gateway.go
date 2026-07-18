@@ -80,7 +80,7 @@ func (t *callTool) Name() string { return "mcp_call_tool" }
 func (t *callTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name: "mcp_call_tool",
-		Description: "調用一個外部 MCP 工具。可用工具目錄（名稱: 說明）如下；需要精確參數時先用 mcp_describe_tool 查 schema：\n\n" +
+		Description: "調用一個外部 MCP 工具。可用工具目錄（名稱: 說明）如下；需要精確參數、或想了解該 server 的用法時，先用 mcp_describe_tool 查（會回傳完整 schema，該 server 若附使用說明也一併回傳）：\n\n" +
 			t.g.catalog(),
 		InputSchema: map[string]interface{}{
 			"type": "object",
@@ -146,6 +146,11 @@ func (t *describeTool) Execute(_ context.Context, args json.RawMessage) (string,
 		"name":         mt.exposedName,
 		"description":  mt.description,
 		"input_schema": mt.inputSchema,
+	}
+	// server 級使用指引（若有）：承載「這個 server 的工具該怎麼用」的脈絡（查詢語法、常見流程），
+	// 按需在此提供——避免塞進每輪都送的 mcp_call_tool 目錄而撐爆 context。
+	if mt.client != nil && mt.client.Instructions != "" {
+		out["server_instructions"] = mt.client.Instructions
 	}
 	b, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {

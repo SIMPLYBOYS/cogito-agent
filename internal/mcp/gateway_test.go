@@ -67,3 +67,29 @@ func TestGateway_CatalogAndCall(t *testing.T) {
 		t.Errorf("describe 應含 input_schema 與參數 msg: %s", d)
 	}
 }
+
+// server 級 instructions（若有）應經 mcp_describe_tool 按需送出——供 agent 拿到「這 server 怎麼用」的脈絡。
+func TestGateway_DescribeIncludesServerInstructions(t *testing.T) {
+	c := dialFake(t)
+	c.Instructions = "用 search_datasets 找資料集，再用 query_rows 拉列。"
+	gw, err := NewGateway(context.Background(), []*Client{c})
+	if err != nil {
+		t.Fatalf("NewGateway 失敗: %v", err)
+	}
+	describe := toolByName(gw.Tools(), "mcp_describe_tool")
+	d, err := describe.Execute(context.Background(), []byte(`{"name":"test__echo"}`))
+	if err != nil {
+		t.Fatalf("describe 失敗: %v", err)
+	}
+	if !strings.Contains(d, "server_instructions") || !strings.Contains(d, "search_datasets") {
+		t.Errorf("describe 應含 server_instructions 及其內容: %s", d)
+	}
+
+	// 無 instructions 的 server → describe 不應冒出空的 server_instructions 欄位。
+	c2 := dialFake(t)
+	gw2, _ := NewGateway(context.Background(), []*Client{c2})
+	d2, _ := toolByName(gw2.Tools(), "mcp_describe_tool").Execute(context.Background(), []byte(`{"name":"test__echo"}`))
+	if strings.Contains(d2, "server_instructions") {
+		t.Error("無 instructions 時不該有 server_instructions 欄位")
+	}
+}
