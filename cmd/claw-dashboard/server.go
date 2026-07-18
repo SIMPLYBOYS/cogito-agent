@@ -82,7 +82,7 @@ func (s *server) runsList(w http.ResponseWriter, r *http.Request) {
 		if e != nil || !ok {
 			continue
 		}
-		run := replay.Build(id, snap.History, metaOf(snap))
+		run := replay.Build(id, snap.History, metaOf(snap), "") // 列表不載子深度（只需計數/是否有 subagent）
 		rows = append(rows, runRow{
 			ID: id, Link: "/runs/" + url.PathEscape(id), Query: run.Query,
 			Updated: snap.UpdatedAt, Turns: len(run.Turns), Cost: snap.TotalCostUSD,
@@ -120,7 +120,7 @@ func (s *server) runDetail(w http.ResponseWriter, r *http.Request) {
 		render(w, "Run 不存在", template.HTML(`<p class="muted">找不到這個 session。<a href="/runs">← 回列表</a></p>`))
 		return
 	}
-	run := replay.Build(id, snap.History, metaOf(snap))
+	run := replay.Build(id, snap.History, metaOf(snap), snap.WorkDir) // 詳情：載入 subagent 內部深度
 	body := template.HTML(`<p class="muted"><a href="/runs">← 回列表</a> · session `+
 		template.HTMLEscapeString(id)+`</p>`) + replay.Fragment(run)
 	render(w, "Run", body)

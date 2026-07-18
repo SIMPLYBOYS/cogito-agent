@@ -11,6 +11,7 @@ import (
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/replay"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
@@ -410,6 +411,13 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 
 		// 退出條件：不再調用工具 → 它已寫好報告，直接把 Content 當返回值給主 agent
 		if len(actionResp.ToolCalls) == 0 {
+			// M2：把子 agent【內部】history 落地成 subagents/<callID>.json，供 dashboard run-tree 用同一把
+			// call id 掛回主節點。用 ctx 裡的 session workDir + 當前 spawn_subagent 的 call id；背景子 agent
+			// （detached ctx）兩者取不到 → WriteSubRun 內部略過，無行為改變。best-effort，寫失敗不影響回報。
+			if sess := SessionFromContext(ctx); sess != nil {
+				_ = replay.WriteSubRun(sess.WorkDir, tools.CallIDFromContext(ctx),
+					replay.SubRun{Prompt: task.Prompt, History: contextHistory})
+			}
 			return actionResp.Content, nil
 		}
 

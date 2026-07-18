@@ -43,7 +43,8 @@ type Turn struct {
 	Usage       *schema.Usage
 }
 
-// Action 是一次工具調用。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）。
+// Action 是一次工具調用。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）；
+// SubTurns 為該子 agent 的【內部】執行（M2：從 subagents/<CallID>.json 掛回，可展開）。
 type Action struct {
 	Tool        string
 	Args        string
@@ -51,19 +52,38 @@ type Action struct {
 	IsSubagent  bool
 	AgentType   string
 	Report      string
+	CallID      string  // ToolCall.ID——用來找 subagents/<CallID>.json
+	SubTurns    []*Turn // 子 agent 內部逐輪（有落地 sub-history 時才有）
 }
 
-// Build 把 history 重建成 Run。演算法：assistant 訊息開一輪（thinking + actions）；user+ToolCallID 是工具
-// 結果（回填對應 action 的 observation）；第一則 user（無 ToolCallID）是 query，其後的則當系統提醒。
-func Build(id string, history []schema.Message, meta Meta) Run {
-	run := Run{ID: id, Meta: meta}
-	byCall := map[string]*Action{} // ToolCall.ID → *Action，供回填 observation（用指標避免 slice 擴張失聯）
+// Build 把 history 重建成 Run。sessWorkDir 非空時，會用 spawn_subagent 節點的 CallID 去
+// <sessWorkDir>/subagents/<CallID>.json 把子 agent 的【內部】執行掛回（M2 深度）；空則只到委派層。
+func Build(id string, history []schema.Message, meta Meta, sessWorkDir string) Run {
+	turns, query, hasSub := reconstruct(history)
+	run := Run{ID: id, Query: query, Turns: turns, HasSubagent: hasSub, Meta: meta}
+	if sessWorkDir != "" {
+		for _, t := range turns {
+			for _, a := range t.Actions {
+				if a.IsSubagent && a.CallID != "" {
+					if sr, ok := LoadSubRun(sessWorkDir, a.CallID); ok {
+						a.SubTurns, _, _ = reconstruct(sr.History)
+					}
+				}
+			}
+		}
+	}
+	return run
+}
 
+// reconstruct 把一段扁平 history 重建成 turns（+ query + 是否有 subagent）。主 run 與 subagent 內部共用它。
+// 演算法：assistant 開一輪（thinking + actions）；user+ToolCallID 是工具結果（回填對應 action 的
+// observation）；第一則 user（無 ToolCallID）是 query，其後的當系統提醒。
+func reconstruct(history []schema.Message) (turns []*Turn, query string, hasSub bool) {
+	byCall := map[string]*Action{} // ToolCall.ID → *Action（指標，避免 slice 擴張失聯）
 	for _, m := range history {
 		switch m.Role {
 		case schema.RoleSystem:
 			continue // 靜態系統層，不入 run-tree
-
 		case schema.RoleUser:
 			if m.ToolCallID != "" { // 工具結果 → 回填觀察
 				if a := byCall[m.ToolCallID]; a != nil {
@@ -74,19 +94,18 @@ func Build(id string, history []schema.Message, meta Meta) Run {
 				}
 				continue
 			}
-			if run.Query == "" {
-				run.Query = m.Content // 首則 user ＝ 任務
+			if query == "" {
+				query = m.Content // 首則 user ＝ 任務
 			} else {
-				run.Turns = append(run.Turns, &Turn{Note: m.Content}) // 系統提醒/續跑
+				turns = append(turns, &Turn{Note: m.Content}) // 系統提醒/續跑
 			}
-
 		case schema.RoleAssistant:
 			t := &Turn{Thinking: m.Content, Usage: m.Usage}
 			for _, tc := range m.ToolCalls {
-				a := &Action{Tool: tc.Name, Args: prettyArgs(tc.Arguments)}
+				a := &Action{Tool: tc.Name, Args: prettyArgs(tc.Arguments), CallID: tc.ID}
 				if tc.Name == "spawn_subagent" {
 					a.IsSubagent = true
-					run.HasSubagent = true
+					hasSub = true
 					if at := jsonField(tc.Arguments, "agent_type"); at != "" {
 						a.AgentType = at
 					} else {
@@ -100,18 +119,17 @@ func Build(id string, history []schema.Message, meta Meta) Run {
 				t.FinalAnswer = m.Content
 				t.Thinking = ""
 			}
-			run.Turns = append(run.Turns, t)
+			turns = append(turns, t)
 		}
 	}
-
 	n := 0
-	for _, t := range run.Turns {
+	for _, t := range turns {
 		if t.Note == "" {
 			n++
 			t.Index = n
 		}
 	}
-	return run
+	return turns, query, hasSub
 }
 
 // prettyArgs 把工具參數（json.RawMessage）壓成單行、截斷的可讀字串（供顯示，非結構化）。

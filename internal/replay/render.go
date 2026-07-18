@@ -34,6 +34,7 @@ var fragmentTmpl = template.Must(template.New("run").Parse(`<style>
   .run .usage { color:var(--mut,#888); font-size:11px; margin-top:4px; }
   .run .note { color:var(--mut,#888); font-size:12.5px; font-style:italic; margin:6px 0; }
   .run .ans-title { color:var(--rl); }
+  .run .subinner { margin:4px 0 4px 8px; border-left:1px dashed var(--rl); padding-left:8px; }
 </style>
 <div class="run">
   <div class="q"><div class="lbl">收到任務</div>{{.Query}}</div>
@@ -46,7 +47,10 @@ var fragmentTmpl = template.Must(template.New("run").Parse(`<style>
     {{with .Meta.Model}}<span>model: {{.}}</span>{{end}}
     {{with .Meta.UpdatedAt}}<span>{{.}}</span>{{end}}
   </div>
-  {{range .Turns}}
+  {{template "turns" .Turns}}
+</div>
+{{define "turns"}}
+  {{range .}}
     {{if .Note}}
       <div class="note">[系統提醒] {{.Note}}</div>
     {{else if .FinalAnswer}}
@@ -58,7 +62,8 @@ var fragmentTmpl = template.Must(template.New("run").Parse(`<style>
           {{if .IsSubagent}}
             <div class="action sub">🤖 spawn_subagent <span class="badge">{{.AgentType}}</span>
               <details><summary>參數</summary><pre>{{.Args}}</pre></details>
-              {{if .Report}}<details class="report"><summary>📋 子 agent 報告</summary><div class="content">{{.Report}}</div></details>{{end}}
+              {{if .SubTurns}}<details class="subinner"><summary>🔬 子 agent 內部（{{len .SubTurns}} 步）</summary>{{template "turns" .SubTurns}}</details>
+              {{else if .Report}}<details class="report"><summary>📋 子 agent 報告</summary><div class="content">{{.Report}}</div></details>{{end}}
             </div>
           {{else}}
             <div class="action">🔧 <b>{{.Tool}}</b> <pre>{{.Args}}</pre>
@@ -70,4 +75,4 @@ var fragmentTmpl = template.Must(template.New("run").Parse(`<style>
       </div>
     {{end}}
   {{end}}
-</div>`))
+{{end}}`))

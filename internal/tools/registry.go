@@ -86,6 +86,7 @@ func (r *registryImpl) GetAvailableTools() []schema.ToolDefinition {
 func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult {
 	// 【埋點 5】開啟工具執行 Span（無論成敗，defer 確保結束）
 	ctx, span := observability.StartSpan(ctx, "Tool.Execute")
+	ctx = WithCallID(ctx, call.ID) // 讓工具（及其 RunSub）拿得到自己的 call id（見 context.go）
 	span.AddAttribute("tool_name", call.Name)
 	span.AddAttribute("arguments", string(call.Arguments))
 	defer span.EndSpan()
