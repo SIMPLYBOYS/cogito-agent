@@ -172,6 +172,8 @@ func main() {
 			SkillsBaseDir: rootDir,
 			Reporter:      reporter,
 			Middleware:    []tools.MiddlewareFunc{approval, timing},
+			// 子 agent 也能用外部 MCP（如研究型子 agent 查資料源）。危險 MCP 呼叫仍過 approval 中介層。
+			ExtraSubTools: func(r tools.Registry) { agentkit.RegisterMCPTools(r, mcpGateway) },
 		})
 
 		return eng
