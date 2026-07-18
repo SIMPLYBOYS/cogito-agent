@@ -14,7 +14,7 @@ func TestPlatform_MasksSecretsAndResolvesProvider(t *testing.T) {
 	t.Setenv("OPENAI_MODEL", "qwen2.5-72b")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "123:telegram-secret")
 
-	srv := newServer(nil, "", "")
+	srv := newServer(nil, "", "", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/platform", nil))
 	body := rec.Body.String()
@@ -37,7 +37,7 @@ func TestPlatform_DefaultClaudeAndMissingKey(t *testing.T) {
 	t.Setenv("COGITO_PROVIDER", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	srv := newServer(nil, "", "")
+	srv := newServer(nil, "", "", nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/platform", nil))
 	body := rec.Body.String()

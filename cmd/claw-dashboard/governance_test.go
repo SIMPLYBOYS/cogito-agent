@@ -23,7 +23,7 @@ func TestServer_Governance(t *testing.T) {
 	t.Setenv("COGITO_ALLOWED_USERS", "telegram:771163423,slack:U0AB")
 	t.Setenv("COGITO_ADMIN_USERS", "telegram:771163423")
 
-	srv := newServer(nil, "", ws)
+	srv := newServer(nil, "", ws, nil)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/governance", nil))
 	if rec.Code != 200 {

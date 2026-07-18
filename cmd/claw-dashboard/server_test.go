@@ -13,7 +13,7 @@ import (
 
 // in-process 測 handler（NewRequest/NewRecorder，不綁 port——沙箱下可跑，且測的是「邏輯」非「部署」）。
 func TestServerRoutes_NoStore(t *testing.T) {
-	srv := newServer(nil, "", "")
+	srv := newServer(nil, "", "", nil)
 
 	cases := []struct{ path, want string }{
 		{"/", "cogito ops"},
@@ -67,7 +67,7 @@ func TestServer_RunsWithRealStore(t *testing.T) {
 	if err := store.Save(snap); err != nil {
 		t.Fatal(err)
 	}
-	srv := newServer(store, dir, dir)
+	srv := newServer(store, dir, dir, nil)
 
 	// /runs 列表：含 session id、任務、subagent badge
 	rec := httptest.NewRecorder()
