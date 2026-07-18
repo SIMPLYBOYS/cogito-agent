@@ -25,15 +25,16 @@ const operatorSessionID = "operator"
 // chatRunner 讓 dashboard 在自己的行程內驅動 agent（等同「claw-cli 包在 web form 後面」）：專用
 // operator session，工具集與 claw-cli 對齊（read/write/bash/edit/skill/recall + subagent + 背景任務）。
 // 這是【寫入】能力（會真的跑 bash/寫檔），故 opt-in（COGITO_DASH_CHAT=1）；一次只允許一個 run（mu 序列化）。
+// 執行事件經 hub 以 SSE 即時串流到瀏覽器（見 chat_stream.go）。
 //
 // 行程模型：若 bot（cmd/claw）也在跑，這是【第二個】agent 實例。用專屬 operator session 避免歷史相撞；
 // 但兩者共享同一 workspace，檔案/bash 副作用是共用的——這正是 operator 就地驅動同一工作區的目的。
 type chatRunner struct {
 	eng      *engine.AgentEngine
-	reporter engine.Reporter
+	reporter engine.Reporter // fanout：終端 console + SSE hub
+	hub      *sseHub
 	workDir  string
 	mu       sync.Mutex   // 序列化：一次一個 operator run，避免同 session 併發改歷史
-	running  atomic.Bool  // 供 GET 顯示「執行中」（另開分頁時看得到）
 	lastErr  atomic.Value // string：上次 run 的錯誤（空＝成功）
 }
 
@@ -63,7 +64,10 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	}
 
 	eng := engine.NewAgentEngine(tracked, registry, false, false)
-	reporter := engine.NewTerminalReporter() // 進度打到跑 dashboard 的終端；web 視圖重載時從 session 讀
+
+	hub := &sseHub{}
+	// 事件同時打到終端（跑 dashboard 的 console）與 SSE hub（瀏覽器即時串流）。
+	reporter := multiReporter{rs: []engine.Reporter{engine.NewTerminalReporter(), sseReporter{hub: hub}}}
 
 	buildSubReg := func(wd string) tools.Registry {
 		r := tools.NewRegistry()
@@ -80,26 +84,27 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 		registry.Register(bt)
 	}
 
-	c := &chatRunner{eng: eng, reporter: reporter, workDir: workDir}
+	c := &chatRunner{eng: eng, reporter: reporter, hub: hub, workDir: workDir}
 	c.lastErr.Store("")
 	return c, nil
 }
 
 // start 非阻塞地跑一輪 operator agent：先【同步】Append user 訊息（讓它立刻顯示），再在背景 goroutine
-// 跑 engine.Run（可能數十秒）。POST 因此立刻返回；頁面靠 meta-refresh 輪詢，running 結束就顯示回覆。
-// 忙碌（已有 run 進行中）時回 false、不排隊。mu 於 goroutine 內 Unlock（Go 允許跨 goroutine 解鎖）。
+// 跑 engine.Run（可能數十秒），執行事件經 hub 即時串流。POST 因此立刻返回。忙碌（已有 run 進行中）時
+// 回 false、不排隊。mu 於 goroutine 內 Unlock（Go 允許跨 goroutine 解鎖）。
 func (c *chatRunner) start(userMsg string) bool {
 	if !c.mu.TryLock() {
 		return false
 	}
-	c.running.Store(true)
+	c.hub.begin()
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, c.workDir)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: userMsg}) // 立刻落地→GET 馬上看得到提問
 	go func() {
 		defer c.mu.Unlock()
-		defer c.running.Store(false)
+		defer c.hub.end()
 		if err := c.eng.Run(context.Background(), sess, c.reporter); err != nil {
 			c.lastErr.Store(err.Error())
+			c.hub.push(evJSON("error", "執行出錯："+err.Error()))
 		} else {
 			c.lastErr.Store("")
 		}
@@ -132,24 +137,24 @@ func (s *server) chatGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var hist []schema.Message
-	var meta string
+	var model string
 	if s.store != nil {
 		if snap, ok, _ := s.store.Load(operatorSessionID); ok {
 			hist = snap.History
-			meta = snap.Model
+			model = snap.Model
 		}
 	}
 	data := chatView{
 		Msgs:    toBubbles(hist),
-		Running: s.chat.running.Load(),
-		Model:   meta,
+		Running: s.chat.hub.isRunning(),
+		Model:   model,
 	}
 	if e, _ := s.chat.lastErr.Load().(string); e != "" {
 		data.LastErr = e
 	}
 	var b bytes.Buffer
 	_ = chatTmpl.Execute(&b, data)
-	s.render(w, "Operator Chat", template.HTML(b.String()))
+	s.renderChat(w, "Operator Chat", template.HTML(b.String())) // renderChat：放寬 CSP 供 SSE 串流
 }
 
 func (s *server) chatPost(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +168,7 @@ func (s *server) chatPost(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := strings.TrimSpace(r.FormValue("msg"))
 	if msg != "" {
-		s.chat.start(msg) // 非阻塞：背景跑 agent，POST 立刻返回；忙碌則 no-op（回 false 不排隊）
+		s.chat.start(msg) // 非阻塞：背景跑 agent、事件即時串流；忙碌則 no-op（回 false 不排隊）
 	}
 	http.Redirect(w, r, "/chat#end", http.StatusSeeOther) // PRG：避免重整重送；錨點捲到最新
 }
@@ -212,34 +217,52 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat .note { color:var(--m); font-size:12.5px; margin:0 0 14px; }
   .chat .note a { font-weight:600; }
   .chat .banner { border:1px solid var(--a); border-radius:7px; padding:8px 12px; margin-bottom:14px; color:var(--a); font-size:13px; }
-  .chat .thread { display:flex; flex-direction:column; gap:12px; margin-bottom:22px; }
+  .chat .banner.done { color:var(--ok,#86b06e); border-color:var(--ok,#86b06e); }
+  .chat .thread { display:flex; flex-direction:column; gap:12px; margin-bottom:16px; }
   .chat .msg { max-width:82%; padding:9px 13px; border-radius:10px; white-space:pre-wrap; word-break:break-word; font-size:14px; }
   .chat .msg.you { align-self:flex-end; background:var(--a); color:#fff; border-bottom-right-radius:3px; }
   .chat .msg.bot { align-self:flex-start; background:var(--p); border:1px solid var(--ln); border-bottom-left-radius:3px; }
   .chat .msg .tag { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.1em; opacity:.7; margin-bottom:3px; }
   .chat .msg.bot .used { display:block; margin-top:6px; font-size:11px; color:var(--m); }
   .chat .empty { color:var(--m); font-style:italic; margin-bottom:20px; }
+  /* 即時串流區：agent 執行事件逐筆冒出 */
+  .chat #live { display:flex; flex-direction:column; gap:4px; margin-bottom:16px; }
+  .chat .ev { display:flex; gap:8px; font-size:12.5px; line-height:1.5; padding:3px 0; border-left:2px solid var(--ln); padding-left:12px; }
+  .chat .ev .ic { color:var(--a2); flex:none; }
+  .chat .ev .tx { white-space:pre-wrap; word-break:break-word; }
+  .chat .ev.turn { color:var(--m); text-transform:uppercase; letter-spacing:.08em; font-size:11px; border-left-color:transparent; margin-top:6px; }
+  .chat .ev.turn .ic { color:var(--m); }
+  .chat .ev.think { color:var(--m); font-style:italic; }
+  .chat .ev.tool .ic { color:var(--a2); }
+  .chat .ev.result { color:var(--m); }
+  .chat .ev.error { color:var(--a); border-left-color:var(--a); }
+  .chat .ev.msg { color:var(--fg); border-left-color:var(--a); }
+  .chat .ev.msg .ic { color:var(--a); }
   .chat form.composer { display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--ln); padding-top:16px; }
   .chat textarea { width:100%; resize:vertical; font:inherit; font-size:14px; color:var(--fg); background:var(--p);
     border:1px solid var(--ln); border-radius:8px; padding:10px 12px; }
   .chat textarea:focus { outline:none; border-color:var(--a); }
+  .chat textarea:disabled { opacity:.55; }
   .chat .row { display:flex; align-items:center; gap:12px; }
   .chat button { font:inherit; font-weight:700; letter-spacing:.03em; color:#fff; background:var(--a); border:none;
     border-radius:8px; padding:8px 20px; cursor:pointer; }
   .chat button:hover { filter:brightness(1.08); }
+  .chat button:disabled { opacity:.5; cursor:not-allowed; }
   .chat .hint { color:var(--m); font-size:11.5px; }
 </style>
 <div class="chat">
-  {{if .Running}}<meta http-equiv="refresh" content="2">{{end}}
+  {{if .Running}}<noscript><meta http-equiv="refresh" content="3"></noscript>{{end}}
   <p class="note">operator 就地驅動 agent（session <code>operator</code>，工作區同 bot／CLI）。完整執行樹（工具調用、子 agent）見 <a href="/runs/operator">/runs/operator</a>。</p>
-  {{if .Running}}<div class="banner">⏳ agent 執行中…（背景執行，本頁每 2 秒自動重載；完成後即顯示回覆）</div>{{end}}
-  {{if .LastErr}}<div class="banner">⚠️ 上次執行出錯：{{.LastErr}}</div>{{end}}
+  {{if .LastErr}}{{if not .Running}}<div class="banner">⚠️ 上次執行出錯：{{.LastErr}}</div>{{end}}{{end}}
   {{if .Msgs}}<div class="thread">
     {{range .Msgs}}<div class="msg {{if .You}}you{{else}}bot{{end}}"><span class="tag">{{if .You}}你{{else}}operator agent{{end}}</span>{{.Text}}{{if .UsedTool}}<span class="used">⚙ 本回合動過工具／子 agent，詳見執行樹</span>{{end}}</div>{{end}}
-  </div>{{else}}<p class="empty">尚無對話。在下方交辦第一個任務。</p>{{end}}
-  <form method="POST" action="/chat" class="composer">
-    <textarea name="msg" rows="3" placeholder="交辦任務給 operator agent…（會真的執行 bash／寫檔）" autofocus></textarea>
-    <div class="row"><button type="submit">送出</button><span class="hint">Enter 換行；點「送出」交辦{{with .Model}} · {{.}}{{end}}</span></div>
+  </div>{{else}}{{if not .Running}}<p class="empty">尚無對話。在下方交辦第一個任務。</p>{{end}}{{end}}
+  {{if .Running}}<div id="runbanner" class="banner">⏳ agent 執行中…（即時串流；完成後可繼續交辦）</div>
+  <div id="live"></div>{{end}}
+  <form method="POST" action="/chat" class="composer" id="composer">
+    <textarea name="msg" rows="3" placeholder="交辦任務給 operator agent…（會真的執行 bash／寫檔）"{{if .Running}} disabled{{else}} autofocus{{end}}></textarea>
+    <div class="row"><button type="submit"{{if .Running}} disabled{{end}}>送出</button><span class="hint">Enter 換行；點「送出」交辦{{with .Model}} · {{.}}{{end}}</span></div>
   </form>
   <div id="end"></div>
-</div>`))
+</div>
+{{if .Running}}<script src="/chat.js"></script>{{end}}`))

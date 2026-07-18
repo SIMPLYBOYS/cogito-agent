@@ -97,3 +97,53 @@ func TestChatPost_RejectsCrossSite(t *testing.T) {
 		t.Errorf("跨站 POST 應 403（CSRF 擋），got %d", rec.Code)
 	}
 }
+
+// SSE hub 緩衝：push 後 since 取得新事件、begin 清空、end 收 running。
+func TestSSEHub_SinceBuffers(t *testing.T) {
+	h := &sseHub{}
+	h.begin()
+	if !h.isRunning() { t.Fatal("begin 後應 running") }
+	h.push(evJSON("tool", "bash"))
+	h.push(evJSON("msg", "done"))
+	evs, running, total := h.since(0)
+	if len(evs) != 2 || total != 2 || !running { t.Fatalf("since(0)：evs=%d total=%d running=%v", len(evs), total, running) }
+	evs2, _, _ := h.since(2)
+	if len(evs2) != 0 { t.Errorf("since(total) 應無新事件，got %d", len(evs2)) }
+	h.end()
+	if h.isRunning() { t.Error("end 後不應 running") }
+	// begin 重置緩衝
+	h.begin()
+	if _, _, total := h.since(0); total != 0 { t.Errorf("begin 應清空緩衝，got total=%d", total) }
+}
+
+// 執行中：chat 頁應含串流區 #live + 載入 /chat.js，且 CSP 放寬到 script-src 'self'。
+func TestChatGet_RunningShowsStream(t *testing.T) {
+	cr := &chatRunner{hub: &sseHub{}}
+	cr.hub.begin() // 標記 running
+	srv := newServer(nil, "", "", cr)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/chat", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="live"`) || !strings.Contains(body, "/chat.js") {
+		t.Error("執行中應渲染串流區 #live 並載入 /chat.js")
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "script-src 'self'") {
+		t.Error("chat 頁 CSP 應放寬 script-src 'self'（供 SSE）")
+	}
+	if !strings.Contains(body, "disabled") {
+		t.Error("執行中輸入框應 disabled，防重複交辦")
+	}
+}
+
+// /chat.js 服務串流客戶端。
+func TestChatJS_Served(t *testing.T) {
+	srv := newServer(nil, "", "", &chatRunner{hub: &sseHub{}})
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/chat.js", nil))
+	if !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Error("/chat.js 應回 javascript content-type")
+	}
+	if !strings.Contains(rec.Body.String(), "EventSource") {
+		t.Error("/chat.js 應含 EventSource 客戶端")
+	}
+}
