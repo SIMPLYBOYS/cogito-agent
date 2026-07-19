@@ -39,6 +39,17 @@ var (
 	cronEnvKeys = []string{cronTZKey, notifyTargetKey, notifyErrOnlyKey}
 )
 
+// liveEnvKeys 是【本行程在使用時才讀】的設定（cronLocation/cronNotifyTarget… 每次都 os.Getenv），
+// 存檔即 os.Setenv → 立刻生效、不必重啟。其餘設定多由 bot（另一行程，啟動時載入 .env）消費，
+// 故訊息要分開講，否則會叫使用者做白工。
+var liveEnvKeys = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range cronEnvKeys {
+		m[k] = true
+	}
+	return m
+}()
+
 // allowedEnvKeys 是【可經面板寫入的白名單】：任一表單只能改這些 key（金鑰/token 不在內）。updateEnvFile
 // 亦只碰傳進去的 key，雙保險。
 var allowedEnvKeys = func() map[string]bool {
@@ -56,6 +67,17 @@ var allowedEnvKeys = func() map[string]bool {
 	}
 	return m
 }()
+
+// envSaveMessage 依「這次改的是誰在讀的設定」給正確回饋：全是本行程即時讀取的 → 立刻生效；
+// 只要沾到 bot 消費的設定 → 才提醒重啟。別讓使用者為了 cron 設定白重啟一次。
+func envSaveMessage(updates map[string]string) string {
+	for k := range updates {
+		if !liveEnvKeys[k] {
+			return "✓ 已寫入 .env——bot 需【重啟】才套用。本面板檢視已即時更新。"
+		}
+	}
+	return "✓ 已寫入 .env，並【立即生效】（本面板每次執行時才讀，不必重啟）。"
+}
 
 type envField struct {
 	Key, Label, Hint, Value string
@@ -110,6 +132,6 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 	for k, v := range updates {
 		_ = os.Setenv(k, v) // 面板檢視即時反映；bot 仍需重啟
 	}
-	s.setFlash("✓ 已寫入 .env——bot 需【重啟】才套用。本面板檢視已即時更新。")
+	s.setFlash(envSaveMessage(updates))
 	http.Redirect(w, r, back, http.StatusSeeOther)
 }

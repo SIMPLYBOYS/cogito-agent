@@ -85,3 +85,23 @@ func TestEnvConfigSave_PartialUpdate(t *testing.T) {
 		t.Error("不在 _fields 的 key 被清掉了——局部更新失效！")
 	}
 }
+
+// 存檔回饋要分情況：cron 設定是本行程使用時才讀 → 立刻生效；沾到 bot 消費的設定才要重啟。
+// 講錯會害使用者白重啟一次。
+func TestEnvSaveMessage(t *testing.T) {
+	live := envSaveMessage(map[string]string{cronTZKey: "Asia/Taipei", notifyTargetKey: "telegram:1"})
+	if !strings.Contains(live, "立即生效") || strings.Contains(live, "需【重啟】") {
+		t.Errorf("純 cron 設定應說立即生效、不得要求重啟，得：%s", live)
+	}
+
+	needsRestart := envSaveMessage(map[string]string{"COGITO_SANDBOX": "docker"})
+	if !strings.Contains(needsRestart, "重啟") {
+		t.Errorf("bot 消費的設定應提醒重啟，得：%s", needsRestart)
+	}
+
+	// 混合：只要沾到一個需重啟的，就得提醒
+	mixed := envSaveMessage(map[string]string{cronTZKey: "UTC", "COGITO_SANDBOX": "docker"})
+	if !strings.Contains(mixed, "重啟") {
+		t.Errorf("混合時應提醒重啟，得：%s", mixed)
+	}
+}
