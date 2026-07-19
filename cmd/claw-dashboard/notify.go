@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -89,7 +90,43 @@ func looksLikeToken(s string) bool {
 		strings.HasPrefix(low, "bot") || len(s) > 40
 }
 
-// sendNotify 依目標平台分派。回錯由呼叫端記 log——通知失敗不該影響排程本身。
+// splitNotifyTargets 拆逗號分隔的多目標（去空白、略過空項），支援同時送 Slack 與 Telegram。
+func splitNotifyTargets(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// validateNotifyTargets 逐一驗證（存檔時用）：任一個不合法就整批擋下，避免存進一半能用的設定。
+func validateNotifyTargets(s string) error {
+	for _, t := range splitNotifyTargets(s) {
+		if _, _, err := parseNotifyTarget(t); err != nil {
+			return fmt.Errorf("%q %v", t, err)
+		}
+	}
+	return nil
+}
+
+// sendNotifyAll 送到所有目標。單一目標失敗不影響其他（Slack 掛了不該讓 Telegram 也收不到），
+// 最後把各自的錯誤合併回報。
+func sendNotifyAll(targets, text string) error {
+	var errs []string
+	for _, t := range splitNotifyTargets(targets) {
+		if err := sendNotify(t, text); err != nil {
+			errs = append(errs, fmt.Sprintf("%s → %v", t, err))
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "；"))
+	}
+	return nil
+}
+
+// sendNotify 送單一目標，依平台分派。回錯由呼叫端記 log——通知失敗不該影響排程本身。
 func sendNotify(target, text string) error {
 	plat, id, err := parseNotifyTarget(target)
 	if err != nil {

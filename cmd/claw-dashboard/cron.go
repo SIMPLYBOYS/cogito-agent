@@ -181,7 +181,7 @@ func (s *cronScheduler) fire(j cronJob, now time.Time) {
 	// 推播結果。失敗只記 log——通知掛掉不該影響排程本身。
 	if target := cronNotifyTarget(); shouldNotify(target, status) {
 		notice := buildCronNotice(j, status, msg, reply, s.now().Sub(started))
-		if e := sendNotify(target, notice); e != nil {
+		if e := sendNotifyAll(target, notice); e != nil {
 			log.Printf("[cron] 推播失敗：%v", e)
 		}
 	}

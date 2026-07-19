@@ -21,7 +21,8 @@ type cronData struct {
 	Jobs          []cronRow
 	SchedulerOn   bool // chat（寫入）啟用＝排程器會真的觸發
 	Flash         string
-	NotifyTarget  string // 空＝不推播
+	NotifyTarget  string   // 原始字串（表單預填）
+	NotifyTargets []string // 拆好的多目標（顯示用；空＝不推播）
 	NotifyErrOnly bool
 	TZName        string // 排程解讀用時區（顯示用）
 	TZValue       string // CRON_TZ 現值（表單預填；空＝跟隨伺服器）
@@ -42,6 +43,7 @@ func (s *server) cronPage(w http.ResponseWriter, r *http.Request) {
 		SchedulerOn:   s.cron != nil,
 		Flash:         s.readFlash(),
 		NotifyTarget:  cronNotifyTarget(),
+		NotifyTargets: splitNotifyTargets(cronNotifyTarget()),
 		NotifyErrOnly: cronNotifyErrorsOnly(),
 		TZName:        loc.String(),
 		TZValue:       strings.TrimSpace(os.Getenv(cronTZKey)),
@@ -178,7 +180,7 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
 </div>
 {{else}}<p class="muted">（尚無排程任務。）</p>{{end}}
 
-<h3>排程設定 <span class="muted">{{if .TZValue}}{{.TZName}}{{else}}<span class="warn">{{.TZName}} ⚠️ 未明設時區</span>{{end}} · {{if .NotifyTarget}}推播 {{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未推播{{end}}</span></h3>
+<h3>排程設定 <span class="muted">{{if .TZValue}}{{.TZName}}{{else}}<span class="warn">{{.TZName}} ⚠️ 未明設時區</span>{{end}} · {{if .NotifyTargets}}推播 {{range $i, $t := .NotifyTargets}}{{if $i}}、{{end}}{{$t}}{{end}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未推播{{end}}</span></h3>
 <p class="muted">時區決定排程怎麼解讀（留空＝跟隨伺服器，雲端多為 UTC）。
 推播是執行完把「狀態＋回覆摘要＋執行樹連結」送到 Slack／Telegram，留空＝不推播；
 token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
@@ -187,7 +189,12 @@ token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
     <input type="hidden" name="_fields" value="CRON_TZ COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
     <input type="hidden" name="_return" value="/cron">
     <label>時區 <input name="CRON_TZ" value="{{.TZValue}}" placeholder="Asia/Taipei"></label>
-    <label>推播目標（收件頻道 id，<b>不是 token</b>） <input name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="slack:C0123ABC 或 telegram:12345678"></label>
+    <p class="fhint">IANA 名稱。留空＝跟隨伺服器（雲端多為 UTC）。</p>
+
+    <label>推播目標 <input class="wide" name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="telegram:12345678, slack:C0123ABC"></label>
+    <p class="fhint">收件對象的<b>頻道／聊天室 id</b>，不是 token。多個用逗號分隔，可同時送
+    Telegram 與 Slack。token 設在 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
+
     <label class="tog"><input type="checkbox" name="COGITO_CRON_NOTIFY_ERRORS_ONLY" value="1"{{if .NotifyErrOnly}} checked{{end}}> 只在失敗時推播</label>
     <button>儲存</button>
   </form>

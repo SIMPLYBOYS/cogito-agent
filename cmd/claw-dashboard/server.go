@@ -331,7 +331,12 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   form.knobs input { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:200px; }
   form.knobs input:focus { outline:none; border-color:var(--acc); }
   form.knobs input[type=checkbox] { width:auto; max-width:none; }
-  form.knobs .tog { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+  /* flex-direction 要顯式設回 row：外層 form.knobs label 是 column，只改 display 會讓
+     勾選框疊在文字上方再被 align-items 置中（跑版）。 */
+  form.knobs .tog { display:inline-flex; flex-direction:row; align-items:center; gap:7px;
+    align-self:flex-start; font-size:13px; }
+  form.knobs input.wide { max-width:420px; }
+  form.knobs .fhint { margin:-7px 0 0; max-width:440px; font-size:11.5px; line-height:1.5; color:var(--mut); }
   form.knobs select { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:220px; }
   ul.gitems .acts { display:flex; gap:8px; flex:none; }
   /* 金鑰／祕密（眼睛顯示 + 輪替） */

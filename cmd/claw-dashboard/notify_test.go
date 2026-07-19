@@ -90,3 +90,31 @@ func TestNotifyTarget_RejectsPastedToken(t *testing.T) {
 		}
 	}
 }
+
+// 多目標：逗號分隔可同時送 Telegram 與 Slack；任一個不合法就整批擋下。
+func TestNotifyTargets_Multi(t *testing.T) {
+	got := splitNotifyTargets(" telegram:123 , slack:C0123ABC ,, ")
+	want := []string{"telegram:123", "slack:C0123ABC"}
+	if len(got) != len(want) {
+		t.Fatalf("預期拆出 %d 個目標，得 %d：%v", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("第 %d 個應為 %q，得 %q", i, want[i], got[i])
+		}
+	}
+
+	if err := validateNotifyTargets("telegram:123, slack:C0123ABC"); err != nil {
+		t.Errorf("合法多目標不該被擋：%v", err)
+	}
+	// 一好一壞 → 整批擋下，避免存進「一半能用」的設定
+	if err := validateNotifyTargets("telegram:123, slack:x" + "oxb-leaked-token-value"); err == nil {
+		t.Error("其中一個是 token 時應整批擋下")
+	}
+	if err := validateNotifyTargets("telegram:123, discord:999"); err == nil {
+		t.Error("其中一個平台不支援時應整批擋下")
+	}
+	if err := validateNotifyTargets(""); err != nil {
+		t.Errorf("空字串＝不推播，不該報錯：%v", err)
+	}
+}

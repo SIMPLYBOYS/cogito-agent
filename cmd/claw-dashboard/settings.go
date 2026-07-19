@@ -119,7 +119,7 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 	}
 	// 推播目標會明碼顯示在頁面上：存檔就擋掉誤貼的 token，別等到執行才失敗（那時憑證已經寫進 .env）。
 	if v := updates[notifyTargetKey]; v != "" {
-		if _, _, err := parseNotifyTarget(v); err != nil {
+		if err := validateNotifyTargets(v); err != nil {
 			s.setFlash("⚠️ 推播目標無效：" + err.Error())
 			http.Redirect(w, r, back, http.StatusSeeOther)
 			return
