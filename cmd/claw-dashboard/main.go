@@ -79,6 +79,6 @@ func main() {
 		mode = "唯讀 + operator chat（寫入）"
 	}
 	srv := newServer(store, *sessions, *workspace, chat)
-	log.Printf("🛠️  cogito operator dashboard 已啟動（%s）：http://%s（sessions：%q，workspace：%q）", mode, disp, *sessions, *workspace)
+	log.Printf("🛠️  cogito agent · operator dashboard 已啟動（%s）：http://%s（sessions：%q，workspace：%q）", mode, disp, *sessions, *workspace)
 	log.Fatal(http.ListenAndServe(*addr, srv))
 }

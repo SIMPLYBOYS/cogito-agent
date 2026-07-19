@@ -79,7 +79,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 	}
 	s.render(w, "Status", template.HTML(
 		`<dl class="kv">`+
-			`<dt>服務</dt><dd>cogito operator dashboard</dd>`+
+			`<dt>服務</dt><dd>cogito agent · operator dashboard</dd>`+
 			`<dt>Go</dt><dd>`+template.HTMLEscapeString(runtime.Version())+`</dd>`+
 			`<dt>sessions 目錄</dt><dd>`+template.HTMLEscapeString(dir)+`</dd>`+
 			`<dt>session 數</dt><dd>`+n+`</dd>`+
@@ -207,7 +207,7 @@ func (s *server) writeLayout(w http.ResponseWriter, title string, body template.
 var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
 <html lang="zh-Hant"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} · cogito ops</title>
+<title>{{.Title}} · cogito agent</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -334,7 +334,7 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
 </style></head>
 <body>
 <header>
-  <span class="brand"><span class="mark"></span><span class="wm">cogito<em> ops</em></span></span>
+  <span class="brand"><span class="mark"></span><span class="wm">cogito<em> agent</em></span></span>
   <nav><a href="/chat">chat</a><a href="/runs">runs</a><a href="/metrics">metrics</a><a href="/governance">governance</a><a href="/platform">platform</a><a href="/status">status</a></nav>
   <span class="env"><span class="dot{{if .Write}} write{{end}}"></span>loopback{{if .Write}} · operator（可寫入）{{end}}</span>
 </header>

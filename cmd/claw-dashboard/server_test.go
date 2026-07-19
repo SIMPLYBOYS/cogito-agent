@@ -16,7 +16,7 @@ func TestServerRoutes_NoStore(t *testing.T) {
 	srv := newServer(nil, "", "", nil)
 
 	cases := []struct{ path, want string }{
-		{"/", "cogito ops"},
+		{"/", "cogito<em> agent</em>"},
 		{"/status", "loopback"},
 		{"/runs", "未設 sessions"}, // 無 store → 提示設目錄
 		{"/governance", "提案佇列"},
