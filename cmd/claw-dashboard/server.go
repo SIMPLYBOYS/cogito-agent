@@ -22,7 +22,8 @@ type server struct {
 	dir       string
 	workspace string
 	chat      *chatRunner
-	flash     atomic.Value // string：上次寫入動作（放行／設定）的結果，GET 時顯示一次即清
+	cron      *cronScheduler // nil＝未啟用 chat（cron 會驅動 agent，沿用同一個寫入閘）
+	flash     atomic.Value   // string：上次寫入動作（放行／設定）的結果，GET 時顯示一次即清
 }
 
 // newServer 組出 operator dashboard 的路由。用自己的 mux（不碰 http.DefaultServeMux——避免任何被
@@ -30,6 +31,11 @@ type server struct {
 // /chat 仍註冊，但顯示「未啟用」提示（唯讀）。
 func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunner) http.Handler {
 	s := &server{store: store, dir: dir, workspace: workspace, chat: chat}
+	// 排程器只在 chat（寫入）啟用時起——cron 到點會驅動 agent。stop 傳 nil＝跟著行程活到結束。
+	if chat != nil {
+		s.cron = newCronScheduler(workspace, chat)
+		go s.cron.run(nil)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /status", s.status)
@@ -42,6 +48,12 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("POST /governance/promote-skill", s.govPromoteSkill)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /skills", s.skills)
+	mux.HandleFunc("GET /cron", s.cronPage)
+	mux.HandleFunc("POST /cron/add", s.cronAdd)
+	mux.HandleFunc("POST /cron/edit", s.cronEdit)
+	mux.HandleFunc("POST /cron/remove", s.cronRemove)
+	mux.HandleFunc("POST /cron/toggle", s.cronToggle)
+	mux.HandleFunc("POST /cron/run", s.cronRunNow)
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("POST /env-config", s.envConfigSave)
@@ -365,6 +377,15 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   button.gact.ghost { color:var(--mut); background:transparent; border:1px solid var(--line); }
   button.gact.ghost:hover { color:var(--acc); border-color:var(--acc); filter:none; }
   .badge, .pill { display:inline-block; font-size:10.5px; letter-spacing:.03em; border-radius:5px; padding:1px 7px; margin-left:4px; }
+  .pill.ok { color:var(--ok); border:1px solid var(--ok); }
+  .pill.err { color:var(--acc); border:1px solid var(--acc); }
+  .cronlist { display:flex; flex-direction:column; gap:10px; margin:14px 0; }
+  .cronitem { border:1px solid var(--line); border-radius:8px; padding:11px 13px; background:var(--bg2); }
+  .cronhead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+  .cronitem dl.kv { font-size:13px; gap:5px 18px; }
+  .cronprompt { margin:9px 0; padding:8px 11px; background:var(--bg); border:1px solid var(--line);
+    border-radius:6px; font-size:13px; white-space:pre-wrap; }
+  .cronitem .acts { display:flex; gap:8px; flex-wrap:wrap; margin-top:4px; }
   .pill.sub { color:var(--acc); border:1px solid var(--acc); }
   .pill.run { color:var(--acc2); border:1px solid var(--acc2); animation:pulse 1.8s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.4; } }
@@ -379,6 +400,7 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
     <a href="/runs"{{if eq .Active "runs"}} class="on"{{end}}><span class="ic">🌿</span>runs</a>
     <a href="/metrics"{{if eq .Active "metrics"}} class="on"{{end}}><span class="ic">📊</span>metrics</a>
     <a href="/skills"{{if eq .Active "skills"}} class="on"{{end}}><span class="ic">📦</span>skills</a>
+    <a href="/cron"{{if eq .Active "cron"}} class="on"{{end}}><span class="ic">⏱</span>cron</a>
     <a href="/governance"{{if eq .Active "governance"}} class="on"{{end}}><span class="ic">⚖️</span>governance</a>
     <a href="/platform"{{if eq .Active "platform"}} class="on"{{end}}><span class="ic">⚙️</span>platform</a>
     <a href="/status"{{if eq .Active "status"}} class="on"{{end}}><span class="ic">◍</span>status</a>
