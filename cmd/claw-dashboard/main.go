@@ -18,6 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	// 內嵌 IANA 時區資料庫：精簡容器（scratch/alpine）常沒有 tzdata，缺了會讓 CRON_TZ 的
+	// time.LoadLocation 直接失敗。內嵌後排程時區在任何部署環境都可用。
+	_ "time/tzdata"
 
 	"github.com/joho/godotenv"
 

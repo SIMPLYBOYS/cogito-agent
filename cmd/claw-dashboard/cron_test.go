@@ -187,3 +187,56 @@ func TestCronRunningMarker(t *testing.T) {
 		t.Error("清除後應回到閒置")
 	}
 }
+
+// 時區必須真的改變觸發時刻——雲端機器多為 UTC，若設定無效，「0 9 * * *」會在錯的時間跑。
+// 情境：LastRun 固定為 2026-01-01T00:00:00Z，排程「每天 09:00」。
+func TestCronDue_RespectsTimezone(t *testing.T) {
+	at := func(s string) time.Time {
+		tm, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm
+	}
+	daily9 := cronJob{ID: "tz", Schedule: "0 9 * * *", Enabled: true, LastRun: "2026-01-01T00:00:00Z"}
+
+	// Asia/Taipei（UTC+8）：09:00 台北 ＝ 01:00 UTC
+	t.Setenv(cronTZKey, "Asia/Taipei")
+	s := &cronScheduler{base: map[string]time.Time{}, now: time.Now}
+	if s.due(daily9, at("2026-01-01T00:30:00Z")) {
+		t.Error("00:30Z＝台北 08:30，未到 09:00，不該觸發")
+	}
+	if !s.due(daily9, at("2026-01-01T01:00:00Z")) {
+		t.Error("01:00Z＝台北 09:00，應觸發")
+	}
+
+	// 同一份排程改成 UTC：09:00 UTC，01:00Z 時就不該觸發了
+	t.Setenv(cronTZKey, "UTC")
+	s2 := &cronScheduler{base: map[string]time.Time{}, now: time.Now}
+	if s2.due(daily9, at("2026-01-01T01:00:00Z")) {
+		t.Error("時區設為 UTC 時，01:00Z 尚未到 09:00，不該觸發")
+	}
+	if !s2.due(daily9, at("2026-01-01T09:00:00Z")) {
+		t.Error("時區設為 UTC 時，09:00Z 應觸發")
+	}
+}
+
+func TestCronLocation(t *testing.T) {
+	t.Setenv(cronTZKey, "")
+	if loc, warn := cronLocation(); loc != time.Local || warn != "" {
+		t.Errorf("未設應回本地時區且無警告，得 %v / %q", loc, warn)
+	}
+	t.Setenv(cronTZKey, "Asia/Taipei")
+	if loc, warn := cronLocation(); loc.String() != "Asia/Taipei" || warn != "" {
+		t.Errorf("應載入 Asia/Taipei，得 %v / %q", loc, warn)
+	}
+	// 無效時區：退回本地並提示，而非讓排程整個停擺
+	t.Setenv(cronTZKey, "Mars/Olympus")
+	loc, warn := cronLocation()
+	if loc != time.Local {
+		t.Errorf("無效時區應退回本地，得 %v", loc)
+	}
+	if warn == "" {
+		t.Error("無效時區應回提示訊息")
+	}
+}

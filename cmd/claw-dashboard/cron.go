@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +20,26 @@ const cronTick = 30 * time.Second
 
 // errAgentBusy＝本行程已有 agent run 在跑。排程器不排隊，下一輪再試（避免堆積）。
 var errAgentBusy = errors.New("agent 忙碌中")
+
+// cronTZKey 設定排程解讀用的時區（IANA 名稱，如 Asia/Taipei）。
+//
+// 【為何需要】排程是牆上時鐘樣式，得先知道是「誰的牆」。雲端機器預設多為 UTC，若依賴伺服器本地時區，
+// 「0 9 * * *」會變成台北下午五點。設了這個就與部署環境的 TZ 脫鉤。
+const cronTZKey = "CRON_TZ"
+
+// cronLocation 回排程用時區；空＝伺服器本地時區。第二個回傳值是設定有問題時的說明（供 UI 提示），
+// 空＝正常。無效時退回本地時區而非讓排程整個停擺。
+func cronLocation() (*time.Location, string) {
+	tz := strings.TrimSpace(os.Getenv(cronTZKey))
+	if tz == "" {
+		return time.Local, ""
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.Local, fmt.Sprintf("時區 %q 無效（%v）——暫用伺服器本地時區", tz, err)
+	}
+	return loc, ""
+}
 
 // cronScheduler 是 dashboard 內的排程器：每 cronTick 掃 .claw/cron.json，到點的啟用 job 交給
 // chatRunner 執行。
@@ -99,12 +122,14 @@ func (s *cronScheduler) tick() {
 }
 
 // due 判斷 job 是否到點：下次觸發時間 <= 現在。壞運算式一律不跑（新增時已驗，這裡是保險）。
+// 基準點先轉到設定時區再算——robfig 的 Next 依傳入時間的 Location 推算，故時區在此生效。
 func (s *cronScheduler) due(j cronJob, now time.Time) bool {
 	sched, err := cronParser.Parse(j.Schedule)
 	if err != nil {
 		return false
 	}
-	return !sched.Next(s.baseline(j, now)).After(now)
+	loc, _ := cronLocation()
+	return !sched.Next(s.baseline(j, now).In(loc)).After(now)
 }
 
 // baseline 取算下次觸發的基準點：優先用上次執行時間（持久化，跨重啟仍準）；沒跑過就用【首次觀察到的

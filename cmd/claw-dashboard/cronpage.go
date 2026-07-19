@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -21,6 +23,9 @@ type cronData struct {
 	Flash         string
 	NotifyTarget  string // 空＝不推播
 	NotifyErrOnly bool
+	TZName        string // 排程解讀用時區（顯示用）
+	TZValue       string // CRON_TZ 現值（表單預填；空＝跟隨伺服器）
+	TZWarn        string // 時區設定有問題時的提示
 }
 
 // cron 頁：列出排程任務，可新增/編輯/停用/移除/立即執行。CRUD 只是編 .claw/cron.json（安全），
@@ -31,12 +36,16 @@ func (s *server) cronPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "讀 cron.json 失敗："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	now := time.Now()
+	loc, tzWarn := cronLocation()
+	now := time.Now().In(loc)
 	d := cronData{
 		SchedulerOn:   s.cron != nil,
 		Flash:         s.readFlash(),
 		NotifyTarget:  cronNotifyTarget(),
 		NotifyErrOnly: cronNotifyErrorsOnly(),
+		TZName:        loc.String(),
+		TZValue:       strings.TrimSpace(os.Getenv(cronTZKey)),
+		TZWarn:        tzWarn,
 	}
 	runningID := ""
 	if s.cron != nil {
@@ -127,7 +136,9 @@ func (s *server) cronDone(w http.ResponseWriter, r *http.Request, err error, okM
 
 var cronTmpl = template.Must(template.New("cron").Parse(`
 {{if .Flash}}<p class="banner">{{.Flash}}</p>{{end}}
-<p class="muted">到點自動把任務交給 agent 執行。排程用標準 cron 運算式（分 時 日 月 週）。
+{{if .TZWarn}}<p class="banner">⚠️ {{.TZWarn}}</p>{{end}}
+<p class="muted">到點自動把任務交給 agent 執行。排程用標準 cron 運算式（分 時 日 月 週），
+時區 <b>{{.TZName}}</b>{{if not .TZValue}}（跟隨伺服器——雲端多為 UTC，建議明設）{{end}}。
 {{if .SchedulerOn}}排程器<b>執行中</b>——每 30 秒檢查一次。{{else}}<b class="warn">排程器未啟用</b>：設 <code>COGITO_DASH_CHAT=1</code> 重啟才會真的觸發（現在僅能編輯）。{{end}}
 只在本面板跑著時觸發，非 24/7 常駐。</p>
 
@@ -167,13 +178,15 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
 </div>
 {{else}}<p class="muted">（尚無排程任務。）</p>{{end}}
 
-<h3>結果推播 <span class="muted">{{if .NotifyTarget}}{{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未設定{{end}}</span></h3>
-<p class="muted">執行完把「狀態＋回覆摘要＋執行樹連結」送到 Slack／Telegram。留空＝不推播。
+<h3>排程設定 <span class="muted">{{.TZName}} · {{if .NotifyTarget}}推播 {{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未推播{{end}}</span></h3>
+<p class="muted">時區決定排程怎麼解讀（留空＝跟隨伺服器，雲端多為 UTC）。
+推播是執行完把「狀態＋回覆摘要＋執行樹連結」送到 Slack／Telegram，留空＝不推播；
 token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
-<details class="mcpedit"><summary>設定推播</summary>
+<details class="mcpedit"><summary>編輯</summary>
   <form method="POST" action="/env-config" class="knobs">
-    <input type="hidden" name="_fields" value="COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
+    <input type="hidden" name="_fields" value="CRON_TZ COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
     <input type="hidden" name="_return" value="/cron">
+    <label>時區 <input name="CRON_TZ" value="{{.TZValue}}" placeholder="Asia/Taipei"></label>
     <label>推播目標 <input name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="slack:C0123ABC 或 telegram:12345678"></label>
     <label class="tog"><input type="checkbox" name="COGITO_CRON_NOTIFY_ERRORS_ONLY" value="1"{{if .NotifyErrOnly}} checked{{end}}> 只在失敗時推播</label>
     <button>儲存</button>
