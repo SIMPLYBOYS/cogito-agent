@@ -16,11 +16,13 @@ import (
 // struct）。祕密（API key / token / secret）一律只顯示「已設定/未設」，絕不露值——即使綁 loopback。
 // provider 解析對照 internal/provider.FromEnv（此處唯讀鏡像，故設定即使不完整也看得到，不像 FromEnv 會報錯）。
 type platformData struct {
-	// LLM（檢視）
-	Provider    string // Claude / OpenAI 相容 / 未知
-	ProviderRaw string // COGITO_PROVIDER 原值（resolveProviderInto 用）
-	Model       string
-	BaseURL     string // 僅 OpenAI 相容
+	// LLM（可就地編輯 provider/模型；金鑰仍只看狀態）
+	Provider    string // 解析後：Claude / OpenAI 相容 / 未知（目前生效）
+	ProviderRaw string // COGITO_PROVIDER 原值（供編輯表單預填 + resolveProviderInto）
+	Model       string // 解析後生效模型
+	ClaudeModel string // CLAUDE_MODEL 原值（編輯用）
+	OpenAIModel string // OPENAI_MODEL 原值
+	OpenAIBase  string // OPENAI_BASE_URL 原值
 	KeyName     string
 	KeySet      bool
 	ProviderErr string // 解析不出（未設 key / 未知 provider）時的提示
@@ -52,6 +54,9 @@ type channelRow struct{ Name, Status string }
 func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	d := platformData{
 		ProviderRaw:   os.Getenv("COGITO_PROVIDER"),
+		ClaudeModel:   os.Getenv("CLAUDE_MODEL"),
+		OpenAIModel:   os.Getenv("OPENAI_MODEL"),
+		OpenAIBase:    os.Getenv("OPENAI_BASE_URL"),
 		Embedder:      envOr("COGITO_EMBED_MODEL", "關鍵字退回（未設 embedder）"),
 		Langfuse:      envSet("LANGFUSE_PUBLIC_KEY") && envSet("LANGFUSE_SECRET_KEY"),
 		OTelEndpoint:  firstNonEmpty(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
@@ -85,7 +90,6 @@ func resolveProviderInto(d *platformData) {
 	case "openai", "openai-compatible", "oai":
 		d.Provider = "OpenAI 相容"
 		d.Model = envOr("OPENAI_MODEL", "gpt-4o-mini")
-		d.BaseURL = envOr("OPENAI_BASE_URL", "https://api.openai.com/v1")
 		d.KeyName, d.KeySet = "OPENAI_API_KEY", envSet("OPENAI_API_KEY")
 		if !d.KeySet {
 			d.ProviderErr = "COGITO_PROVIDER=openai 但未設 OPENAI_API_KEY，bot 會啟動失敗"
@@ -139,13 +143,19 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 <p class="muted">祕密遮罩唯讀，其餘可就地編輯。</p>
 {{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 
-<h2>Provider <span class="muted">檢視</span></h2>
+<h2>Provider <span class="muted">寫 .env · 改完重啟</span></h2>
 {{if .ProviderErr}}<p class="warn">⚠️ {{.ProviderErr}}</p>{{end}}
+<form method="POST" action="/env-config" class="knobs">
+  <input type="hidden" name="_fields" value="COGITO_PROVIDER CLAUDE_MODEL OPENAI_MODEL OPENAI_BASE_URL">
+  <label>provider <span class="muted">claude / openai（空＝claude）</span><input type="text" name="COGITO_PROVIDER" value="{{.ProviderRaw}}"></label>
+  <label>Claude 模型 <span class="muted">空＝預設</span><input type="text" name="CLAUDE_MODEL" value="{{.ClaudeModel}}"></label>
+  <label>OpenAI 模型 <span class="muted">provider=openai 時</span><input type="text" name="OPENAI_MODEL" value="{{.OpenAIModel}}"></label>
+  <label>OpenAI base URL <span class="muted">vLLM/Ollama/OpenRouter…</span><input type="text" name="OPENAI_BASE_URL" value="{{.OpenAIBase}}"></label>
+  <button type="submit">儲存</button>
+</form>
 <dl class="kv">
-  <dt>provider</dt><dd><span class="badge">{{.Provider}}</span></dd>
-  <dt>模型</dt><dd><code>{{.Model}}</code></dd>
-  {{with .BaseURL}}<dt>base URL</dt><dd><code>{{.}}</code></dd>{{end}}
-  <dt>{{.KeyName}}</dt><dd>{{if .KeySet}}已設定 ✓{{else}}<span class="warn">未設 —</span>{{end}}</dd>
+  <dt>目前生效</dt><dd><span class="badge">{{.Provider}}</span> · <code>{{.Model}}</code></dd>
+  <dt>{{.KeyName}}</dt><dd>{{if .KeySet}}已設定 ✓{{else}}<span class="warn">未設 —</span>（金鑰請手動編 .env）{{end}}</dd>
   <dt>embedder</dt><dd><code>{{.Embedder}}</code></dd>
 </dl>
 
@@ -170,9 +180,9 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   <dt>工具併發</dt><dd>{{.MaxConcurrent}}</dd>
 </dl>
 
-<h2>設定 <span class="muted">寫 .env · 改完重啟</span></h2>
-<p class="muted">金鑰不在此，需手動編 .env。</p>
+<h2>存取與行為 <span class="muted">寫 .env · 改完重啟</span></h2>
 <form method="POST" action="/env-config" class="knobs">
+  <input type="hidden" name="_fields" value="{{range .EnvFields}}{{.Key}} {{end}}">
   {{range .EnvFields}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
     {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
   {{end}}<button type="submit">儲存</button>

@@ -31,8 +31,8 @@ func TestEnvConfigSave_WritesEnvPreservesSecrets(t *testing.T) {
 		t.Fatalf("跨站 /env-config 應 403，got %d", rec.Code)
 	}
 
-	// 同源 → 303 + 寫入
-	req2 := httptest.NewRequest("POST", "/env-config", strings.NewReader("CLAUDE_MODEL=claude-haiku-4-5&COGITO_MEMORY_SYNTH=1&COGITO_PROVIDER=claude"))
+	// 同源 → 303 + 寫入（_fields 宣告本表單負責的 key）
+	req2 := httptest.NewRequest("POST", "/env-config", strings.NewReader("_fields=CLAUDE_MODEL+COGITO_MEMORY_SYNTH+COGITO_PROVIDER&CLAUDE_MODEL=claude-haiku-4-5&COGITO_MEMORY_SYNTH=1&COGITO_PROVIDER=claude"))
 	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req2.Header.Set("Sec-Fetch-Site", "same-origin")
 	rec2 := httptest.NewRecorder()
@@ -50,5 +50,38 @@ func TestEnvConfigSave_WritesEnvPreservesSecrets(t *testing.T) {
 	}
 	if !strings.Contains(s, "COGITO_MEMORY_SYNTH=1") {
 		t.Error("toggle 沒寫入")
+	}
+}
+
+// _fields 局部更新：只帶 CLAUDE_MODEL 的表單，不該清掉其他 key（也不碰 _fields 外的欄位）。
+func TestEnvConfigSave_PartialUpdate(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Cleanup(func() {
+		os.Unsetenv("CLAUDE_MODEL")
+		os.Unsetenv("COGITO_ALLOWED_USERS")
+	})
+	if err := os.WriteFile(".env", []byte("COGITO_ALLOWED_USERS=alice\nCLAUDE_MODEL=old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(nil, "", dir, nil)
+
+	// _fields 只宣告 CLAUDE_MODEL；即便 body 夾了 COGITO_ALLOWED_USERS= 也不該動它
+	body := "_fields=CLAUDE_MODEL&CLAUDE_MODEL=new&COGITO_ALLOWED_USERS="
+	req := httptest.NewRequest("POST", "/env-config", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != 303 {
+		t.Fatalf("應 303，got %d", rec.Code)
+	}
+	got, _ := os.ReadFile(".env")
+	s := string(got)
+	if !strings.Contains(s, "CLAUDE_MODEL=new") {
+		t.Error("CLAUDE_MODEL 應更新")
+	}
+	if !strings.Contains(s, "COGITO_ALLOWED_USERS=alice") {
+		t.Error("不在 _fields 的 key 被清掉了——局部更新失效！")
 	}
 }
