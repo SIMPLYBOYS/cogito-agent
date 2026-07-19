@@ -12,6 +12,7 @@ type cronRow struct {
 	cronJob
 	NextRun   string
 	SessionID string
+	Running   bool
 }
 
 type cronData struct {
@@ -37,8 +38,12 @@ func (s *server) cronPage(w http.ResponseWriter, r *http.Request) {
 		NotifyTarget:  cronNotifyTarget(),
 		NotifyErrOnly: cronNotifyErrorsOnly(),
 	}
+	runningID := ""
+	if s.cron != nil {
+		runningID = s.cron.runningID()
+	}
 	for _, j := range jobs {
-		row := cronRow{cronJob: j, SessionID: cronSessionID(j.ID), NextRun: "—"}
+		row := cronRow{cronJob: j, SessionID: cronSessionID(j.ID), NextRun: "—", Running: j.ID == runningID}
 		if sched, e := cronParser.Parse(j.Schedule); e == nil {
 			row.NextRun = sched.Next(now).Format("01-02 15:04")
 		}
@@ -132,6 +137,7 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
   <div class="cronitem">
     <div class="cronhead">
       <b>{{.Name}}</b> <code>{{.Schedule}}</code>
+      {{if .Running}}<span class="pill run">執行中</span>{{end}}
       {{if .Enabled}}<span class="pill ok">啟用</span>{{else}}<span class="pill">停用</span>{{end}}
       {{if eq .LastStatus "error"}}<span class="pill err">上次失敗</span>{{else if eq .LastStatus "ok"}}<span class="pill ok">上次成功</span>{{end}}
     </div>

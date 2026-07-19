@@ -26,9 +26,38 @@ var errAgentBusy = errors.New("agent 忙碌中")
 type cronScheduler struct {
 	path string               // .claw/cron.json
 	chat *chatRunner          // 執行器；nil＝未啟用 chat（cron 驅動 agent＝寫能力，沿用同一個閘）
-	mu   sync.Mutex           // 保護 base
+	mu   sync.Mutex           // 保護 base 與 running
 	base map[string]time.Time // job id → 算下次觸發的基準點
 	now  func() time.Time     // 可注入，供測試
+
+	// running 是正在執行的 job id（空＝閒置）。cron 刻意不打 operator chat 的 SSE 串流
+	//（會污染對話），改用這個讓 cron 頁顯示「執行中」。
+	running string
+}
+
+// tryMarkRunning 標記本 job 開跑；已有其他 job 在跑就回 false（不覆寫別人的狀態——否則被
+// operator chat 擋掉的那次 fire 會把真正在跑的那個標記清掉）。
+func (s *cronScheduler) tryMarkRunning(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running != "" {
+		return false
+	}
+	s.running = id
+	return true
+}
+
+func (s *cronScheduler) clearRunning() {
+	s.mu.Lock()
+	s.running = ""
+	s.mu.Unlock()
+}
+
+// runningID 回目前正在執行的 job id（空＝閒置）。
+func (s *cronScheduler) runningID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
 }
 
 func newCronScheduler(workspace string, chat *chatRunner) *cronScheduler {
@@ -101,10 +130,15 @@ func (s *cronScheduler) fire(j cronJob, now time.Time) {
 	if s.chat == nil {
 		return // 未啟用 chat：不執行（UI 會標示排程器未啟用）
 	}
+	if !s.tryMarkRunning(j.ID) {
+		return // 已有 job 在跑：不排隊，下輪再試
+	}
+	defer s.clearRunning()
+
 	started := s.now()
 	reply, err := s.chat.runJob(cronSessionID(j.ID), j.Prompt)
 	if errors.Is(err, errAgentBusy) {
-		return
+		return // 被 operator chat 佔用：同上，下輪再試
 	}
 	s.mu.Lock()
 	s.base[j.ID] = now

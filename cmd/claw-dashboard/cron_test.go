@@ -161,3 +161,29 @@ func TestCronHandlers(t *testing.T) {
 		t.Error("cron 頁應列出 job")
 	}
 }
+
+// 「執行中」標記不可被第二個 fire 覆寫或誤清——否則被 operator chat 擋掉的那次會把真正
+// 在跑的那個標記清掉，UI 顯示閒置。
+func TestCronRunningMarker(t *testing.T) {
+	s := &cronScheduler{base: map[string]time.Time{}, now: time.Now}
+
+	if s.runningID() != "" {
+		t.Error("初始應為閒置")
+	}
+	if !s.tryMarkRunning("a") {
+		t.Fatal("閒置時應可標記")
+	}
+	if s.runningID() != "a" {
+		t.Errorf("應標記為 a，得 %q", s.runningID())
+	}
+	if s.tryMarkRunning("b") {
+		t.Error("已有 job 在跑時不該讓 b 搶標記")
+	}
+	if s.runningID() != "a" {
+		t.Errorf("b 搶不到後仍應是 a，得 %q", s.runningID())
+	}
+	s.clearRunning()
+	if s.runningID() != "" {
+		t.Error("清除後應回到閒置")
+	}
+}
