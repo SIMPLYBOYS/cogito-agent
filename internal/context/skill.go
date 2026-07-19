@@ -43,6 +43,9 @@ func (s *SkillLoader) loadAll() []Skill {
 	return skills
 }
 
+// List 回全部已載入的技能（含正文，供面板檢視）。
+func (s *SkillLoader) List() []Skill { return s.loadAll() }
+
 // LoadIndex 只把技能的【元數據】（名稱 + 觸發描述）放進 System Prompt（漸進式暴露）；
 // 正文不在此載入，避免技能多時開局就吃掉大量 token。模型需要時用 read_skill 工具按需載入。
 func (s *SkillLoader) LoadIndex() string {

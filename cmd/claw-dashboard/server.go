@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
@@ -40,6 +41,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("POST /governance/discard-memory", s.govDiscardMemory)
 	mux.HandleFunc("POST /governance/promote-skill", s.govPromoteSkill)
 	mux.HandleFunc("GET /metrics", s.metrics)
+	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("POST /env-config", s.envConfigSave)
@@ -201,7 +203,21 @@ func (s *server) writeLayout(w http.ResponseWriter, title string, body template.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Content-Security-Policy", csp)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_ = baseTmpl.Execute(w, map[string]any{"Title": title, "Body": body, "Write": s.chat != nil})
+	_ = baseTmpl.Execute(w, map[string]any{"Title": title, "Body": body, "Write": s.chat != nil, "Active": navKey(title)})
+}
+
+// navKey 由頁面 title 推出目前導覽項（供 sidebar 高亮）。用 contains 讓 "Operator Chat"→chat、
+// "Run"/"Run 不存在"→runs 也對得上；對不上就不高亮（不影響功能）。
+func navKey(title string) string {
+	t := strings.ToLower(title)
+	switch {
+	case strings.Contains(t, "chat"):
+		return "chat"
+	case strings.Contains(t, "run"):
+		return "runs"
+	default:
+		return t
+	}
 }
 
 var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
@@ -228,23 +244,45 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   .warn { color:var(--acc); }
   code { font:inherit; font-size:.92em; color:var(--acc2); background:color-mix(in srgb,var(--acc2) 12%,transparent);
     border:1px solid var(--line); border-radius:4px; padding:0 5px; }
-  /* masthead */
-  header { position:sticky; top:0; z-index:5; display:flex; align-items:center; gap:20px;
-    padding:12px 22px; border-bottom:1px solid var(--line);
-    background:color-mix(in srgb,var(--bg) 86%,transparent); -webkit-backdrop-filter:blur(9px); backdrop-filter:blur(9px); }
-  header .brand { display:flex; align-items:center; gap:10px; }
-  header .mark { width:18px; height:18px; border-radius:4px;
+  /* shell + 左側直欄導覽（版面參考 Hermes；配色維持 ember） */
+  .shell { display:flex; align-items:stretch; min-height:100vh; }
+  .side { flex:0 0 210px; width:210px; box-sizing:border-box; position:sticky; top:0; height:100vh;
+    display:flex; flex-direction:column; padding:18px 0 14px; gap:16px;
+    background:var(--bg2); border-right:1px solid var(--line); }
+  .side .brand { display:flex; align-items:center; gap:10px; padding:0 16px; }
+  .side .mark { width:18px; height:18px; border-radius:4px;
     background:linear-gradient(135deg,var(--acc2),var(--acc)); box-shadow:0 0 15px var(--glow); }
-  header .wm { font-weight:700; letter-spacing:.16em; text-transform:uppercase; font-size:14px; }
-  header .wm em { color:var(--acc); font-style:normal; }
-  header nav { display:flex; gap:3px; }
-  header nav a { color:var(--mut); padding:4px 11px; border-radius:6px; letter-spacing:.03em; }
-  header nav a:hover { color:var(--fg); background:var(--bg2); text-decoration:none; }
-  header .env { margin-left:auto; display:flex; align-items:center; gap:7px; color:var(--mut);
-    font-size:11.5px; letter-spacing:.05em; }
-  header .env .dot { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
-  header .env .dot.write { background:var(--acc); box-shadow:0 0 8px var(--acc); }
-  main { padding:28px 22px 64px; max-width:1000px; margin:0 auto; }
+  .side .wm { font-weight:700; letter-spacing:.14em; text-transform:uppercase; font-size:13px; }
+  .side .wm em { color:var(--acc); font-style:normal; }
+  .side nav { display:flex; flex-direction:column; gap:2px; padding:0 10px; }
+  .side nav a { display:flex; align-items:center; gap:10px; padding:7px 11px; border-radius:7px;
+    color:var(--mut); letter-spacing:.04em; text-transform:uppercase; font-size:12px; }
+  .side nav a:hover { color:var(--fg); background:var(--bg); text-decoration:none; }
+  .side nav a.on { color:var(--acc); background:var(--bg); box-shadow:inset 2px 0 0 var(--acc); }
+  .side nav a .ic { width:18px; text-align:center; font-size:13px; filter:grayscale(.25); }
+  .side .sysfoot { margin-top:auto; padding:12px 16px 0; border-top:1px solid var(--line);
+    display:flex; flex-direction:column; gap:6px; color:var(--mut); font-size:11px; letter-spacing:.05em; }
+  .side .env { display:flex; align-items:center; gap:7px; }
+  .side .env .dot { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
+  .side .env .dot.write { background:var(--acc); box-shadow:0 0 8px var(--acc); }
+  main { flex:1; min-width:0; padding:26px 30px 64px; max-width:1000px; }
+  .skills { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+  .skill { border:1px solid var(--line); border-radius:8px; padding:9px 12px; background:var(--bg2); }
+  .skill > summary { cursor:pointer; list-style:none; }
+  .skill > summary::-webkit-details-marker { display:none; }
+  .skillbody { white-space:pre-wrap; overflow-x:auto; margin:9px 0 2px; padding:11px 12px;
+    background:var(--bg); border:1px solid var(--line); border-radius:6px; font-size:.9em; }
+  @media (max-width:720px) {
+    .shell { flex-direction:column; }
+    .side { flex:none; width:auto; height:auto; position:static; flex-direction:row; flex-wrap:wrap;
+      align-items:center; gap:8px 14px; padding:12px 16px; border-right:0; border-bottom:1px solid var(--line); }
+    .side .brand { padding:0; }
+    .side nav { flex-direction:row; flex-wrap:wrap; padding:0; }
+    .side nav a { text-transform:none; }
+    .side nav a.on { box-shadow:inset 0 -2px 0 var(--acc); }
+    .side .sysfoot { margin:0 0 0 auto; border:0; padding:0; flex-direction:row; gap:12px; }
+    main { padding:20px 18px 48px; }
+  }
   h1 { font-size:20px; font-weight:700; margin:0 0 6px; text-wrap:balance; }
   h2 { font-size:12px; text-transform:uppercase; letter-spacing:.13em; color:var(--mut); font-weight:600;
     margin:32px 0 12px; padding-bottom:7px; border-bottom:1px solid var(--line); }
@@ -333,10 +371,23 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   @media (prefers-reduced-motion: reduce) { .pill.run { animation:none; } }
 </style></head>
 <body>
-<header>
-  <span class="brand"><span class="mark"></span><span class="wm">cogito<em> agent</em></span></span>
-  <nav><a href="/chat">chat</a><a href="/runs">runs</a><a href="/metrics">metrics</a><a href="/governance">governance</a><a href="/platform">platform</a><a href="/status">status</a></nav>
-  <span class="env"><span class="dot{{if .Write}} write{{end}}"></span>loopback{{if .Write}} · operator（可寫入）{{end}}</span>
-</header>
+<div class="shell">
+<aside class="side">
+  <div class="brand"><span class="mark"></span><span class="wm">cogito<em> agent</em></span></div>
+  <nav>
+    <a href="/chat"{{if eq .Active "chat"}} class="on"{{end}}><span class="ic">💬</span>chat</a>
+    <a href="/runs"{{if eq .Active "runs"}} class="on"{{end}}><span class="ic">🌿</span>runs</a>
+    <a href="/metrics"{{if eq .Active "metrics"}} class="on"{{end}}><span class="ic">📊</span>metrics</a>
+    <a href="/skills"{{if eq .Active "skills"}} class="on"{{end}}><span class="ic">📦</span>skills</a>
+    <a href="/governance"{{if eq .Active "governance"}} class="on"{{end}}><span class="ic">⚖️</span>governance</a>
+    <a href="/platform"{{if eq .Active "platform"}} class="on"{{end}}><span class="ic">⚙️</span>platform</a>
+    <a href="/status"{{if eq .Active "status"}} class="on"{{end}}><span class="ic">◍</span>status</a>
+  </nav>
+  <div class="sysfoot">
+    <span class="env"><span class="dot{{if .Write}} write{{end}}"></span>loopback{{if .Write}} · 可寫入{{end}}</span>
+    <span>cogito agent</span>
+  </div>
+</aside>
 <main><h1>{{.Title}}</h1>{{.Body}}</main>
+</div>
 </body></html>`))
