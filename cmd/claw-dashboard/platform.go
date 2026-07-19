@@ -45,6 +45,9 @@ type platformData struct {
 	// MCP servers（.mcp.json，列/增/刪/切換/編輯；env/headers 值遮罩）
 	MCPServers []mcpServerRow
 	MCPPath    string
+	// 金鑰／祕密（loopback-only：眼睛顯示現值 + 輪替）
+	Secrets         []secretRow
+	SecretsAllowed  bool
 }
 
 type channelRow struct{ Name, Status string }
@@ -75,10 +78,14 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	d.Flash = s.readFlash()
 	d.MCPPath = mcpConfigPath()
 	d.MCPServers, _ = readMCPServers(d.MCPPath)
+	d.SecretsAllowed = secretsAllowed()
+	if d.SecretsAllowed {
+		d.Secrets = loadSecrets()
+	}
 
 	var b bytes.Buffer
 	_ = platformTmpl.Execute(&b, d)
-	s.render(w, "Platform", template.HTML(b.String()))
+	s.writeLayout(w, "Platform", template.HTML(b.String()), cspChat) // 放寬 script/connect 'self'：眼睛顯示祕密
 }
 
 // resolveProviderInto 鏡像 provider.FromEnv 的選擇邏輯（唯讀，不建構 provider、不因缺 key 報錯）。
@@ -130,7 +137,7 @@ func firstNonEmpty(vals ...string) string {
 }
 
 var platformTmpl = template.Must(template.New("platform").Parse(`
-<p class="muted">祕密遮罩唯讀，其餘可就地編輯。</p>
+<p class="muted">設定就地可編輯（點「編輯」展開）。祕密遮罩，僅 loopback 可 👁 顯示／輪替。</p>
 {{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 
 <h2>Provider <span class="muted">寫 .env · 改完重啟</span></h2>
@@ -153,10 +160,25 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 </form>
 </details>
 
-<h2>通道 <span class="muted">檢視 · token 在 .env 設</span></h2>
+<h2>通道 <span class="muted">檢視 · token 在下方「金鑰」輪替</span></h2>
 <dl class="kv">
   {{range .Channels}}<dt>{{.Name}}</dt><dd>{{if eq .Status "已綁定"}}<span class="badge">已綁定</span>{{else}}<span class="muted">未綁定</span>{{end}}</dd>{{end}}
 </dl>
+
+{{if .SecretsAllowed}}<h2>金鑰／祕密 <span class="muted">👁 顯示 · 可輪替 · 僅 loopback</span></h2>
+<div class="secrets">
+  {{range .Secrets}}<div class="secret">
+    <span class="sk">{{.Key}}</span>
+    {{if .Set}}<span class="sv" data-key="{{.Key}}">••••••••</span> <button type="button" class="eye" data-key="{{.Key}}" data-shown="0">👁</button>{{else}}<span class="muted">未設</span>{{end}}
+    <details class="mcpedit"><summary>{{if .Set}}輪替{{else}}設定{{end}}</summary>
+      <form method="POST" action="/secret" class="knobs">
+        <input type="hidden" name="key" value="{{.Key}}">
+        <label>新值 <span class="muted">貼上後儲存覆蓋</span><input type="password" name="value" placeholder="{{.Key}}" autocomplete="off"></label>
+        <button type="submit">儲存</button>
+      </form>
+    </details>
+  </div>{{end}}
+</div>{{end}}
 
 <h2>存取控制 <span class="muted">寫 .env · 改完重啟</span></h2>
 {{template "envblock" .AccessEnv}}
@@ -234,4 +256,5 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   {{end}}<button type="submit">儲存</button>
 </form>
 </details>{{end}}
+{{if .SecretsAllowed}}<script src="/platform.js"></script>{{end}}
 `))

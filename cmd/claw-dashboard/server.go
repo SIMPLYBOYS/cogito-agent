@@ -43,6 +43,9 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /platform", s.platform)
 	mux.HandleFunc("POST /config", s.configSave)
 	mux.HandleFunc("POST /env-config", s.envConfigSave)
+	mux.HandleFunc("GET /platform.js", s.platformJS)
+	mux.HandleFunc("GET /secret/reveal", s.secretReveal)
+	mux.HandleFunc("POST /secret", s.secretSave)
 	mux.HandleFunc("POST /mcp/add", s.mcpAdd)
 	mux.HandleFunc("POST /mcp/edit", s.mcpEdit)
 	mux.HandleFunc("POST /mcp/remove", s.mcpRemove)
@@ -279,6 +282,14 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   form.knobs .tog { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
   form.knobs select { font:inherit; color:var(--fg); background:var(--bg2); border:1px solid var(--line); border-radius:6px; padding:6px 10px; max-width:220px; }
   ul.gitems .acts { display:flex; gap:8px; flex:none; }
+  /* 金鑰／祕密（眼睛顯示 + 輪替） */
+  .secrets { display:flex; flex-direction:column; }
+  .secret { border-bottom:1px solid var(--line); padding:8px 0; display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:13px; }
+  .secret .sk { min-width:210px; }
+  .secret .sv { color:var(--mut); word-break:break-all; }
+  .secret .eye { background:transparent; border:1px solid var(--line); border-radius:5px; cursor:pointer; padding:0 7px; font-size:13px; }
+  .secret .eye:hover { border-color:var(--acc); }
+  .secret details { flex-basis:100%; }
   /* MCP server 列表（可展開編輯） */
   .mcplist { display:flex; flex-direction:column; }
   .mcpitem { border-bottom:1px solid var(--line); padding:9px 0; }
