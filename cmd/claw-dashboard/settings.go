@@ -35,6 +35,8 @@ var (
 	// Provider 表單直接寫死這些欄位（不走 loadEnvGroup），但需在白名單內。含 embedder（非祕密：
 	// model / base url；embedder 金鑰仍是祕密、不在此）。
 	providerEnvKeys = []string{"COGITO_PROVIDER", "CLAUDE_MODEL", "OPENAI_MODEL", "OPENAI_BASE_URL", "COGITO_EMBED_MODEL", "COGITO_EMBED_BASE_URL"}
+	// cron 結果推播設定（非祕密：只是頻道 id 與開關；token 走「金鑰／祕密」區）。表單在 cron 頁。
+	cronEnvKeys = []string{notifyTargetKey, notifyErrOnlyKey}
 )
 
 // allowedEnvKeys 是【可經面板寫入的白名單】：任一表單只能改這些 key（金鑰/token 不在內）。updateEnvFile
@@ -42,6 +44,9 @@ var (
 var allowedEnvKeys = func() map[string]bool {
 	m := map[string]bool{}
 	for _, k := range providerEnvKeys {
+		m[k] = true
+	}
+	for _, k := range cronEnvKeys {
 		m[k] = true
 	}
 	for _, g := range [][]envKeyDef{accessEnv, runtimeEnv, evolveEnv, obsEnv} {
@@ -74,6 +79,12 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
+	// _return 讓非 platform 的頁（如 /cron）也能用這個表單，改完導回原頁。只收站內絕對路徑，
+	// 防開放重導。
+	back := "/platform"
+	if v := r.FormValue("_return"); strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") {
+		back = v
+	}
 	updates := map[string]string{}
 	for _, k := range strings.Fields(r.FormValue("_fields")) {
 		if allowedEnvKeys[k] { // 白名單外一律忽略（防被塞入祕密 key）
@@ -81,7 +92,7 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(updates) == 0 {
-		http.Redirect(w, r, "/platform", http.StatusSeeOther)
+		http.Redirect(w, r, back, http.StatusSeeOther)
 		return
 	}
 	if err := updateEnvFile(".env", updates); err != nil {
@@ -92,5 +103,5 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 		_ = os.Setenv(k, v) // 面板檢視即時反映；bot 仍需重啟
 	}
 	s.setFlash("✓ 已寫入 .env——bot 需【重啟】才套用。本面板檢視已即時更新。")
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }

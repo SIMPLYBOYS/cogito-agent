@@ -24,9 +24,9 @@ var errAgentBusy = errors.New("agent 忙碌中")
 // 行程模型（先講清楚天花板）：只在 dashboard 跑著時會觸發，【不是 24/7 daemon】。同一份 cron.json
 // 之後可讓 bot 端排程器也讀，就能常駐。
 type cronScheduler struct {
-	path string       // .claw/cron.json
-	chat *chatRunner  // 執行器；nil＝未啟用 chat（cron 驅動 agent＝寫能力，沿用同一個閘）
-	mu   sync.Mutex   // 保護 base
+	path string               // .claw/cron.json
+	chat *chatRunner          // 執行器；nil＝未啟用 chat（cron 驅動 agent＝寫能力，沿用同一個閘）
+	mu   sync.Mutex           // 保護 base
 	base map[string]time.Time // job id → 算下次觸發的基準點
 	now  func() time.Time     // 可注入，供測試
 }
@@ -101,7 +101,8 @@ func (s *cronScheduler) fire(j cronJob, now time.Time) {
 	if s.chat == nil {
 		return // 未啟用 chat：不執行（UI 會標示排程器未啟用）
 	}
-	err := s.chat.runJob(cronSessionID(j.ID), j.Prompt)
+	started := s.now()
+	reply, err := s.chat.runJob(cronSessionID(j.ID), j.Prompt)
 	if errors.Is(err, errAgentBusy) {
 		return
 	}
@@ -117,6 +118,14 @@ func (s *cronScheduler) fire(j cronJob, now time.Time) {
 		log.Printf("[cron] 回寫結果失敗：%v", e)
 	}
 	log.Printf("[cron] %q（%s）→ %s", j.Name, j.Schedule, status)
+
+	// 推播結果。失敗只記 log——通知掛掉不該影響排程本身。
+	if target := cronNotifyTarget(); shouldNotify(target, status) {
+		notice := buildCronNotice(j, status, msg, reply, s.now().Sub(started))
+		if e := sendNotify(target, notice); e != nil {
+			log.Printf("[cron] 推播失敗：%v", e)
+		}
+	}
 }
 
 // cronSessionID 讓每個 job 有自己的 session，執行樹可在 /runs/cron-<id> 回放。
@@ -127,13 +136,16 @@ func cronSessionID(id string) string { return "cron-" + id }
 //
 // ponytail: 每次執行前 Reset——排程任務彼此獨立，且避免同一 session 歷史無限長。代價是只留「最近一次」
 // 執行樹；要保留每次歷史就得一次一 session（sessions 會無限長），需要時再改。
-func (c *chatRunner) runJob(sessionID, prompt string) error {
+func (c *chatRunner) runJob(sessionID, prompt string) (string, error) {
 	if !c.mu.TryLock() {
-		return errAgentBusy
+		return "", errAgentBusy
 	}
 	defer c.mu.Unlock()
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(sessionID, c.workDir)
 	sess.Reset()
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
-	return c.eng.Run(context.Background(), sess, engine.NewTerminalReporter())
+	if err := c.eng.Run(context.Background(), sess, engine.NewTerminalReporter()); err != nil {
+		return "", err
+	}
+	return sess.LastAssistantText(), nil // 供推播摘要
 }

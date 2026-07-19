@@ -2,6 +2,7 @@ package context
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -207,6 +208,18 @@ func (s *Session) Usage() (promptTokens, completionTokens int, costUSD float64) 
 }
 
 // HistoryLen 回傳目前 history 的訊息數（供 /status）。
+// LastAssistantText 回最後一則有內容的 assistant 訊息（供排程結果通知等處做摘要）。無則回空字串。
+func (s *Session) LastAssistantText() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := len(s.history) - 1; i >= 0; i-- {
+		if s.history[i].Role == schema.RoleAssistant && strings.TrimSpace(s.history[i].Content) != "" {
+			return s.history[i].Content
+		}
+	}
+	return ""
+}
+
 func (s *Session) HistoryLen() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

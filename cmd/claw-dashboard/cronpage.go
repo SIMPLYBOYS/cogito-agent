@@ -15,9 +15,11 @@ type cronRow struct {
 }
 
 type cronData struct {
-	Jobs        []cronRow
-	SchedulerOn bool // chat（寫入）啟用＝排程器會真的觸發
-	Flash       string
+	Jobs          []cronRow
+	SchedulerOn   bool // chat（寫入）啟用＝排程器會真的觸發
+	Flash         string
+	NotifyTarget  string // 空＝不推播
+	NotifyErrOnly bool
 }
 
 // cron 頁：列出排程任務，可新增/編輯/停用/移除/立即執行。CRUD 只是編 .claw/cron.json（安全），
@@ -29,7 +31,12 @@ func (s *server) cronPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	d := cronData{SchedulerOn: s.cron != nil, Flash: s.readFlash()}
+	d := cronData{
+		SchedulerOn:   s.cron != nil,
+		Flash:         s.readFlash(),
+		NotifyTarget:  cronNotifyTarget(),
+		NotifyErrOnly: cronNotifyErrorsOnly(),
+	}
 	for _, j := range jobs {
 		row := cronRow{cronJob: j, SessionID: cronSessionID(j.ID), NextRun: "—"}
 		if sched, e := cronParser.Parse(j.Schedule); e == nil {
@@ -153,6 +160,19 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
 {{end}}
 </div>
 {{else}}<p class="muted">（尚無排程任務。）</p>{{end}}
+
+<h3>結果推播 <span class="muted">{{if .NotifyTarget}}{{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未設定{{end}}</span></h3>
+<p class="muted">執行完把「狀態＋回覆摘要＋執行樹連結」送到 Slack／Telegram。留空＝不推播。
+token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
+<details class="mcpedit"><summary>設定推播</summary>
+  <form method="POST" action="/env-config" class="knobs">
+    <input type="hidden" name="_fields" value="COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
+    <input type="hidden" name="_return" value="/cron">
+    <label>推播目標 <input name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="slack:C0123ABC 或 telegram:12345678"></label>
+    <label class="tog"><input type="checkbox" name="COGITO_CRON_NOTIFY_ERRORS_ONLY" value="1"{{if .NotifyErrOnly}} checked{{end}}> 只在失敗時推播</label>
+    <button>儲存</button>
+  </form>
+</details>
 
 <details class="mcpedit"><summary>＋新增排程任務</summary>
   <form method="post" action="/cron/add" class="knobs">
