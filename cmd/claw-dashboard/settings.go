@@ -6,30 +6,47 @@ import (
 	"strings"
 )
 
-// editableEnv 是「一般設定」表單的【非祕密】操作型 env key（金鑰／token 一律不在此列——見 Provider 區的
-// 遮罩狀態）。provider/模型另放在 Provider 區的表單（就地編輯）。每個 key 標型別（toggle＝勾選＝"1"/""）。
-var editableEnv = []struct {
+// 可編輯的【非祕密】操作型 env，依主題分組——每組在 platform 頁是一個獨立的小表單（就地看+改）。
+// 金鑰／token 一律不在此（維持遮罩唯讀）。provider/模型另在 Provider 區的表單。
+type envKeyDef struct {
 	Key, Label, Hint string
-	Toggle           bool
-}{
-	{"COGITO_ALLOWED_USERS", "可驅動 agent 的 id", "逗號分隔；空＝拒絕所有", false},
-	{"COGITO_ADMIN_USERS", "可審批的 id", "逗號分隔；空＝同 ALLOWED", false},
-	{"COGITO_MCP_CONFIG", "MCP 設定檔路徑", "如 ./.mcp.json", false},
-	{"COGITO_SANDBOX", "沙箱模式", "docker / 空＝host", false},
-	{"COGITO_SUMMARY", "滾動摘要壓縮", "off＝關", false},
-	{"COGITO_MEMORY_SYNTH", "記憶合成", "", true},
-	{"COGITO_SKILL_SYNTH", "技能合成", "", true},
-	{"COGITO_KG_SYNTH", "知識圖譜合成", "", true},
+	Toggle           bool // true＝勾選（"1"/""）
 }
 
-// allowedEnvKeys 是【可經面板寫入的白名單】：任一表單只能改這些 key（金鑰/token 不在內）。updateEnvFile
-// 亦只碰傳進去的 key，雙保險。含 Provider 區表單的 key + editableEnv。
-var allowedEnvKeys = func() map[string]bool {
-	m := map[string]bool{
-		"COGITO_PROVIDER": true, "CLAUDE_MODEL": true, "OPENAI_MODEL": true, "OPENAI_BASE_URL": true,
+var (
+	accessEnv = []envKeyDef{
+		{"COGITO_ALLOWED_USERS", "可驅動 agent 的 id", "逗號分隔；空＝拒絕所有", false},
+		{"COGITO_ADMIN_USERS", "可審批的 id", "逗號分隔；空＝同 ALLOWED", false},
 	}
-	for _, e := range editableEnv {
-		m[e.Key] = true
+	runtimeEnv = []envKeyDef{
+		{"COGITO_SANDBOX", "沙箱模式", "docker / 空＝host", false},
+		{"COGITO_MCP_CONFIG", "MCP 設定檔路徑", "如 ./.mcp.json", false},
+		{"COGITO_SESSION_DIR", "session 目錄", "空＝純記憶體", false},
+		{"COGITO_SUMMARY", "滾動摘要壓縮", "off＝關", false},
+	}
+	evolveEnv = []envKeyDef{
+		{"COGITO_MEMORY_SYNTH", "記憶合成", "", true},
+		{"COGITO_SKILL_SYNTH", "技能合成", "", true},
+		{"COGITO_KG_SYNTH", "知識圖譜合成", "", true},
+	}
+	obsEnv = []envKeyDef{
+		{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTel endpoint", "空＝不上報 trace", false},
+	}
+	// Provider 表單直接寫死這些欄位（不走 loadEnvGroup），但需在白名單內。
+	providerEnvKeys = []string{"COGITO_PROVIDER", "CLAUDE_MODEL", "OPENAI_MODEL", "OPENAI_BASE_URL"}
+)
+
+// allowedEnvKeys 是【可經面板寫入的白名單】：任一表單只能改這些 key（金鑰/token 不在內）。updateEnvFile
+// 亦只碰傳進去的 key，雙保險。
+var allowedEnvKeys = func() map[string]bool {
+	m := map[string]bool{}
+	for _, k := range providerEnvKeys {
+		m[k] = true
+	}
+	for _, g := range [][]envKeyDef{accessEnv, runtimeEnv, evolveEnv, obsEnv} {
+		for _, e := range g {
+			m[e.Key] = true
+		}
 	}
 	return m
 }()
@@ -39,10 +56,10 @@ type envField struct {
 	Toggle, On              bool
 }
 
-// loadEnvFields 帶入「一般設定」各 key 的現值。
-func loadEnvFields() []envField {
-	out := make([]envField, 0, len(editableEnv))
-	for _, e := range editableEnv {
+// loadEnvGroup 帶入一組 key 的現值（os.Getenv＝dashboard 啟動時從 .env 載入的生效值）。
+func loadEnvGroup(defs []envKeyDef) []envField {
+	out := make([]envField, 0, len(defs))
+	for _, e := range defs {
 		v := os.Getenv(e.Key)
 		out = append(out, envField{Key: e.Key, Label: e.Label, Hint: e.Hint, Value: v, Toggle: e.Toggle, On: v == "1"})
 	}

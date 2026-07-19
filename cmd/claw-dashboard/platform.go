@@ -41,9 +41,12 @@ type platformData struct {
 	Knobs    evolve.Knobs
 	Limits   evolve.KnobLimits
 	KnobsSet bool
-	// 非祕密 env 設定（寫 .env，重啟套用）
-	EnvFields []envField
-	Flash     string
+	// 非祕密 env 設定，分主題（各一個就地編輯表單；寫 .env，重啟套用）
+	AccessEnv  []envField
+	RuntimeEnv []envField
+	EvolveEnv  []envField
+	ObsEnv     []envField
+	Flash      string
 	// MCP servers（.mcp.json，列/增/刪/切換/編輯；env/headers 值遮罩）
 	MCPServers []mcpServerRow
 	MCPPath    string
@@ -74,7 +77,10 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Limits = evolve.Limits()
 	d.Knobs, d.KnobsSet = evolve.LoadKnobs(s.workspace) // 已套用的執行時覆蓋（.claw/config.json）
-	d.EnvFields = loadEnvFields()
+	d.AccessEnv = loadEnvGroup(accessEnv)
+	d.RuntimeEnv = loadEnvGroup(runtimeEnv)
+	d.EvolveEnv = loadEnvGroup(evolveEnv)
+	d.ObsEnv = loadEnvGroup(obsEnv)
 	d.Flash = s.readFlash()
 	d.MCPPath = mcpConfigPath()
 	d.MCPServers, _ = readMCPServers(d.MCPPath)
@@ -159,34 +165,26 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   <dt>embedder</dt><dd><code>{{.Embedder}}</code></dd>
 </dl>
 
-<h2>通道 <span class="muted">檢視</span></h2>
+<h2>通道 <span class="muted">檢視 · token 在 .env 設</span></h2>
 <dl class="kv">
   {{range .Channels}}<dt>{{.Name}}</dt><dd>{{if eq .Status "已綁定"}}<span class="badge">已綁定</span>{{else}}<span class="muted">未綁定</span>{{end}}</dd>{{end}}
 </dl>
 
-<h2>可觀測性 <span class="muted">檢視</span></h2>
-<dl class="kv">
-  <dt>Langfuse</dt><dd>{{if .Langfuse}}<span class="badge">已接</span>{{else}}<span class="muted">未接</span>{{end}}</dd>
-  <dt>OTel</dt><dd>{{if .OTelEndpoint}}<code>{{.OTelEndpoint}}</code>{{else}}<span class="muted">未設</span>{{end}}</dd>
-</dl>
+<h2>存取控制 <span class="muted">寫 .env · 改完重啟</span></h2>
+{{template "envform" .AccessEnv}}
 
-<h2>執行環境 <span class="muted">檢視</span></h2>
-<dl class="kv">
-  <dt>sandbox</dt><dd>{{.Sandbox}}</dd>
-  <dt>MCP 設定檔</dt><dd><code>{{.MCPConfig}}</code></dd>
-  <dt>session 目錄</dt><dd><code>{{.SessionDir}}</code></dd>
-  <dt>回合上限</dt><dd>{{.MaxTurns}} 輪</dd>
-  <dt>成本熔斷</dt><dd>${{printf "%.2f" .MaxCostUSD}}</dd>
-  <dt>工具併發</dt><dd>{{.MaxConcurrent}}</dd>
-</dl>
+<h2>執行環境 <span class="muted">寫 .env · 改完重啟</span></h2>
+{{template "envform" .RuntimeEnv}}
+<p class="muted">回合／成本／併發上限見下方「護欄」（熱載免重啟）。</p>
 
-<h2>存取與行為 <span class="muted">寫 .env · 改完重啟</span></h2>
-<form method="POST" action="/env-config" class="knobs">
-  <input type="hidden" name="_fields" value="{{range .EnvFields}}{{.Key}} {{end}}">
-  {{range .EnvFields}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
-    {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
-  {{end}}<button type="submit">儲存</button>
-</form>
+<h2>可觀測性 <span class="muted">Langfuse 檢視 · OTel 可編輯</span></h2>
+<dl class="kv">
+  <dt>Langfuse</dt><dd>{{if .Langfuse}}<span class="badge">已接</span>{{else}}<span class="muted">未接</span>{{end}} <span class="muted">（金鑰在 .env）</span></dd>
+</dl>
+{{template "envform" .ObsEnv}}
+
+<h2>自我進化 <span class="muted">寫 .env · 改完重啟</span></h2>
+{{template "envform" .EvolveEnv}}
 
 <h2>MCP 伺服器 <span class="muted">改完重啟</span></h2>
 {{if .MCPServers}}<div class="mcplist">{{range .MCPServers}}<div class="mcpitem">
@@ -229,4 +227,11 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
     <input type="number" step="0.01" name="max_cost" value="{{printf "%.2f" .Knobs.MaxCostUSD}}" min="0" max="{{.Limits.MaxCostUSD}}"></label>
   <button type="submit">儲存</button>
 </form>
+
+{{define "envform"}}<form method="POST" action="/env-config" class="knobs">
+  <input type="hidden" name="_fields" value="{{range .}}{{.Key}} {{end}}">
+  {{range .}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
+    {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
+  {{end}}<button type="submit">儲存</button>
+</form>{{end}}
 `))

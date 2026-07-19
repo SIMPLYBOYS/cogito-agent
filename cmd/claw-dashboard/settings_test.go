@@ -12,8 +12,8 @@ func TestEnvConfigSave_WritesEnvPreservesSecrets(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir) // 讓 handler 的 ".env" 解到 temp
 	t.Cleanup(func() {
-		for _, e := range editableEnv {
-			os.Unsetenv(e.Key) // 清掉 handler os.Setenv 的殘留，避免污染其他測試
+		for k := range allowedEnvKeys {
+			os.Unsetenv(k) // 清掉 handler os.Setenv 的殘留，避免污染其他測試
 		}
 	})
 	if err := os.WriteFile(".env", []byte("ANTHROPIC_API_KEY=sk-LIVE-SECRET\nCLAUDE_MODEL=claude-opus-4-8\n"), 0o600); err != nil {
