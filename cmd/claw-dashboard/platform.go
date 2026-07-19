@@ -169,7 +169,7 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 <div class="secrets">
   {{range .Secrets}}<div class="secret">
     <span class="sk">{{.Key}}</span>
-    {{if .Set}}<span class="sv" data-key="{{.Key}}">••••••••</span> <button type="button" class="eye" data-key="{{.Key}}" data-shown="0">👁</button>{{else}}<span class="muted">未設</span>{{end}}
+    {{if .Set}}<span class="secfield"><span class="sv">••••••••</span> <button type="button" class="eye" data-url="/secret/reveal?key={{.Key}}" data-shown="0">👁</button></span>{{else}}<span class="muted">未設</span>{{end}}
     <details class="mcpedit"><summary>{{if .Set}}輪替{{else}}設定{{end}}</summary>
       <form method="POST" action="/secret" class="knobs">
         <input type="hidden" name="key" value="{{.Key}}">
@@ -211,9 +211,19 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
       <label>類型<select name="type"><option value="stdio"{{if ne .Type "http"}} selected{{end}}>stdio</option><option value="http"{{if eq .Type "http"}} selected{{end}}>http</option></select></label>
       <label>{{if eq .Type "http"}}url{{else}}command{{end}}<input type="text" name="target" value="{{if eq .Type "http"}}{{.URL}}{{else}}{{.Command}}{{end}}"></label>
       <label>args<input type="text" name="args" value="{{.ArgsStr}}"></label>
-      {{if or .EnvKeys .HeaderKeys}}<p class="hint">🔒 保留不動（改值編 .mcp.json）：{{range .EnvKeys}}<code>env:{{.}}</code> {{end}}{{range .HeaderKeys}}<code>header:{{.}}</code> {{end}}</p>{{end}}
       <button type="submit">儲存</button>
     </form>
+    {{if and $.SecretsAllowed (or .EnvKeys .HeaderKeys)}}{{$srv := .Name}}<p class="hint">env / headers（👁 顯示／輪替；新增請編 .mcp.json）：</p>
+    <div class="secrets">
+      {{range .EnvKeys}}<div class="secret"><span class="sk">env: {{.}}</span>
+        <span class="secfield"><span class="sv">••••••••</span> <button type="button" class="eye" data-url="/mcp/secret/reveal?server={{$srv}}&kind=env&key={{.}}" data-shown="0">👁</button></span>
+        <details class="mcpedit"><summary>輪替</summary><form method="POST" action="/mcp/secret" class="knobs"><input type="hidden" name="server" value="{{$srv}}"><input type="hidden" name="kind" value="env"><input type="hidden" name="key" value="{{.}}"><label>新值<input type="password" name="value" placeholder="新的 {{.}}" autocomplete="off"></label><button type="submit">儲存</button></form></details>
+      </div>{{end}}
+      {{range .HeaderKeys}}<div class="secret"><span class="sk">header: {{.}}</span>
+        <span class="secfield"><span class="sv">••••••••</span> <button type="button" class="eye" data-url="/mcp/secret/reveal?server={{$srv}}&kind=headers&key={{.}}" data-shown="0">👁</button></span>
+        <details class="mcpedit"><summary>輪替</summary><form method="POST" action="/mcp/secret" class="knobs"><input type="hidden" name="server" value="{{$srv}}"><input type="hidden" name="kind" value="headers"><input type="hidden" name="key" value="{{.}}"><label>新值<input type="password" name="value" placeholder="新的 {{.}}" autocomplete="off"></label><button type="submit">儲存</button></form></details>
+      </div>{{end}}
+    </div>{{end}}
   </details>
 </div>{{end}}</div>{{else}}<p class="muted">尚無 server。</p>{{end}}
 <details class="mcpedit"><summary>＋ 新增 server</summary>

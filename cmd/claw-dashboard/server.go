@@ -46,6 +46,8 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /platform.js", s.platformJS)
 	mux.HandleFunc("GET /secret/reveal", s.secretReveal)
 	mux.HandleFunc("POST /secret", s.secretSave)
+	mux.HandleFunc("GET /mcp/secret/reveal", s.mcpSecretReveal)
+	mux.HandleFunc("POST /mcp/secret", s.mcpSecretSave)
 	mux.HandleFunc("POST /mcp/add", s.mcpAdd)
 	mux.HandleFunc("POST /mcp/edit", s.mcpEdit)
 	mux.HandleFunc("POST /mcp/remove", s.mcpRemove)

@@ -133,3 +133,61 @@ func readFileStr(t *testing.T, p string) string {
 	}
 	return string(b)
 }
+
+// MCP 祕密：讀單一 env/header 值；輪替只改該值、其餘欄位與其他祕密逐字保留。
+func TestMCPSecretRotate(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".mcp.json")
+	seed := `{"mcpServers":{"gh":{"type":"http","url":"https://x/mcp/","headers":{"Authorization":"Bearer OLD","X-Other":"keep"}}}}`
+	if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := readMCPSecretValue(p, "gh", "headers", "Authorization"); !ok || v != "Bearer OLD" {
+		t.Fatalf("reveal 應回現值，got %q %v", v, ok)
+	}
+	if err := setMCPSecretValue(p, "gh", "headers", "Authorization", "Bearer NEW"); err != nil {
+		t.Fatal(err)
+	}
+	s := readFileStr(t, p)
+	if !strings.Contains(s, "Bearer NEW") || strings.Contains(s, "Bearer OLD") {
+		t.Error("Authorization 沒正確輪替")
+	}
+	if !strings.Contains(s, "X-Other") || !strings.Contains(s, "keep") {
+		t.Error("其他 header 被動到了")
+	}
+	if !strings.Contains(s, "https://x/mcp/") {
+		t.Error("url 被動到了")
+	}
+	if _, ok := readMCPSecretValue(p, "gh", "env", "NOPE"); ok {
+		t.Error("不存在的 key 應回 false")
+	}
+}
+
+// MCP 祕密 handler：同源回值；跨站 403；INSECURE（非 loopback）403。
+func TestMCPSecret_HandlerGate(t *testing.T) {
+	dir := t.TempDir()
+	mcpPath := filepath.Join(dir, ".mcp.json")
+	_ = os.WriteFile(mcpPath, []byte(`{"mcpServers":{"gh":{"type":"http","url":"https://x","headers":{"Authorization":"Bearer OLD"}}}}`), 0o600)
+	t.Setenv("COGITO_MCP_CONFIG", mcpPath)
+	t.Setenv("COGITO_DASH_INSECURE", "")
+	srv := newServer(nil, "", dir, nil)
+	rev := func(secFetch string) (int, string) {
+		req := httptest.NewRequest("GET", "/mcp/secret/reveal?server=gh&kind=headers&key=Authorization", nil)
+		if secFetch != "" {
+			req.Header.Set("Sec-Fetch-Site", secFetch)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	if code, body := rev("same-origin"); code != 200 || body != "Bearer OLD" {
+		t.Errorf("同源應回值，got %d %q", code, body)
+	}
+	if code, _ := rev("cross-site"); code != 403 {
+		t.Errorf("跨站應 403，got %d", code)
+	}
+	t.Setenv("COGITO_DASH_INSECURE", "1")
+	if code, _ := rev("same-origin"); code != 403 {
+		t.Errorf("INSECURE 應 403，got %d", code)
+	}
+}

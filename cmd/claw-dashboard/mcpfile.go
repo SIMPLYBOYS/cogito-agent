@@ -250,6 +250,69 @@ func removeMCPServer(path, name string) error {
 	return writeMCPFile(path, top)
 }
 
+// readMCPSecretValue 讀某 server 的 env/headers 單一 key 現值（供眼睛按需顯示，不預先嵌頁面）。
+// kind＝"env" 或 "headers"。找不到回 ("", false)。
+func readMCPSecretValue(path, server, kind, key string) (string, bool) {
+	top, err := readMCPFile(path)
+	if err != nil {
+		return "", false
+	}
+	raw := serverMap(top, mcpEnabledKey)[server]
+	if raw == nil {
+		raw = serverMap(top, mcpDisabledKey)[server]
+	}
+	if raw == nil {
+		return "", false
+	}
+	var c mcp.ServerConfig
+	if json.Unmarshal(raw, &c) != nil {
+		return "", false
+	}
+	m := c.Env
+	if kind == "headers" {
+		m = c.Headers
+	}
+	v, ok := m[key]
+	return v, ok
+}
+
+// setMCPSecretValue 輪替某 server 的 env/headers 單一【既有】key（其餘欄位與其他祕密逐字保留）。
+// 只允許改既有 key（防注入任意鍵）——呼叫端須先以 readMCPSecretValue 確認存在。
+func setMCPSecretValue(path, server, kind, key, value string) error {
+	field := "env"
+	if kind == "headers" {
+		field = "headers"
+	}
+	top, err := readMCPFile(path)
+	if err != nil {
+		return err
+	}
+	mapKey := mcpEnabledKey
+	sm := serverMap(top, mcpEnabledKey)
+	if sm[server] == nil {
+		mapKey = mcpDisabledKey
+		sm = serverMap(top, mcpDisabledKey)
+	}
+	raw := sm[server]
+	if raw == nil {
+		return fmt.Errorf("找不到 server %q", server)
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(raw, &cfg); err != nil || cfg == nil {
+		cfg = map[string]any{}
+	}
+	sub, _ := cfg[field].(map[string]any)
+	if sub == nil {
+		sub = map[string]any{}
+	}
+	sub[key] = value
+	cfg[field] = sub
+	newRaw, _ := json.Marshal(cfg)
+	sm[server] = newRaw
+	putServerMap(top, mapKey, sm)
+	return writeMCPFile(path, top)
+}
+
 // toggleMCPServer 在 mcpServers ↔ mcpServersDisabled 之間搬移（停用不刪設定，raw 逐字保留）。
 func toggleMCPServer(path, name string) error {
 	top, err := readMCPFile(path)

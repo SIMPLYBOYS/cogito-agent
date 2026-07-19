@@ -89,6 +89,66 @@ func (s *server) secretSave(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/platform", http.StatusSeeOther)
 }
 
+// mcpSecretReveal 即時回傳某 MCP server 的 env/headers 單一 key 現值。同 /secret/reveal 的護欄
+// （loopback-only + 同源 + no-store）。
+func (s *server) mcpSecretReveal(w http.ResponseWriter, r *http.Request) {
+	if !secretsAllowed() {
+		http.Error(w, "非 loopback 部署不提供祕密顯示", http.StatusForbidden)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	q := r.URL.Query()
+	kind := q.Get("kind")
+	if kind != "env" && kind != "headers" {
+		http.NotFound(w, r)
+		return
+	}
+	v, ok := readMCPSecretValue(mcpConfigPath(), q.Get("server"), kind, q.Get("key"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(v))
+}
+
+// mcpSecretSave 輪替某 MCP server 的 env/headers 單一【既有】key。loopback-only + CSRF；只改既有 key。
+func (s *server) mcpSecretSave(w http.ResponseWriter, r *http.Request) {
+	if !secretsAllowed() {
+		http.Error(w, "非 loopback 部署不提供祕密編輯", http.StatusForbidden)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	server, kind, key := r.FormValue("server"), r.FormValue("kind"), r.FormValue("key")
+	if kind != "env" && kind != "headers" {
+		http.Error(w, "kind 需為 env / headers", http.StatusBadRequest)
+		return
+	}
+	if _, ok := readMCPSecretValue(mcpConfigPath(), server, kind, key); !ok {
+		http.Error(w, "該 server 無此 "+kind+" key（只能輪替既有值）", http.StatusBadRequest)
+		return
+	}
+	val := strings.TrimSpace(r.FormValue("value"))
+	if val == "" {
+		s.setFlash("⚠️ 新值為空，未更動。")
+		http.Redirect(w, r, "/platform", http.StatusSeeOther)
+		return
+	}
+	if err := setMCPSecretValue(mcpConfigPath(), server, kind, key, val); err != nil {
+		http.Error(w, "寫入 .mcp.json 失敗："+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.setFlash("✓ 已輪替 " + server + " 的 " + kind + ":" + key + "——bot 需【重啟】才套用。")
+	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+}
+
 // platformJS：眼睛圖示的最小客戶端。點眼睛→fetch /secret/reveal 顯示現值；再點→遮回。textContent
 // 塞入→免 XSS。獨立檔以走 script-src 'self'（不放 inline script）。
 func (s *server) platformJS(w http.ResponseWriter, r *http.Request) {
@@ -97,16 +157,18 @@ func (s *server) platformJS(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(platformJSSrc))
 }
 
+// 統一眼睛：按鈕帶 data-url（reveal 端點），值放在同一 .secfield 內的 .sv。頂層祕密與 MCP env/headers
+// 共用。textContent 塞入→免 XSS。
 const platformJSSrc = `document.querySelectorAll('.eye').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    var key = btn.getAttribute('data-key');
-    var sv = document.querySelector('.sv[data-key="' + key + '"]');
+    var wrap = btn.closest('.secfield');
+    var sv = wrap && wrap.querySelector('.sv');
     if (!sv) return;
     if (btn.getAttribute('data-shown') === '1') {
       sv.textContent = '••••••••'; btn.setAttribute('data-shown', '0'); btn.textContent = '👁';
       return;
     }
-    fetch('/secret/reveal?key=' + encodeURIComponent(key))
+    fetch(btn.getAttribute('data-url'))
       .then(function (r) { return r.ok ? r.text() : Promise.reject(); })
       .then(function (v) { sv.textContent = v; btn.setAttribute('data-shown', '1'); btn.textContent = '🙈'; })
       .catch(function () { sv.textContent = '（讀取失敗）'; });
