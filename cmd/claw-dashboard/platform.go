@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 )
 
@@ -23,20 +22,16 @@ type platformData struct {
 	ClaudeModel string // CLAUDE_MODEL 原值（編輯用）
 	OpenAIModel string // OPENAI_MODEL 原值
 	OpenAIBase  string // OPENAI_BASE_URL 原值
+	EmbedModel  string // COGITO_EMBED_MODEL 原值（編輯用）
+	EmbedBase   string // COGITO_EMBED_BASE_URL 原值
 	KeyName     string
 	KeySet      bool
 	ProviderErr string // 解析不出（未設 key / 未知 provider）時的提示
-	Embedder    string // 模型 id，或「關鍵字退回（未設）」
-	// 通道 / 可觀測性 / 執行環境（檢視）
+	Embedder    string // 顯示：模型 id，或「關鍵字退回（未設）」
+	// 通道 / 可觀測性（檢視；祕密狀態）
 	Channels     []channelRow
 	Langfuse     bool
 	OTelEndpoint string
-	Sandbox      string
-	MCPConfig    string
-	SessionDir   string
-	MaxTurns     int
-	MaxCostUSD   float64
-	MaxConcurrent int
 	// 可調護欄（.claw/config.json，熱載）
 	Knobs    evolve.Knobs
 	Limits   evolve.KnobLimits
@@ -60,15 +55,11 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 		ClaudeModel:   os.Getenv("CLAUDE_MODEL"),
 		OpenAIModel:   os.Getenv("OPENAI_MODEL"),
 		OpenAIBase:    os.Getenv("OPENAI_BASE_URL"),
+		EmbedModel:    os.Getenv("COGITO_EMBED_MODEL"),
+		EmbedBase:     os.Getenv("COGITO_EMBED_BASE_URL"),
 		Embedder:      envOr("COGITO_EMBED_MODEL", "關鍵字退回（未設 embedder）"),
 		Langfuse:      envSet("LANGFUSE_PUBLIC_KEY") && envSet("LANGFUSE_SECRET_KEY"),
 		OTelEndpoint:  firstNonEmpty(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
-		Sandbox:       onOff("COGITO_SANDBOX"),
-		MCPConfig:     envOr("COGITO_MCP_CONFIG", "（未設）"),
-		SessionDir:    envOr("COGITO_SESSION_DIR", "（未設）"),
-		MaxTurns:      engine.DefaultMaxTurns,
-		MaxCostUSD:    engine.DefaultMaxCostUSD,
-		MaxConcurrent: engine.DefaultMaxConcurrentTools,
 	}
 	resolveProviderInto(&d)
 	d.Channels = []channelRow{
@@ -122,13 +113,6 @@ func envOr(key, def string) string {
 	return def
 }
 
-func onOff(key string) string {
-	if envSet(key) {
-		return "已啟用"
-	}
-	return "停用"
-}
-
 func boundStatus(ok bool) string {
 	if ok {
 		return "已綁定"
@@ -151,19 +135,23 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 
 <h2>Provider <span class="muted">寫 .env · 改完重啟</span></h2>
 {{if .ProviderErr}}<p class="warn">⚠️ {{.ProviderErr}}</p>{{end}}
-<form method="POST" action="/env-config" class="knobs">
-  <input type="hidden" name="_fields" value="COGITO_PROVIDER CLAUDE_MODEL OPENAI_MODEL OPENAI_BASE_URL">
-  <label>provider <span class="muted">claude / openai（空＝claude）</span><input type="text" name="COGITO_PROVIDER" value="{{.ProviderRaw}}"></label>
-  <label>Claude 模型 <span class="muted">空＝預設</span><input type="text" name="CLAUDE_MODEL" value="{{.ClaudeModel}}"></label>
-  <label>OpenAI 模型 <span class="muted">provider=openai 時</span><input type="text" name="OPENAI_MODEL" value="{{.OpenAIModel}}"></label>
-  <label>OpenAI base URL <span class="muted">vLLM/Ollama/OpenRouter…</span><input type="text" name="OPENAI_BASE_URL" value="{{.OpenAIBase}}"></label>
-  <button type="submit">儲存</button>
-</form>
 <dl class="kv">
-  <dt>目前生效</dt><dd><span class="badge">{{.Provider}}</span> · <code>{{.Model}}</code></dd>
-  <dt>{{.KeyName}}</dt><dd>{{if .KeySet}}已設定 ✓{{else}}<span class="warn">未設 —</span>（金鑰請手動編 .env）{{end}}</dd>
+  <dt>provider</dt><dd><span class="badge">{{.Provider}}</span> · <code>{{.Model}}</code></dd>
+  <dt>{{.KeyName}}</dt><dd>{{if .KeySet}}已設定 ✓{{else}}<span class="warn">未設 —</span>{{end}} <span class="muted">（金鑰手動編 .env）</span></dd>
   <dt>embedder</dt><dd><code>{{.Embedder}}</code></dd>
 </dl>
+<details class="mcpedit"><summary>編輯</summary>
+<form method="POST" action="/env-config" class="knobs">
+  <input type="hidden" name="_fields" value="COGITO_PROVIDER CLAUDE_MODEL OPENAI_MODEL OPENAI_BASE_URL COGITO_EMBED_MODEL COGITO_EMBED_BASE_URL">
+  <label>provider <span class="muted">claude / openai</span><input type="text" name="COGITO_PROVIDER" value="{{.ProviderRaw}}"></label>
+  <label>Claude 模型<input type="text" name="CLAUDE_MODEL" value="{{.ClaudeModel}}"></label>
+  <label>OpenAI 模型 <span class="muted">provider=openai 時</span><input type="text" name="OPENAI_MODEL" value="{{.OpenAIModel}}"></label>
+  <label>OpenAI base URL<input type="text" name="OPENAI_BASE_URL" value="{{.OpenAIBase}}"></label>
+  <label>embedder 模型 <span class="muted">空＝關鍵字退回</span><input type="text" name="COGITO_EMBED_MODEL" value="{{.EmbedModel}}"></label>
+  <label>embedder base URL<input type="text" name="COGITO_EMBED_BASE_URL" value="{{.EmbedBase}}"></label>
+  <button type="submit">儲存</button>
+</form>
+</details>
 
 <h2>通道 <span class="muted">檢視 · token 在 .env 設</span></h2>
 <dl class="kv">
@@ -171,20 +159,20 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 </dl>
 
 <h2>存取控制 <span class="muted">寫 .env · 改完重啟</span></h2>
-{{template "envform" .AccessEnv}}
+{{template "envblock" .AccessEnv}}
 
 <h2>執行環境 <span class="muted">寫 .env · 改完重啟</span></h2>
-{{template "envform" .RuntimeEnv}}
+{{template "envblock" .RuntimeEnv}}
 <p class="muted">回合／成本／併發上限見下方「護欄」（熱載免重啟）。</p>
 
 <h2>可觀測性 <span class="muted">Langfuse 檢視 · OTel 可編輯</span></h2>
 <dl class="kv">
   <dt>Langfuse</dt><dd>{{if .Langfuse}}<span class="badge">已接</span>{{else}}<span class="muted">未接</span>{{end}} <span class="muted">（金鑰在 .env）</span></dd>
 </dl>
-{{template "envform" .ObsEnv}}
+{{template "envblock" .ObsEnv}}
 
 <h2>自我進化 <span class="muted">寫 .env · 改完重啟</span></h2>
-{{template "envform" .EvolveEnv}}
+{{template "envblock" .EvolveEnv}}
 
 <h2>MCP 伺服器 <span class="muted">改完重啟</span></h2>
 {{if .MCPServers}}<div class="mcplist">{{range .MCPServers}}<div class="mcpitem">
@@ -217,8 +205,14 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 </details>
 
 <h2>護欄 <span class="muted">熱載 · 免重啟</span></h2>
-<p class="muted">0＝用預設；送出自動 clamp。{{if .KnobsSet}}目前有覆蓋。{{else}}目前用預設。{{end}}</p>
+<dl class="kv">
+  <dt>回合上限</dt><dd>{{if .Knobs.MaxTurns}}{{.Knobs.MaxTurns}} 輪{{else}}<span class="muted">預設</span>{{end}}</dd>
+  <dt>工具併發</dt><dd>{{if .Knobs.MaxConcurrentTools}}{{.Knobs.MaxConcurrentTools}}{{else}}<span class="muted">預設</span>{{end}}</dd>
+  <dt>成本熔斷</dt><dd>{{if .Knobs.MaxCostUSD}}${{printf "%.2f" .Knobs.MaxCostUSD}}{{else}}<span class="muted">預設</span>{{end}}</dd>
+</dl>
+<details class="mcpedit"><summary>編輯</summary>
 <form method="POST" action="/config" class="knobs">
+  <p class="hint">0＝用預設；送出自動 clamp。</p>
   <label>回合上限 <span class="muted">{{.Limits.MinTurns}}–{{.Limits.MaxTurns}}</span>
     <input type="number" name="max_turns" value="{{.Knobs.MaxTurns}}" min="0" max="{{.Limits.MaxTurns}}"></label>
   <label>工具併發 <span class="muted">{{.Limits.MinConcurrency}}–{{.Limits.MaxConcurrency}}</span>
@@ -227,11 +221,17 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
     <input type="number" step="0.01" name="max_cost" value="{{printf "%.2f" .Knobs.MaxCostUSD}}" min="0" max="{{.Limits.MaxCostUSD}}"></label>
   <button type="submit">儲存</button>
 </form>
+</details>
 
-{{define "envform"}}<form method="POST" action="/env-config" class="knobs">
+{{define "envblock"}}<dl class="kv">
+  {{range .}}<dt>{{.Label}}</dt><dd>{{if .Toggle}}{{if .On}}<span class="badge">啟用</span>{{else}}<span class="muted">停用</span>{{end}}{{else}}{{if .Value}}<code>{{.Value}}</code>{{else}}<span class="muted">未設</span>{{end}}{{end}}</dd>{{end}}
+</dl>
+<details class="mcpedit"><summary>編輯</summary>
+<form method="POST" action="/env-config" class="knobs">
   <input type="hidden" name="_fields" value="{{range .}}{{.Key}} {{end}}">
   {{range .}}<label>{{.Label}}{{with .Hint}} <span class="muted">{{.}}</span>{{end}}
     {{if .Toggle}}<span class="tog"><input type="checkbox" name="{{.Key}}" value="1"{{if .On}} checked{{end}}> 啟用</span>{{else}}<input type="text" name="{{.Key}}" value="{{.Value}}" placeholder="{{.Hint}}">{{end}}</label>
   {{end}}<button type="submit">儲存</button>
-</form>{{end}}
+</form>
+</details>{{end}}
 `))

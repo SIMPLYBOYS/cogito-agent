@@ -32,8 +32,9 @@ var (
 	obsEnv = []envKeyDef{
 		{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTel endpoint", "空＝不上報 trace", false},
 	}
-	// Provider 表單直接寫死這些欄位（不走 loadEnvGroup），但需在白名單內。
-	providerEnvKeys = []string{"COGITO_PROVIDER", "CLAUDE_MODEL", "OPENAI_MODEL", "OPENAI_BASE_URL"}
+	// Provider 表單直接寫死這些欄位（不走 loadEnvGroup），但需在白名單內。含 embedder（非祕密：
+	// model / base url；embedder 金鑰仍是祕密、不在此）。
+	providerEnvKeys = []string{"COGITO_PROVIDER", "CLAUDE_MODEL", "OPENAI_MODEL", "OPENAI_BASE_URL", "COGITO_EMBED_MODEL", "COGITO_EMBED_BASE_URL"}
 )
 
 // allowedEnvKeys 是【可經面板寫入的白名單】：任一表單只能改這些 key（金鑰/token 不在內）。updateEnvFile
