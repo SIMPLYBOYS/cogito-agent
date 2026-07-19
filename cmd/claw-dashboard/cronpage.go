@@ -178,11 +178,11 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
 </div>
 {{else}}<p class="muted">（尚無排程任務。）</p>{{end}}
 
-<h3>排程設定 <span class="muted">{{.TZName}} · {{if .NotifyTarget}}推播 {{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未推播{{end}}</span></h3>
+<h3>排程設定 <span class="muted">{{if .TZValue}}{{.TZName}}{{else}}<span class="warn">{{.TZName}} ⚠️ 未明設時區</span>{{end}} · {{if .NotifyTarget}}推播 {{.NotifyTarget}}{{if .NotifyErrOnly}}（只送失敗）{{end}}{{else}}未推播{{end}}</span></h3>
 <p class="muted">時區決定排程怎麼解讀（留空＝跟隨伺服器，雲端多為 UTC）。
 推播是執行完把「狀態＋回覆摘要＋執行樹連結」送到 Slack／Telegram，留空＝不推播；
 token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
-<details class="mcpedit"><summary>編輯</summary>
+<details class="mcpedit"{{if not .TZValue}} open{{end}}><summary>編輯時區／推播</summary>
   <form method="POST" action="/env-config" class="knobs">
     <input type="hidden" name="_fields" value="CRON_TZ COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
     <input type="hidden" name="_return" value="/cron">

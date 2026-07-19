@@ -240,3 +240,34 @@ func TestCronLocation(t *testing.T) {
 		t.Error("無效時區應回提示訊息")
 	}
 }
+
+// 未明設時區時要「講大聲」：標題警示 + 設定區預設展開；設好之後回歸安靜的緊湊顯示。
+func TestCronPage_TimezoneNudge(t *testing.T) {
+	srv := newServer(nil, "", t.TempDir(), nil)
+	get := func() string {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest("GET", "/cron", nil))
+		return rec.Body.String()
+	}
+
+	t.Setenv(cronTZKey, "")
+	body := get()
+	if !strings.Contains(body, "未明設時區") {
+		t.Error("未設時區時標題應警示")
+	}
+	if !strings.Contains(body, `class="mcpedit" open`) {
+		t.Error("未設時區時設定區應預設展開")
+	}
+
+	t.Setenv(cronTZKey, "Asia/Taipei")
+	body = get()
+	if strings.Contains(body, "未明設時區") {
+		t.Error("設好時區後不該再警示")
+	}
+	if !strings.Contains(body, "Asia/Taipei") {
+		t.Error("設好後標題應顯示該時區")
+	}
+	if strings.Contains(body, `class="mcpedit" open`) {
+		t.Error("設好後設定區應收合（維持緊湊顯示）")
+	}
+}
