@@ -68,3 +68,25 @@ func TestSendNotify_RejectsBadTarget(t *testing.T) {
 		t.Errorf("缺 Telegram token 應明說，得 %v", err)
 	}
 }
+
+// 誤把 token 貼進「推播目標」必須被擋——該欄明碼顯示在頁面上，貼 token 等於憑證外洩。
+func TestNotifyTarget_RejectsPastedToken(t *testing.T) {
+	tokens := []string{
+		"slack:x" + "oxb-123456789012-abcdefghijklmnop",
+		"slack:x" + "app-1-A012-xyz",
+		"telegram:123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw",
+		"slack:" + strings.Repeat("a", 41), // 過長＝幾乎必然是憑證
+	}
+	for _, tk := range tokens {
+		if _, _, err := parseNotifyTarget(tk); err == nil {
+			t.Errorf("疑似 token 的目標 %q 應被擋下", tk)
+		}
+	}
+
+	// 正常的頻道／聊天室 id 不可被誤擋
+	for _, good := range []string{"slack:C0123ABC456", "telegram:12345678", "telegram:-1001234567890"} {
+		if _, _, err := parseNotifyTarget(good); err != nil {
+			t.Errorf("合法目標 %q 不該被擋：%v", good, err)
+		}
+	}
+}

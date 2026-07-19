@@ -61,20 +61,44 @@ func buildCronNotice(j cronJob, status, errMsg, reply string, dur time.Duration)
 	return b.String()
 }
 
-// sendNotify 依目標前綴分派。回錯由呼叫端記 log——通知失敗不該影響排程本身。
+// parseNotifyTarget 拆解並驗證推播目標。
+//
+// 【為何連 token 形狀都擋】這欄填的是【收件地址】且會明碼顯示在 cron 頁標題上；誤把 bot token
+// 貼進來等於把憑證印在畫面、並寫進 .env 的非祕密欄位。token 該放「金鑰／祕密」區。
+func parseNotifyTarget(target string) (plat, id string, err error) {
+	p, i, ok := strings.Cut(strings.TrimSpace(target), ":")
+	if !ok || strings.TrimSpace(i) == "" {
+		return "", "", fmt.Errorf("格式須為 <平台>:<id>（如 slack:C0123ABC），實得 %q", target)
+	}
+	plat, id = strings.ToLower(strings.TrimSpace(p)), strings.TrimSpace(i)
+	if plat != "slack" && plat != "telegram" {
+		return "", "", fmt.Errorf("不支援的通知平台 %q（目前支援 slack / telegram）", p)
+	}
+	if looksLikeToken(id) {
+		return "", "", fmt.Errorf("這裡要填【收件頻道／聊天室 id】（如 C0123ABC），不是 token；" +
+			"token 請設在 platform 的「金鑰／祕密」區")
+	}
+	return plat, id, nil
+}
+
+// looksLikeToken 粗判誤貼的憑證：Slack 一律 xox*／xapp- 開頭；頻道與聊天室 id 都很短，
+// 過長幾乎必然是 token。寧可誤擋也不要讓憑證明碼上畫面。
+func looksLikeToken(s string) bool {
+	low := strings.ToLower(s)
+	return strings.HasPrefix(low, "xox") || strings.HasPrefix(low, "xapp-") ||
+		strings.HasPrefix(low, "bot") || len(s) > 40
+}
+
+// sendNotify 依目標平台分派。回錯由呼叫端記 log——通知失敗不該影響排程本身。
 func sendNotify(target, text string) error {
-	plat, id, ok := strings.Cut(target, ":")
-	if !ok || strings.TrimSpace(id) == "" {
-		return fmt.Errorf("通知目標格式須為 <平台>:<id>（如 slack:C0123ABC），實得 %q", target)
+	plat, id, err := parseNotifyTarget(target)
+	if err != nil {
+		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(plat)) {
-	case "slack":
+	if plat == "slack" {
 		return sendSlack(id, text)
-	case "telegram":
-		return sendTelegram(id, text)
-	default:
-		return fmt.Errorf("不支援的通知平台 %q（目前支援 slack / telegram）", plat)
 	}
+	return sendTelegram(id, text)
 }
 
 func sendSlack(channel, text string) error {

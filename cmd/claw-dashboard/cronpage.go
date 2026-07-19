@@ -187,7 +187,7 @@ token 走 <a href="/platform">platform</a> 的「金鑰／祕密」區。</p>
     <input type="hidden" name="_fields" value="CRON_TZ COGITO_CRON_NOTIFY COGITO_CRON_NOTIFY_ERRORS_ONLY">
     <input type="hidden" name="_return" value="/cron">
     <label>時區 <input name="CRON_TZ" value="{{.TZValue}}" placeholder="Asia/Taipei"></label>
-    <label>推播目標 <input name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="slack:C0123ABC 或 telegram:12345678"></label>
+    <label>推播目標（收件頻道 id，<b>不是 token</b>） <input name="COGITO_CRON_NOTIFY" value="{{.NotifyTarget}}" placeholder="slack:C0123ABC 或 telegram:12345678"></label>
     <label class="tog"><input type="checkbox" name="COGITO_CRON_NOTIFY_ERRORS_ONLY" value="1"{{if .NotifyErrOnly}} checked{{end}}> 只在失敗時推播</label>
     <button>儲存</button>
   </form>
