@@ -123,19 +123,34 @@ func (s *Scheduler) due(j Job, now time.Time) bool {
 	return ok && !next.After(now)
 }
 
-// baseline 取算下次觸發的基準點：優先用上次執行時間（持久化，跨重啟仍準）；沒跑過就用【首次觀察到
-// 的時刻】——這樣剛新增的 job 不會立刻補跑一次「過去的」排程。
+// baseline 取算下次觸發的基準點。
+//
+// 首次觀察：有跑過就以持久化的 LastRun 為準（跨重啟仍準、會補跑錯過的一次）；沒跑過就用當下
+// （剛新增的 job 不補跑過去的排程）。
+//
+// 【之後每輪都要再比對 LastRun】——LastRun 是【跨行程的事實】：另一個排程器（bot／dashboard）
+// 跑過就會更新它。若只認自己記憶體裡的快取，會發生：A 搶到鎖執行並推進 LastRun，B 該輪因搶不到
+// 鎖而整輪跳過、基準點停在舊值，下一輪 B 拿過時基準一算又認為到點 → 同一個排程點被跑兩次，
+// 且兩行程來回 ping-pong。取「快取與 LastRun 的較新者」即可收斂。
 func (s *Scheduler) baseline(j Job, now time.Time) time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if b, ok := s.base[j.ID]; ok {
-		return b
-	}
-	b := now
+
+	var lastRun time.Time
 	if j.LastRun != "" {
 		if t, err := time.Parse(time.RFC3339, j.LastRun); err == nil {
-			b = t
+			lastRun = t
 		}
+	}
+
+	b, cached := s.base[j.ID]
+	switch {
+	case !cached && !lastRun.IsZero():
+		b = lastRun // 首次觀察且跑過：以 LastRun 為準（跨重啟補跑）
+	case !cached:
+		b = now // 首次觀察且沒跑過：不補跑過去的排程
+	case lastRun.After(b):
+		b = lastRun // 別的行程剛跑過：跟上，別重跑
 	}
 	s.base[j.ID] = b
 	return b

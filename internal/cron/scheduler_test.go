@@ -245,3 +245,29 @@ func TestTick_CrossProcessLock(t *testing.T) {
 		unlock()
 	}
 }
+
+// 兩個行程都跑排程器時，同一個排程點只能被執行一次。
+//
+// 鎖只擋「同時 tick」，擋不住「各自依過時基準重複觸發」：A 執行後推進了持久化的 LastRun，
+// B 若只認自己記憶體裡的快取基準，下一輪會拿過時基準再跑一遍（並來回 ping-pong）。
+func TestDue_FollowsOtherProcessLastRun(t *testing.T) {
+	job := Job{ID: "x", Schedule: "0 * * * *", Enabled: true, LastRun: "2026-01-01T08:00:00Z"}
+
+	b := newSched(t, &countingRunner{}) // 模擬 dashboard 端
+	// B 在 09:30 首次觀察：基準＝LastRun(08:00)，下次 09:00 已過 → 到點
+	if !b.due(job, at(t, "2026-01-01T09:30:00Z")) {
+		t.Fatal("前提不成立：此刻本應到點")
+	}
+
+	// A（另一個行程）搶到鎖跑掉了，把 LastRun 推到 09:30。B 這輪什麼都沒做，快取仍停在 08:00。
+	job.LastRun = "2026-01-01T09:30:00Z"
+
+	// 09:40：B 必須看見別人已經跑過，不可再跑一次
+	if b.due(job, at(t, "2026-01-01T09:40:00Z")) {
+		t.Error("別的行程已在 09:30 跑過，B 不該重跑同一個排程點")
+	}
+	// 10:00：下一個真正的排程點到了，才該再跑
+	if !b.due(job, at(t, "2026-01-01T10:00:00Z")) {
+		t.Error("到了下一個排程點應正常觸發")
+	}
+}
