@@ -272,11 +272,14 @@ cp .env.example .env
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/some/dir"]
+      // 鎖版本：不寫版號或寫 @latest，等於每次重啟都拉當下最新——上游被投毒就自動吃進去
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2026.7.10", "/some/dir"]
     }
   }
 }
 ```
+
+> **供應鏈**：MCP server 多是第三方 npx/uvx 套件，等於把工具能力外包出去，請一律**鎖到確切版本**（升級前先看 changelog）。cogito 這端已做的：MCP server 子行程只拿白名單環境變數（`ANTHROPIC_API_KEY` 等一律讀不到），且 MCP 工具照樣過[權限守門](#工具權限政策deny--ask--allow)。
 
 ```bash
 export COGITO_MCP_CONFIG=./.mcp.json

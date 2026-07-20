@@ -1,20 +1,21 @@
 {
+  "_comment": "MCP server 多是第三方套件＝把工具能力外包出去。一律鎖到確切版本：不寫版號或寫 @latest，等於每次重啟都拉當下最新，上游被投毒就自動吃進去。升級前先看 changelog。",
   "mcpServers": {
     "everything": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"]
+      "args": ["-y", "@modelcontextprotocol/server-everything@2026.7.4"]
     },
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem@2026.7.10", "/tmp"]
     },
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest", "--headless"]
+      "args": ["-y", "@playwright/mcp@0.0.78", "--headless"]
     },
     "job104": {
       "command": "uvx",
-      "args": ["job104-mcp@latest"]
+      "args": ["job104-mcp@0.1.7"]
     },
     "twinkle-hub": {
       "type": "http",

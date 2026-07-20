@@ -38,7 +38,7 @@ func TestFilteredEnv_ExtraPassthrough(t *testing.T) {
 	t.Setenv("MY_SECRET_VAR", "value-2")
 	t.Setenv(passExtraKey, "MY_TOOLCHAIN_VAR")
 
-	joined := strings.Join(filteredEnv(), "\n")
+	joined := strings.Join(FilteredEnv(), "\n")
 	if !strings.Contains(joined, "MY_TOOLCHAIN_VAR=value-1") {
 		t.Error("列在 COGITO_SANDBOX_ENV_PASS 的變數應放行")
 	}
