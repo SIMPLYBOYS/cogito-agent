@@ -368,6 +368,21 @@ go run ./cmd/claw-cli -session task_001 -prompt "繼續"
 
 ### Operator Dashboard（維運面板）
 
+<table>
+<tr>
+<td width="50%"><img src="docs/dashboard/runs.png" alt="Runs：一次 query 的完整執行樹"><br>
+<b>Runs</b> — ReAct 迴圈逐步展開：思考、工具參數、子 agent 委派、最終回答</td>
+<td width="50%"><img src="docs/dashboard/metrics.png" alt="Metrics：各平台與各模型的用量切片"><br>
+<b>Metrics</b> — 總花費與 token，按平台／模型切片（自帶，不依賴 Langfuse）</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/dashboard/cron.png" alt="Cron：排程任務"><br>
+<b>Cron</b> — 排程任務、下次／上次執行、失敗原因、結果推播設定</td>
+<td width="50%"><img src="docs/dashboard/policy.png" alt="工具權限政策"><br>
+<b>Policy</b> — Deny &gt; Ask &gt; Allow 的現行規則（唯讀檢視）</td>
+</tr>
+</table>
+
 ```bash
 go run ./cmd/claw-dashboard          # → http://127.0.0.1:8091（唯讀）
 COGITO_DASH_CHAT=1 go run ./cmd/claw-dashboard   # 額外開啟寫入能力（見下）
