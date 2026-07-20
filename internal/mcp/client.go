@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 )
 
 const protocolVersion = "2024-11-05"
@@ -177,7 +179,11 @@ func Dial(ctx context.Context, cfg ServerConfig) (*Client, error) {
 
 func dialStdio(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	cmd := exec.Command(cfg.Command, cfg.Args...)
-	cmd.Env = append(cmd.Environ(), cfg.envSlice()...)
+	// 【為何不用 cmd.Environ()】那會把本行程【全部】環境變數交出去——包含 ANTHROPIC_API_KEY、
+	// bot token。MCP server 多半是 npx/uvx 拉下來的第三方套件，等於把所有金鑰交給不是自己寫的
+	// 程式碼（供應鏈曝險）。改成白名單基底 + .mcp.json 明確宣告的 env：server 真正需要的憑證
+	// 由設定明講，其餘一律不給。
+	cmd.Env = append(sandbox.FilteredEnv(), cfg.envSlice()...)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

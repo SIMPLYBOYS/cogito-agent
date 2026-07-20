@@ -25,11 +25,22 @@ var baseEnvKeys = []string{
 	"LANG", "LC_ALL", "LC_CTYPE",
 	// Go 工具鏈（agent 常跑 build/test）。逐一列出而非用 "GO" 前綴——前綴會誤放 GOOGLE_API_KEY 之類。
 	"GOPATH", "GOROOT", "GOBIN", "GOCACHE", "GOMODCACHE", "GOFLAGS", "GOPROXY", "GOPRIVATE", "GONOSUMDB", "GOSUMDB", "GOTOOLCHAIN",
+	// 快取/設定目錄：npx、uvx 等會用到（否則每次重抓套件，甚至直接失敗）。非祕密。
+	"XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+	// TLS 憑證位置（某些環境需明指），非祕密。
+	"SSL_CERT_FILE", "SSL_CERT_DIR",
+	// 代理設定：擋掉的話公司網路後面會整個連不出去。
+	// 註：代理 URL 可以內嵌帳密（http://user:pass@…），這是刻意的取捨——寧可放行也不要讓網路全斷。
+	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy",
 }
 
-// filteredEnv 依白名單組出要傳給子行程的環境變數。
+// FilteredEnv 依白名單組出要傳給【我們自己拉起的子行程】的環境變數——agent 的 bash 與 MCP
+// server 子行程都走這裡。
+//
 // 使用者可用 COGITO_SANDBOX_ENV_PASS（逗號分隔）補上自家工具鏈需要的變數，例如
 // COGITO_SANDBOX_ENV_PASS=NODE_ENV,CARGO_HOME。
+func FilteredEnv() []string { return filteredEnv() }
+
 func filteredEnv() []string {
 	allow := map[string]bool{}
 	for _, k := range baseEnvKeys {

@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 )
 
 // fakeServer 是 in-process 的最小 MCP 伺服器：從 reqR 讀 JSON-RPC 行，往 respW 回應。
@@ -133,6 +136,45 @@ func TestClient_ConcurrentCalls(t *testing.T) {
 		want := string(rune('A' + i))
 		if !strings.Contains(got, want) { // 每個結果含各自 msg＝id 路由正確（結果外層有邊界標記）
 			t.Errorf("併發呼叫 %d：id 路由錯誤，want 含 %q got %q", i, want, got)
+		}
+	}
+}
+
+// MCP server 子行程不得繼承本行程的金鑰。
+//
+// 這些 server 多半是 npx/uvx 拉下來的第三方套件，把 ANTHROPIC_API_KEY / bot token 全交出去
+// 等於供應鏈曝險。server 真正需要的憑證應由 .mcp.json 的 env 明確宣告。
+func TestDialStdio_DoesNotInheritSecrets(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-should-not-reach-mcp")
+	t.Setenv("SLACK_BOT_TOKEN", "token-should-not-reach-mcp")
+
+	// 讓 server 把自己看到的環境變數印出來後結束；dial 會因握手失敗回錯，但我們要的是它的 stdout。
+	cfg := ServerConfig{
+		Command: "bash",
+		Args:    []string{"-c", "env > " + t.TempDir() + "/dummy; env"},
+		Env:     map[string]string{"DECLARED_TOKEN": "explicitly-configured"},
+	}
+	cmd := exec.Command(cfg.Command, cfg.Args...)
+	cmd.Env = append(sandbox.FilteredEnv(), cfg.envSlice()...)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("執行失敗: %v", err)
+	}
+	seen := string(out)
+
+	for _, leaked := range []string{"sk-should-not-reach-mcp", "token-should-not-reach-mcp"} {
+		if strings.Contains(seen, leaked) {
+			t.Errorf("MCP server 看得到金鑰 %q", leaked)
+		}
+	}
+	// .mcp.json 明確宣告的 env 必須照樣送達，否則 server 自己的憑證會壞掉
+	if !strings.Contains(seen, "DECLARED_TOKEN=explicitly-configured") {
+		t.Error(".mcp.json 明確宣告的 env 應保留")
+	}
+	// npx/uvx 靠這兩個找執行檔與快取
+	for _, need := range []string{"PATH=", "HOME="} {
+		if !strings.Contains(seen, need) {
+			t.Errorf("缺少 %s，npx/uvx 會跑不起來", need)
 		}
 	}
 }
