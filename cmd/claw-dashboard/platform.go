@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/policy"
 )
 
 // platformData 是 /platform 頁的唯讀資料：實際驅動 agent 的平台設定（全 env 驅動，本專案無集中 config
@@ -48,6 +49,11 @@ type platformData struct {
 	// 金鑰／祕密（loopback-only：眼睛顯示現值 + 輪替）
 	Secrets        []secretRow
 	SecretsAllowed bool
+	// 工具權限政策（.claw/policy.json，唯讀檢視）——沒有這一區的話，使用者無從得知政策是否
+	// 生效、有幾條規則，安全設定變成隱形的。
+	PolicyPath  string
+	PolicyRules []policy.Rule
+	PolicyErr   string // 載入失敗（此時 chat/cron 會拒絕啟動，必須讓人看見原因）
 }
 
 type channelRow struct{ Name, Status string }
@@ -78,6 +84,15 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	d.Flash = s.readFlash()
 	d.MCPPath = mcpConfigPath()
 	d.MCPServers, _ = readMCPServers(d.MCPPath)
+
+	// 工具權限政策：即時重讀檔案（與 MCP 同樣做法）。載入失敗要明講——那代表 chat/cron 會拒絕
+	// 啟動，使用者看到的現象是「chat 不能用」，原因卻只在終端 log 裡。
+	d.PolicyPath = policy.ConfigPath(s.workspace)
+	if pol, err := policy.Load(d.PolicyPath); err != nil {
+		d.PolicyErr = err.Error()
+	} else {
+		d.PolicyRules = pol.Rules()
+	}
 	d.SecretsAllowed = secretsAllowed()
 	if d.SecretsAllowed {
 		d.Secrets = loadSecrets()
@@ -240,6 +255,26 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
     <button type="submit">新增</button>
   </form>
 </details>
+
+<h2>工具權限政策 <span class="muted">{{if .PolicyErr}}<span class="warn">⚠️ 載入失敗</span>{{else if .PolicyRules}}{{len .PolicyRules}} 條規則{{else}}未設定 · 走內建判斷{{end}}</span></h2>
+{{if .PolicyErr}}
+<p class="banner">⚠️ {{.PolicyPath}} 載入失敗：{{.PolicyErr}}<br>
+政策有錯時 <b>operator chat 與排程會拒絕啟動</b>（寧可不跑也不要以為有保護）。修好該檔或直接移除即可。</p>
+{{else if .PolicyRules}}
+<p class="muted">裁決順序 <b>Deny &gt; Ask &gt; Allow</b>，與規則先後無關。無人值守（排程）時 Ask 一律視為 Deny。</p>
+<table class="runs"><thead><tr><th>工具</th><th>參數比對</th><th>裁決</th><th>原因</th></tr></thead><tbody>
+{{range .PolicyRules}}<tr>
+  <td><code>{{.Tool}}</code></td>
+  <td>{{if .Match}}<code>{{.Match}}</code>{{else}}<span class="muted">（全部）</span>{{end}}</td>
+  <td>{{if eq .Action "deny"}}<span class="pill err">DENY</span>{{else if eq .Action "ask"}}<span class="pill">ASK</span>{{else}}<span class="pill ok">ALLOW</span>{{end}}</td>
+  <td class="muted">{{.Reason}}</td>
+</tr>{{end}}
+</tbody></table>
+{{else}}
+<p class="muted">未建 <code>{{.PolicyPath}}</code>，走內建判斷：命中高危黑名單→需審批，其餘放行。
+要「某工具永遠不准」（不問任何人）才需要政策檔。</p>
+{{end}}
+<p class="muted">唯讀檢視——政策是安全設定，刻意不開放面板編輯；改檔後需<b>重啟</b>才載入。</p>
 
 <h2>護欄 <span class="muted">熱載 · 免重啟</span></h2>
 <dl class="kv">

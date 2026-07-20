@@ -56,6 +56,18 @@ type compiled struct {
 // Policy 是一組規則。零值（或 nil）代表「無政策」——Decide 一律回空裁決，由呼叫端走內建預設。
 type Policy struct{ rules []compiled }
 
+// Rules 回已載入的規則（供面板檢視；順序即檔案順序，但裁決不看順序——見 Action.rank）。
+func (p *Policy) Rules() []Rule {
+	if p == nil {
+		return nil
+	}
+	out := make([]Rule, 0, len(p.rules))
+	for _, c := range p.rules {
+		out = append(out, c.Rule)
+	}
+	return out
+}
+
 // ConfigPath 回政策檔路徑（<workspace>/.claw/policy.json）。
 func ConfigPath(workspace string) string {
 	return filepath.Join(workspace, ".claw", "policy.json")

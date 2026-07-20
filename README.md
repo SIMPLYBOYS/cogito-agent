@@ -51,6 +51,13 @@
 - 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
 - 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
+- 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
+- ⏰ **內建 cron**：到點自動派任務給 agent，標準 cron 運算式 + 時區設定；結果推播 Slack／Telegram（含執行來源）。排程住常駐行程，bot 與面板各跑一個、靠檔案鎖仲裁不重複執行。
+
+**安全邊界**
+- 🛡️ **Deny > Ask > Allow 權限模型**：宣告式政策檔（`.claw/policy.json`）可讓某工具**永遠不准**；裁決與規則順序無關。**無人值守**（排程）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
+- 🔑 **金鑰不下放子行程**：agent 的 bash 與 MCP server 子行程只拿白名單環境變數，`ANTHROPIC_API_KEY` 等一律讀不到（MCP server 多是第三方 npx 套件，這條擋的是供應鏈曝險）。
+- 🚧 **控制面唯讀**：檔案工具不得寫入 `.claw/`（技能／記憶／護欄／排程）——否則 agent 可自行晉升技能、解除自己的成本上限、自己排程，整條人工放行的鏈就被繞過。
 
 ## Architecture
 
@@ -333,6 +340,8 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 > docker build -t cogito-sandbox:latest -f docker/sandbox.Dockerfile .
 > export COGITO_SANDBOX=docker     # bash 命令改在隔離容器內執行
 > # 可調：COGITO_SANDBOX_IMAGE / _MEMORY（512m）/ _CPUS（1.0）/ _NETWORK（none）/ _PIDS（256）
+> # 子行程（agent 的 bash、MCP server）只拿到【白名單】環境變數，金鑰不外流。
+> # 自家工具鏈變數不夠用時補上：COGITO_SANDBOX_ENV_PASS=NODE_ENV,CARGO_HOME
 > ```
 >
 > 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景進程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
@@ -353,6 +362,62 @@ go run ./cmd/claw-cli -session task_001 -prompt "繼續"
 ```
 
 對 Slack（`cmd/claw`）同理：設 `COGITO_SESSION_DIR` 後各頻道記憶不因服務重啟而丟失。每個 session 一個 JSON 檔（含對話歷史），請勿入庫（已加進 `.gitignore`）。
+
+### Operator Dashboard（維運面板）
+
+```bash
+go run ./cmd/claw-dashboard          # → http://127.0.0.1:8091（唯讀）
+COGITO_DASH_CHAT=1 go run ./cmd/claw-dashboard   # 額外開啟寫入能力（見下）
+```
+
+**綁 loopback、無認證**——遠端存取請走 SSH tunnel（`ssh -L 8091:127.0.0.1:8091 <host>`），綁非 loopback 位址會**拒絕啟動**（remote 認證尚未實作）。
+
+| 頁面 | 內容 |
+|---|---|
+| **Runs** | 一次 query 的完整執行樹：ReAct 迴圈、工具調用、子 agent 協同，逐步可展開 |
+| **Metrics** | 總花費、各平台／各模型的 token 與成本切片（自帶，不依賴 Langfuse） |
+| **Skills** | 生效中的技能（`.claw/skills/`），可展開看正文 |
+| **Cron** | 排程任務：新增／編輯／立即執行／推播設定（見下節） |
+| **Governance** | 自我進化的提案佇列：技能晉升、記憶放行、調參套用 |
+| **Platform** | provider／模型／MCP servers／金鑰輪替／權限政策／護欄，多數可就地編輯 |
+| **Chat** | 內嵌 operator chat，就地驅動 agent（逐字串流） |
+
+`COGITO_DASH_CHAT=1` 才開啟**寫入能力**（chat 會真的跑 bash／寫檔；cron 也才會觸發）。需同時設 `COGITO_SESSION_DIR`。
+
+### Cron（排程任務）
+
+到點自動把任務交給 agent 執行，標準 5-field cron 運算式。在面板 `/cron` 新增即可。
+
+```bash
+CRON_TZ=Asia/Taipei                          # 排程解讀時區（雲端機器多為 UTC，建議明設）
+COGITO_CRON_NOTIFY=telegram:123456789        # 結果推播；多目標逗號分隔，可同時送 Slack
+COGITO_CRON_NOTIFY_ERRORS_ONLY=1             # 只在失敗時推播
+```
+
+排程器住在**常駐行程**：`cmd/claw`（bot）與 dashboard 各跑一個，共用 `.claw/cron.json`，靠檔案鎖（`flock`）仲裁——**同一輪只有一個真的執行**。因此關掉面板，只要 bot 還在，排程照跑。
+
+- 錯過的排程**會補跑一次**（停三天也只補一次）；適合「每天提醒我」，不適合「定時輪詢」。
+- 執行結果推播含**來源標記**（bot／dashboard），執行樹在 `/runs/cron-<id>`。
+- 排程任務是**無人值守**的：需審批的高危操作會被自動拒絕（見下節）。
+
+### 工具權限政策（Deny > Ask > Allow）
+
+預設行為：命中內建高危黑名單 → 需人工審批（Slack 回 `approve`/`reject`）；其餘放行。
+
+要「某工具**永遠**不准」（不問任何人）才需要政策檔 `workspace/.claw/policy.json`：
+
+```json
+{"rules": [
+  {"tool": "bash", "action": "deny", "reason": "本部署禁用 shell"},
+  {"tool": "bash", "match": "curl .*\\| *sh", "action": "deny", "reason": "管道執行遠端腳本"},
+  {"tool": "write_file", "action": "ask"}
+]}
+```
+
+- 裁決 **Deny > Ask > Allow**，**與規則順序無關**。
+- **無人值守**（排程任務）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
+- 政策檔格式或正則有錯 → **啟動即中止**，不靜默忽略（否則會以為有保護、其實沒載入）。
+- 面板 `/platform` 可檢視現行政策（唯讀；改檔需重啟）。
 
 ## Development
 
@@ -416,13 +481,24 @@ go run ./cmd/claw-cli -session fix-bug \
   -prompt "修好 ./app 的編譯錯誤" \
   -verify "cd ./app && go build ./..." -max-attempts 5
 
-# 心跳：不在 app 內造排程器——OS 的 cron 就是心跳。一行 crontab 每早 8 點跑（-session 持久化＝跨次累積的「脊柱」）：
+# 心跳（一次性 CLI）：OS 的 crontab 直接叫 claw-cli。零額外元件，適合「這台機器上跑一個腳本」。
 # 0 8 * * 1-5  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session daily-triage -prompt "拉昨日 CI 失敗，挑出可修的，逐一處理"
 
 # 定期覆盤：每週一早上審閱近 7 天互動，蒸餾技能/慣例提案（retrospect 技能＝覆盤 playbook，
 # 產物只進 skills-proposed/ 與 AGENTS.proposed.md 提案通道，人工放行才生效）：
 # 0 8 * * 1  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session retrospect -prompt "用 read_skill 讀 retrospect 技能，照著覆盤近 7 天"
 ```
+
+**OS crontab vs 內建排程**：原本的立場是「不在 app 內造排程器」，後來補了[內建 cron](#cron排程任務)——但**不是取代**，兩者定位不同：
+
+| | OS crontab + `claw-cli` | 內建 cron |
+|---|---|---|
+| 適合 | 這台機器跑一個腳本 | 已經有常駐 bot／面板的部署 |
+| 額外元件 | 零 | 需要 bot 或 dashboard 跑著 |
+| 要看結果 | 自己導 log | 面板有執行樹、可推播到 Slack／Telegram |
+| 改排程 | 編 crontab | 面板上點 |
+
+只跑 CLI 就用 OS crontab，別為了排程多養一個行程。
 
 ### 切換 LLM Provider
 
