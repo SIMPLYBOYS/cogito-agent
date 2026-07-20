@@ -21,9 +21,13 @@ type governanceData struct {
 	Skills         []proposedSkill
 	MemoryProposed string // AGENTS.proposed.md 預覽（空＝無）
 	ConfigProposed string // config.proposed.json 內容（空＝無）
-	Allowed        []string
-	Admins         []string
-	Flash          string // 上次放行動作的結果（顯示一次）
+	// 調參提案的回歸驗證證據（用候選參數重跑一次的結果）。刻意不下判決——樣本少時通過率
+	// 粒度粗、又有 LLM 非確定性，硬擋會給出沒有意義的綠燈。把數字連同樣本數攤開，人來判斷。
+	Verify    evolve.Verification
+	HasVerify bool
+	Allowed   []string
+	Admins    []string
+	Flash     string // 上次放行動作的結果（顯示一次）
 }
 
 type proposedSkill struct{ Dir, Name, Desc string } // Dir＝資料夾名（晉升用）；Name＝顯示名（frontmatter）
@@ -39,6 +43,8 @@ func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 		Admins:         parseCSVEnv("COGITO_ADMIN_USERS"),
 		Flash:          s.readFlash(),
 	}
+	d.Verify, d.HasVerify = evolve.ReadProposedVerification(claw)
+
 	var b bytes.Buffer
 	_ = govTmpl.Execute(&b, d)
 	s.render(w, "Governance", template.HTML(b.String()))
@@ -205,7 +211,10 @@ func parseCSVEnv(key string) []string {
 	return out
 }
 
-var govTmpl = template.Must(template.New("gov").Parse(`
+// mulPct 把 0..1 的比率轉成百分比數值（template 沒有算術，只能靠 func map）。
+func mulPct(r float64) float64 { return r * 100 }
+
+var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct": mulPct}).Parse(`
 <h2>提案佇列 <span class="muted">放行＝寫入；面板綁 loopback，操作者即 admin</span></h2>
 {{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 <p class="muted">workspace：<code>{{.Workspace}}</code></p>
@@ -232,7 +241,21 @@ var govTmpl = template.Must(template.New("gov").Parse(`
 {{else}}<p class="muted">無。</p>{{end}}
 
 <h3>調參提案 <span class="muted">config.proposed.json</span></h3>
-{{if .ConfigProposed}}<pre class="prev">{{.ConfigProposed}}</pre>
+{{if .ConfigProposed}}
+{{if .HasVerify}}
+  {{if .Verify.Ran}}
+    <p class="banner{{if not .Verify.Regressed}} done{{end}}">
+      {{if .Verify.Regressed}}⚠️ 用候選參數重跑後<b>退步</b>{{else}}✓ 用候選參數重跑後未退步{{end}}：
+      通過率 {{printf "%.0f" (mulPct .Verify.BaselinePassRate)}}% → {{printf "%.0f" (mulPct .Verify.CandidatePassRate)}}%
+      （{{.Verify.SampleSize}} 個用例）
+      {{if .Verify.LowConfidence}}<br><b>樣本過少，此結果僅供參考、不足以當結論</b>——通過率粒度是 1/N，
+      加上 LLM 本身有非確定性，分不出這是回歸還是雜訊。要當回歸閘用請改跑 SWE-bench。{{end}}
+    </p>
+  {{else}}
+    <p class="muted">未重跑驗證：{{.Verify.SkipReason}}</p>
+  {{end}}
+{{end}}
+<pre class="prev">{{.ConfigProposed}}</pre>
 <div class="grow">
   <form method="POST" action="/governance/apply-config"><button type="submit" class="gact">套用調參</button></form>
   <span class="hint">套用時一律 clamp 有界（越界夾回）。也可到 <a href="/platform">Platform</a> 直接編輯生效值。</span>

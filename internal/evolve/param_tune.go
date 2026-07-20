@@ -104,8 +104,62 @@ func Advise(s RunStats, cur Knobs) []Proposal {
 	return ps
 }
 
-// WriteProposedConfig 把提案寫進【暫存】config.proposed.json（不自動套用）。
-func WriteProposedConfig(clawDir string, cur Knobs, proposals []Proposal) (string, error) {
+// MinVerifySamples 是「驗證結果值得當一回事」的最低用例數。低於此數只記錄、標低信心。
+//
+// 【為何需要】通過率的粒度是 1/N：只有 2 個用例時，一個案例翻掉就是 50% 落差，而 LLM 本身
+// 就有非確定性——分不出那是回歸還是雜訊。這種情況下若用「退步就擋」，綠燈其實沒有意義，
+// 反而會讓人放心套用。故先只提供證據、把判斷留給人。
+const MinVerifySamples = 10
+
+// Verification 是「用候選參數重跑一次」的結果。刻意【不下判決】：Regressed 只是算好放著，
+// 由人在治理頁決定要不要放行。等用例規模上得來（或固定用 SWE-bench 跑），同一份資料就能
+// 直接升級成硬閘。
+type Verification struct {
+	Ran        bool   `json:"ran"`
+	SkipReason string `json:"skip_reason,omitempty"` // 未重跑的原因（例如提案方向不可能造成回歸）
+
+	SampleSize        int     `json:"sample_size"`
+	BaselinePassRate  float64 `json:"baseline_pass_rate"`
+	CandidatePassRate float64 `json:"candidate_pass_rate"`
+	Regressed         bool    `json:"regressed"`      // 候選通過率低於基線
+	LowConfidence     bool    `json:"low_confidence"` // 樣本數 < MinVerifySamples，結果僅供參考
+}
+
+// CandidateKnobs 把提案套到現行值上，得出「若放行會變成什麼」的那組參數。
+func CandidateKnobs(cur Knobs, proposals []Proposal) Knobs {
+	out := cur
+	for _, p := range proposals {
+		switch p.Knob {
+		case "max_turns":
+			out.MaxTurns = int(toFloat(p.Proposed))
+		case "max_concurrent_tools":
+			out.MaxConcurrentTools = int(toFloat(p.Proposed))
+		case "max_cost_usd":
+			out.MaxCostUSD = toFloat(p.Proposed)
+		}
+	}
+	return out
+}
+
+// NeedsVerification 判斷這批提案是否可能造成回歸，決定要不要花錢重跑一次。
+//
+// 放寬回合／成本上限【不可能】讓原本通過的案例失敗——更寬鬆而已，故可省下這次重跑。
+// 會出事的是：收緊任一上限（原本剛好夠用的案例會被砍掉），或提高工具併發（引入競態）。
+func NeedsVerification(cur Knobs, proposals []Proposal) (bool, string) {
+	cand := CandidateKnobs(cur, proposals)
+	switch {
+	case cand.MaxTurns < cur.MaxTurns:
+		return true, ""
+	case cand.MaxCostUSD < cur.MaxCostUSD:
+		return true, ""
+	case cand.MaxConcurrentTools > cur.MaxConcurrentTools:
+		return true, ""
+	}
+	return false, "本次提案皆為放寬上限或降低併發，不可能讓原本通過的案例失敗，故未重跑"
+}
+
+// WriteProposedConfig 把提案與其驗證證據寫進【暫存】config.proposed.json（不自動套用）。
+func WriteProposedConfig(clawDir string, cur Knobs, proposals []Proposal, v Verification) (string, error) {
 	if err := os.MkdirAll(clawDir, 0o755); err != nil {
 		return "", fmt.Errorf("建立 .claw 目錄失敗: %w", err)
 	}
@@ -115,6 +169,7 @@ func WriteProposedConfig(clawDir string, cur Knobs, proposals []Proposal) (strin
 		"generated_at": time.Now().Format(time.RFC3339),
 		"current":      cur,
 		"proposals":    proposals,
+		"verification": v,
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -124,6 +179,21 @@ func WriteProposedConfig(clawDir string, cur Knobs, proposals []Proposal) (strin
 		return "", fmt.Errorf("寫入提案參數失敗: %w", err)
 	}
 	return path, nil
+}
+
+// ReadProposedVerification 取出提案檔裡的驗證證據（供面板顯示）。無檔或無該欄位回 ok=false。
+func ReadProposedVerification(clawDir string) (Verification, bool) {
+	data, err := os.ReadFile(filepath.Join(clawDir, ProposedConfigFileName))
+	if err != nil {
+		return Verification{}, false
+	}
+	var doc struct {
+		Verification *Verification `json:"verification"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil || doc.Verification == nil {
+		return Verification{}, false
+	}
+	return *doc.Verification, true
 }
 
 // LoadKnobs 讀【已套用】的執行期參數 <root>/.claw/config.json。bool 表示存在且可解析——不存在時

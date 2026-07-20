@@ -82,7 +82,7 @@ func TestAdvise_Healthy_NoProposals(t *testing.T) {
 func TestWriteProposedConfig(t *testing.T) {
 	dir := t.TempDir()
 	ps := []Proposal{{Knob: "max_concurrent_tools", Current: 5, Proposed: 4, Reason: "r"}}
-	path, err := WriteProposedConfig(dir, defaultKnobs, ps)
+	path, err := WriteProposedConfig(dir, defaultKnobs, ps, Verification{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestApplyProposedConfig_PromotesAndClamps(t *testing.T) {
 		{Knob: "max_turns", Current: 40, Proposed: 20, Reason: "收緊"},
 		{Knob: "max_cost_usd", Current: 1.0, Proposed: 999.0, Reason: "越界試探", Sensitive: true},
 	}
-	if _, err := WriteProposedConfig(clawDir, defaultKnobs, proposals); err != nil {
+	if _, err := WriteProposedConfig(clawDir, defaultKnobs, proposals, Verification{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +165,7 @@ func TestApplyProposedConfig_ClampsMaliciousBase(t *testing.T) {
 	evil := Knobs{MaxTurns: 9999, MaxConcurrentTools: 999, MaxCostUSD: 99999}
 	// 只帶一個無關且合法的提案，把 evil 基底夾帶進去
 	proposals := []Proposal{{Knob: "max_concurrent_tools", Current: 4, Proposed: 4, Reason: "夾帶"}}
-	if _, err := WriteProposedConfig(clawDir, evil, proposals); err != nil {
+	if _, err := WriteProposedConfig(clawDir, evil, proposals, Verification{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ApplyProposedConfig(root); err != nil {
@@ -197,7 +197,7 @@ func TestApplyProposedConfig_ZeroMeansUnset(t *testing.T) {
 	// 基底只設 max_turns，其餘留 0（＝不覆蓋）
 	base := Knobs{MaxTurns: 40}
 	proposals := []Proposal{{Knob: "max_turns", Current: 40, Proposed: 30, Reason: "收緊"}}
-	if _, err := WriteProposedConfig(clawDir, base, proposals); err != nil {
+	if _, err := WriteProposedConfig(clawDir, base, proposals, Verification{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ApplyProposedConfig(root); err != nil {

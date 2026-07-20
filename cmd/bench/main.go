@@ -129,7 +129,7 @@ func main() {
 
 	// 參數自調（Tier 4 #15）：依跑分聚合指標產出【提案參數】到暫存區，不自動套用。
 	if *tune {
-		emitTuningProposals(report, knobs)
+		emitTuningProposals(context.Background(), runner, testcases, report, knobs)
 	}
 
 	// CI 門檻：通過率低於 -min-pass-rate 即非 0 退出，讓 CI job 失敗。
@@ -213,7 +213,7 @@ func effectiveKnobs(root string) evolve.Knobs {
 
 // emitTuningProposals 從跑分報告算出聚合指標，產出有界的調參提案到暫存區（不自動套用）。
 // cur 必須是【這次跑分實際生效】的那組參數——否則就是拿 A 的觀測去建議改 B。
-func emitTuningProposals(report *eval.SuiteReport, cur evolve.Knobs) {
+func emitTuningProposals(ctx context.Context, runner *eval.BenchmarkRunner, cases []eval.TestCase, report *eval.SuiteReport, cur evolve.Knobs) {
 
 	n := len(report.Results)
 	if n == 0 {
@@ -249,11 +249,59 @@ func emitTuningProposals(report *eval.SuiteReport, cur evolve.Knobs) {
 		}
 		log.Printf("[tune] %s: %v → %v%s（%s）", p.Knob, p.Current, p.Proposed, tag, p.Reason)
 	}
-	if path, err := evolve.WriteProposedConfig(filepath.Join("workspace", ".claw"), cur, proposals); err != nil {
+	v := verifyProposals(ctx, runner, cases, report, cur, proposals)
+
+	if path, err := evolve.WriteProposedConfig(filepath.Join("workspace", ".claw"), cur, proposals, v); err != nil {
 		log.Printf("[tune] 寫入提案失敗: %v", err)
 	} else {
 		log.Printf("[tune] 📄 調參提案已寫入 %s（須人工 review 後手動套用，不會自動生效）", path)
 	}
+}
+
+// verifyProposals 用【候選參數】把同一組用例再跑一次，蒐集回歸證據。
+//
+// 刻意不下判決（不因退步就擋掉提案）：目前用例規模下，通過率粒度是 1/N，一個案例翻掉就是
+// 大幅落差，而 LLM 本身有非確定性——分不出回歸與雜訊。硬擋會給出沒有意義的綠燈，反而讓人
+// 放心套用。故只把數字連同【樣本數】記進提案檔，判斷留給治理頁上的人。
+// 等用例規模上得來，把 Regressed 從「顯示」改成「拒寫」即可升級為硬閘。
+func verifyProposals(ctx context.Context, runner *eval.BenchmarkRunner, cases []eval.TestCase,
+	baseline *eval.SuiteReport, cur evolve.Knobs, proposals []evolve.Proposal) evolve.Verification {
+
+	need, skipReason := evolve.NeedsVerification(cur, proposals)
+	if !need {
+		log.Printf("[tune] 跳過驗證重跑：%s", skipReason)
+		return evolve.Verification{SkipReason: skipReason}
+	}
+
+	cand := evolve.CandidateKnobs(cur, proposals)
+	log.Printf("[tune] 🔁 用候選參數重跑驗證（回合 %d / 併發 %d / 成本 $%.2f）——這會再花一次 API 費用",
+		cand.MaxTurns, cand.MaxConcurrentTools, cand.MaxCostUSD)
+
+	// 複製 runner 換上候選參數，避免污染原本那顆。
+	cr := *runner
+	cr.MaxTurns, cr.MaxConcurrentTools, cr.MaxCostUSD = cand.MaxTurns, cand.MaxConcurrentTools, cand.MaxCostUSD
+	candReport := cr.RunSuite(ctx, cases)
+
+	v := evolve.Verification{
+		Ran:               true,
+		SampleSize:        len(cases),
+		BaselinePassRate:  baseline.PassRate,
+		CandidatePassRate: candReport.PassRate,
+		Regressed:         candReport.PassRate < baseline.PassRate,
+		LowConfidence:     len(cases) < evolve.MinVerifySamples,
+	}
+
+	verdict := "無退步"
+	if v.Regressed {
+		verdict = "⚠️ 退步"
+	}
+	note := ""
+	if v.LowConfidence {
+		note = fmt.Sprintf("（僅 %d 個用例，少於 %d，結果僅供參考，不足以當結論）", v.SampleSize, evolve.MinVerifySamples)
+	}
+	log.Printf("[tune] 驗證結果：通過率 %.0f%% → %.0f%%，%s%s",
+		v.BaselinePassRate*100, v.CandidatePassRate*100, verdict, note)
+	return v
 }
 
 func writeReport(dir string, report *eval.SuiteReport) error {
