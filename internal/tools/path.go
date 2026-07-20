@@ -44,6 +44,41 @@ func evalExisting(p string) (string, error) {
 // ponytail: 解析與實際開檔之間仍有 TOCTOU 窗口（bash 可在這之間把某段換成 symlink）。要徹底關掉
 // 得用 openat2(RESOLVE_BENEATH)（Linux）或逐段 O_NOFOLLOW 開檔，屆時再說；現況已擋掉「先種後用」
 // 這個真正好用的攻擊路徑。
+// controlDir 是 agent 的【控制面】：技能、記憶、調參、排程都住這。
+//
+// 【為何寫入要擋】這裡的檔案決定 agent 未來的行為，等於它自己的規則書：
+//   - .claw/skills/      生效技能——本該只能經 governance 的把關流程晉升（見 evolve.Promote）
+//   - .claw/config.json  執行期護欄（MaxTurns / MaxCostUSD）——能改就等於能解除自己的上限
+//   - .claw/memory/      長期記憶——提案本該人工放行
+//   - .claw/cron.json    排程任務——【能寫就等於能自己排程】，Hermes 也專門防這條
+//
+// 少了這層，「產物只進暫存區、需人工放行」的整條 HITL 鏈可以被一句 write_file 繞過。
+const controlDir = ".claw"
+
+// resolveForWrite 同 resolveInWorkDir，另外擋掉寫入控制面（.claw/）。
+//
+// 邊界說明：這只管檔案工具。bash 仍能 `echo > .claw/config.json`——那條靠危險命令審批與
+// Docker 隔離，不在本層。擋住檔案工具已經關掉最順手的那條路（模型偏好用結構化工具改檔）。
+func resolveForWrite(workDir, path string) (string, error) {
+	full, err := resolveInWorkDir(workDir, path)
+	if err != nil {
+		return "", err
+	}
+	root, err := evalExisting(workDir)
+	if err != nil {
+		return "", fmt.Errorf("工作區路徑解析失敗: %w", err)
+	}
+	rel, err := filepath.Rel(root, full)
+	if err != nil {
+		return "", fmt.Errorf("路徑解析失敗: %w", err)
+	}
+	if rel == controlDir || strings.HasPrefix(rel, controlDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("拒絕寫入 agent 控制面 %s/（技能／記憶／調參／排程須經治理流程放行）: %s",
+			controlDir, path)
+	}
+	return full, nil
+}
+
 func resolveInWorkDir(workDir, path string) (string, error) {
 	root, err := evalExisting(workDir)
 	if err != nil {

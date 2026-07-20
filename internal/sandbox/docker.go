@@ -112,6 +112,9 @@ func (d *DockerExecutor) Command(ctx context.Context, command, workDir string) (
 	if err != nil {
 		return nil, err
 	}
+	// 這裡【不】過濾環境變數：繼承的是給 docker CLI 自己用的（DOCKER_HOST / DOCKER_CONTEXT 等），
+	// 過濾掉反而會連不上 daemon。命令實際跑在容器裡，用的是【容器自己的】環境——我們沒帶 -e，
+	// 宿主機的金鑰進不去，故本模式天生沒有 host 模式那個外洩面。
 	return exec.CommandContext(ctx, "docker", d.execArgs(name, command)...), nil
 }
 

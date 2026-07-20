@@ -59,7 +59,7 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 
-	fullPath, err := resolveInWorkDir(t.workDir, input.Path)
+	fullPath, err := resolveForWrite(t.workDir, input.Path)
 	if err != nil {
 		return "", err
 	}

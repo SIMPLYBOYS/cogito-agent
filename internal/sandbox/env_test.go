@@ -21,8 +21,8 @@ func TestFromEnv_DockerVsHost(t *testing.T) {
 // Docker 模式的資源旋鈕走 envOr 預設；設了就用設定值。
 func TestFromEnv_DockerDefaultsAndOverride(t *testing.T) {
 	t.Setenv("COGITO_SANDBOX", "docker")
-	t.Setenv("COGITO_SANDBOX_MEMORY", "")   // 用預設
-	t.Setenv("COGITO_SANDBOX_CPUS", "2.5")  // 覆蓋
+	t.Setenv("COGITO_SANDBOX_MEMORY", "")  // 用預設
+	t.Setenv("COGITO_SANDBOX_CPUS", "2.5") // 覆蓋
 	d, ok := FromEnv().(*DockerExecutor)
 	if !ok {
 		t.Fatal("應為 DockerExecutor")

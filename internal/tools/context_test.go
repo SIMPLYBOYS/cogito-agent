@@ -10,8 +10,8 @@ import (
 
 type capIDTool struct{ got *string }
 
-func (capIDTool) Name() string                       { return "capid" }
-func (capIDTool) Definition() schema.ToolDefinition  { return schema.ToolDefinition{Name: "capid"} }
+func (capIDTool) Name() string                      { return "capid" }
+func (capIDTool) Definition() schema.ToolDefinition { return schema.ToolDefinition{Name: "capid"} }
 func (c capIDTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
 	*c.got = CallIDFromContext(ctx)
 	return "ok", nil

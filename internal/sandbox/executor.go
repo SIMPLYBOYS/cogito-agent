@@ -31,6 +31,9 @@ func (HostExecutor) Name() string { return "host" }
 func (HostExecutor) Command(ctx context.Context, command, workDir string) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = workDir
+	// 不設 Env 會繼承本行程【全部】環境變數，包含 ANTHROPIC_API_KEY / bot token——agent 一句
+	// `env` 就讀得到。改成白名單（見 env_filter.go）。
+	cmd.Env = filteredEnv()
 	return cmd, nil
 }
 
