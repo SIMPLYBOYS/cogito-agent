@@ -25,14 +25,34 @@ jobs:
           go-version: "1.25"
           cache: true
 
+      # 缺 secret 時明確跳過（fork 的 PR 拿不到 secret）：不要讓 job 以「金鑰沒設」的錯誤失敗，
+      # 那種紅燈會被當雜訊忽略，久了連真的退步也一起被忽略。
+      - name: 檢查 secret
+        id: guard
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::warning::未設 ANTHROPIC_API_KEY secret，跳過跑分"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 跑分
+        if: steps.guard.outputs.skip != 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # 排程跑必須帶【真門檻】——預設 0 等於不檢查，那每週的綠燈毫無意義，退步了也沒人知道。
+          #
+          # 門檻取捨：內建用例目前只有 2 個，粒度是 50%，且 LLM 本身會 flake。設 1.0 抓得最嚴，
+          # 但偶發的假紅燈會訓練人忽略警報——那比沒有閘更糟。若開始出現假警報，先修/換掉那個
+          # 不穩的用例（用例不穩本身就是問題），真的不行再用 repo variable BENCH_MIN_PASS_RATE
+          # 調低，不必改這個檔。手動觸發時用使用者填的值（預設 0 方便試跑）。
+          MIN_PASS_RATE: ${{ github.event_name == 'schedule' && (vars.BENCH_MIN_PASS_RATE || '1.0') || (github.event.inputs.min_pass_rate || '0') }}
         run: |
           go run ./cmd/bench \
             -model "${{ github.event.inputs.model || 'claude-haiku-4-5' }}" \
             -out ./bench-reports \
-            -min-pass-rate "${{ github.event.inputs.min_pass_rate || '0' }}"
+            -min-pass-rate "$MIN_PASS_RATE"
 
       - name: 上傳 JSON 報告（即使失敗也傳，供儀表板）
         if: always()
