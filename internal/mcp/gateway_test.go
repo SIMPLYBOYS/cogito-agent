@@ -44,7 +44,7 @@ func TestGateway_CatalogAndCall(t *testing.T) {
 		t.Errorf("call 工具描述應含目錄: %s", desc)
 	}
 
-	// 透過 gateway 調用底層工具
+	// 透過 gateway 呼叫底層工具
 	out, err := call.Execute(context.Background(), []byte(`{"name":"test__echo","arguments":{"msg":"via-gateway"}}`))
 	if err != nil {
 		t.Fatalf("mcp_call_tool 執行失敗: %v", err)

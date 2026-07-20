@@ -17,7 +17,7 @@ import (
 const maxExtractNodes = 40
 
 const relationExtractSystemPrompt = `你是知識圖譜的關係抽取器。下面是一組「記憶節點」（每個有 id 與摘要/內容）。
-請抽出節點【之間】有意義的有向 typed 關係，型別用簡短英文連字符詞，如：
+請抽出節點【之間】有意義的有向 typed 關係，型別用簡短英文連字元詞，如：
 depends-on / part-of / contradicts / relates-to / uses / example-of / supersedes。
 
 嚴格規則：
@@ -81,7 +81,7 @@ func (e *RelationExtractor) Extract(ctx context.Context) (int, error) {
 	}
 	resp, err := e.provider.Generate(ctx, msgs, nil)
 	if err != nil {
-		return 0, fmt.Errorf("關係抽取 LLM 調用失敗: %w", err)
+		return 0, fmt.Errorf("關係抽取 LLM 呼叫失敗: %w", err)
 	}
 	var out struct {
 		Edges []ctxpkg.StoredEdge `json:"edges"`

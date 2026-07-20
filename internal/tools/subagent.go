@@ -11,8 +11,8 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
-// AgentRunner 定義引擎向工具層暴露的"拉起子智能體"能力。接口定義在 tools 包（使用端），
-// 這樣 tools 不需要 import engine，避免循環依賴；*engine.AgentEngine 靠 duck typing 滿足它。
+// AgentRunner 定義引擎向工具層暴露的"拉起子 agent"能力。介面定義在 tools 包（使用端），
+// 這樣 tools 不需要 import engine，避免迴圈依賴；*engine.AgentEngine 靠 duck typing 滿足它。
 // skillBody 為可選的「綁定技能正文」：非空時注入子 agent 的隔離 context，主 context 不被汙染。
 // SubTask 是一次子 agent 委派的完整參數（用 struct 而非長 positional 參數，好擴充）。
 type SubTask struct {
@@ -44,7 +44,7 @@ func effortToMaxTokens(effort string) int {
 	}
 }
 
-// SubagentTool 是一個標準 BaseTool：主 agent 調用它來派出一個受限的探索子 agent，
+// SubagentTool 是一個標準 BaseTool：主 agent 呼叫它來派出一個受限的探索子 agent，
 // 子 agent 在隔離的上下文裡跑完，只回傳一段精煉報告——主 agent 的 session 不被搜索過程汙染。
 // 可選地綁定一個技能（skill 參數）：該技能的完整正文只會載入子 agent 的隔離 context。
 // defaultSubagentTools 是未指定 agent_type（或具名 agent 未宣告 tools）時的預設工具集——維持唯讀
@@ -98,7 +98,7 @@ func (t *SubagentTool) Name() string {
 }
 
 func (t *SubagentTool) Definition() schema.ToolDefinition {
-	desc := "派出一個子智能體在隔離 context 中執行子任務（探索/審查/規劃…），完畢後回傳一份精煉報告——主 context 不被過程汙染，可一次吐多個並行委派。"
+	desc := "派出一個子 agent在隔離 context 中執行子任務（探索/審查/規劃…），完畢後回傳一份精煉報告——主 context 不被過程汙染，可一次吐多個並行委派。"
 	if idx := t.agentLoader.Index(); idx != "" {
 		desc += "\n可用的 agent_type（不指定則為預設探路者，唯讀探索）：\n" + idx
 	}
@@ -111,7 +111,7 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 			"properties": map[string]interface{}{
 				"task_prompt": map[string]interface{}{
 					"type":        "string",
-					"description": "給子智能體下達的明確任務指令。",
+					"description": "給子 agent下達的明確任務指令。",
 				},
 				"agent_type": map[string]interface{}{
 					"type":        "string",
@@ -119,7 +119,7 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 				},
 				"skill": map[string]interface{}{
 					"type":        "string",
-					"description": "（可選）要綁定給子智能體的技能名稱，須與 System Prompt『技能索引』中的名稱一致。指定後該技能正文只進子 context。",
+					"description": "（可選）要綁定給子 agent的技能名稱，須與 System Prompt『技能索引』中的名稱一致。指定後該技能正文只進子 context。",
 				},
 				"background": map[string]interface{}{
 					"type":        "boolean",
@@ -237,14 +237,14 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		Reporter:     t.reporter,
 	})
 	if err != nil {
-		// error-as-observation：讓主 agent 看到失敗但不中斷主 ReAct 循環。
-		return fmt.Errorf("子智能體執行失敗: %v", err).Error(), nil
+		// error-as-observation：讓主 agent 看到失敗但不中斷主 ReAct 迴圈。
+		return fmt.Errorf("子 agent執行失敗: %v", err).Error(), nil
 	}
 	if mergeBack != nil {
 		summary += mergeBack() // 把隔離回寫結果附在報告尾，讓主 agent 知道改動去向
 	}
 
-	log.Printf("[Subagent] ✅ 子智能體任務結束。報告返回給主幹...")
+	log.Printf("[Subagent] ✅ 子 agent任務結束。報告回傳給主幹...")
 
-	return fmt.Sprintf("【子智能體探索報告】:\n%s", summary), nil
+	return fmt.Sprintf("【子 agent探索報告】:\n%s", summary), nil
 }

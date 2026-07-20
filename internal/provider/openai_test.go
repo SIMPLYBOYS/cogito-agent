@@ -148,7 +148,7 @@ func TestOpenAIProvider_RetriesOn429ThenSucceeds(t *testing.T) {
 	}
 }
 
-// 4xx（非 429）不重試：用戶端錯誤重試無益，應立即失敗、只打一次。
+// 4xx（非 429）不重試：使用者端錯誤重試無益，應立即失敗、只打一次。
 func TestOpenAIProvider_NoRetryOn4xx(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

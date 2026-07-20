@@ -18,7 +18,7 @@ func (f *fakeProvider) ModelName() string     { return "fake" }
 
 func TestInjectLessons(t *testing.T) {
 	if got := injectLessons("做事", nil); got != "做事" {
-		t.Errorf("無教訓應原樣返回，got %q", got)
+		t.Errorf("無教訓應原樣回傳，got %q", got)
 	}
 	got := injectLessons("做事", []string{"用 printf 不要用 echo", "先 build 再 test"})
 	for _, want := range []string{"做事", "教訓", "1. 用 printf", "2. 先 build"} {

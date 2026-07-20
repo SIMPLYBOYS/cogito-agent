@@ -27,7 +27,7 @@ type SessionSnapshot struct {
 	ModelUsed  string           `json:"model_used,omitempty"`  // 實際跑過的（最近一次）模型 id，供用量按模型切片
 	Goal       string           `json:"goal,omitempty"`        // 持久目標（`goal <text>`）
 	GoalPaused bool             `json:"goal_paused,omitempty"` // 暫停自動續跑（保留目標）
-	// Running＝任務進行中；正常結束會清為 false，若程序被硬砍（OOM/SIGKILL）則留 true，
+	// Running＝任務進行中；正常結束會清為 false，若行程被硬砍（OOM/SIGKILL）則留 true，
 	// 供啟動時掃出未完成任務自動續跑。ResumeAttempts 是跨重啟續跑次數（防崩潰迴圈）。
 	Running               bool    `json:"running,omitempty"`
 	ResumeAttempts        int     `json:"resume_attempts,omitempty"`

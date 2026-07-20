@@ -207,6 +207,6 @@ func TestSubagent_UnknownSkill(t *testing.T) {
 		t.Errorf("應提示綁定失敗，got %q", out)
 	}
 	if fr.called {
-		t.Error("綁定技能失敗時不應調用 RunSub")
+		t.Error("綁定技能失敗時不應呼叫 RunSub")
 	}
 }

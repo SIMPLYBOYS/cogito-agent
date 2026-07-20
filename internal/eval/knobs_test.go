@@ -9,7 +9,7 @@ import (
 // -tune 卻拿這些觀測去跟 .claw/config.json 的現行值比——量的是 A、建議改的是 B，
 // CeilingHitRate 尤其失真。這條測試釘住「設了就要生效」。
 func TestBenchmarkRunner_AppliesKnobs(t *testing.T) {
-	// 用一個必定失敗的 Setup 讓 runOnce 在呼叫 LLM 前就返回：我們只驗參數有沒有套到引擎上，
+	// 用一個必定失敗的 Setup 讓 runOnce 在呼叫 LLM 前就回傳：我們只驗參數有沒有套到引擎上，
 	// 不需要真的跑 agent（跑分要錢）。
 	r := NewBenchmarkRunner("claude-haiku-4-5")
 	r.MaxTurns, r.MaxConcurrentTools, r.MaxCostUSD = 17, 3, 2.5

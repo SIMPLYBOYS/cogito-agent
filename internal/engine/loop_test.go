@@ -17,8 +17,8 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
-// fakeProvider 永遠回一個工具調用（製造一個本來會無限循環的 ReAct），可選地每輪累加成本，
-// 用來驗證框架層的硬防線會在無上限循環中強制中止。
+// fakeProvider 永遠回一個工具呼叫（製造一個本來會無限迴圈的 ReAct），可選地每輪累加成本，
+// 用來驗證框架層的硬防線會在無上限迴圈中強制中止。
 type fakeProvider struct {
 	mu      sync.Mutex
 	calls   int
@@ -53,7 +53,7 @@ func newTestRegistry() tools.Registry {
 	return r
 }
 
-// 修補①：主循環不再是無上限 for{}——一個永遠調用工具的模型必須在 MaxTurns 被框架強制中止。
+// 修補①：主迴圈不再是無上限 for{}——一個永遠呼叫工具的模型必須在 MaxTurns 被框架強制中止。
 func TestRun_MaxTurnsCircuitBreaker(t *testing.T) {
 	fp := &fakeProvider{}
 	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
@@ -65,7 +65,7 @@ func TestRun_MaxTurnsCircuitBreaker(t *testing.T) {
 
 	err := eng.Run(context.Background(), sess, nil)
 	if err == nil {
-		t.Fatal("無限調用工具的循環應被 MaxTurns 強制中止並返回 error")
+		t.Fatal("無限呼叫工具的迴圈應被 MaxTurns 強制中止並回傳 error")
 	}
 	if !strings.Contains(err.Error(), "最大回合數") {
 		t.Errorf("錯誤訊息應指明回合數熔斷: %v", err)
@@ -75,7 +75,7 @@ func TestRun_MaxTurnsCircuitBreaker(t *testing.T) {
 	}
 }
 
-// /stop：ctx 取消時 Run 在回合邊界即時返回 context.Canceled，且不再呼叫 provider。
+// /stop：ctx 取消時 Run 在回合邊界即時回傳 context.Canceled，且不再呼叫 provider。
 func TestRun_ContextCancelStops(t *testing.T) {
 	fp := &fakeProvider{}
 	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
@@ -92,7 +92,7 @@ func TestRun_ContextCancelStops(t *testing.T) {
 		t.Fatalf("已取消的 ctx 應讓 Run 回 context.Canceled，got %v", err)
 	}
 	if fp.calls != 0 {
-		t.Errorf("ctx 已取消，Run 應在回合頂即返回、不呼叫 provider，實際呼叫 %d 次", fp.calls)
+		t.Errorf("ctx 已取消，Run 應在回合頂即回傳、不呼叫 provider，實際呼叫 %d 次", fp.calls)
 	}
 }
 
@@ -108,7 +108,7 @@ func TestRun_CostCircuitBreaker(t *testing.T) {
 
 	err := eng.Run(context.Background(), sess, nil)
 	if err == nil {
-		t.Fatal("累計成本超預算應被強制中止並返回 error")
+		t.Fatal("累計成本超預算應被強制中止並回傳 error")
 	}
 	if !strings.Contains(err.Error(), "成本上限") {
 		t.Errorf("錯誤訊息應指明成本熔斷: %v", err)
@@ -155,7 +155,7 @@ func TestRun_CostSoftLanding(t *testing.T) {
 	eng.MaxTurns = 100
 	eng.MaxCostUSD = 1.0
 
-	_ = eng.Run(context.Background(), sess, nil) // 最終仍撞硬上限返回 error，這裡只看軟著陸提醒
+	_ = eng.Run(context.Background(), sess, nil) // 最終仍撞硬上限回傳 error，這裡只看軟著陸提醒
 
 	n := 0
 	for _, m := range sess.GetWorkingMemory(1000) {
@@ -259,7 +259,7 @@ func TestRun_ToolConcurrencyUnlimitedWhenZero(t *testing.T) {
 	}
 }
 
-// captureProvider 抓下發給模型的 system prompt，並以「無工具調用」讓 Run 在第 1 輪即結束。
+// captureProvider 抓下發給模型的 system prompt，並以「無工具呼叫」讓 Run 在第 1 輪即結束。
 type captureProvider struct {
 	system string
 }

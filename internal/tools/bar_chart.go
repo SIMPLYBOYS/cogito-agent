@@ -23,7 +23,7 @@ func (t *BarChartTool) Name() string { return "bar_chart" }
 func (t *BarChartTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name: t.Name(),
-		Description: "把一組數據渲染成等寬水平長條圖（比例精準、標籤對齊）。適合呈現排名/比較/分布。" +
+		Description: "把一組資料渲染成等寬水平長條圖（比例精準、標籤對齊）。適合呈現排名/比較/分布。" +
 			"回傳的是【已排版好】的圖表字串，請【原樣、含 ``` 圍欄】放進你的最終回覆，不要改動或重畫。",
 		InputSchema: map[string]any{
 			"type": "object",

@@ -19,8 +19,8 @@ func (r *TerminalReporter) OnThinking(ctx context.Context) {
 }
 
 func (r *TerminalReporter) OnToolCall(ctx context.Context, toolName string, args string) {
-	fmt.Printf("[🛠️ 調用工具] %s\n", toolName)
-	// 清理參數中的換行符和特殊字符
+	fmt.Printf("[🛠️ 呼叫工具] %s\n", toolName)
+	// 清理參數中的換行符和特殊字元
 	displayArgs := strings.ReplaceAll(args, "\n", "\\n")
 	displayArgs = strings.ReplaceAll(displayArgs, "\r", "\\r")
 	displayArgs = schema.TruncRunes(displayArgs, 150, "... (已截斷)") // 工具參數常含中文，byte 切會壞

@@ -28,7 +28,7 @@ func (t *bashBackgroundTool) Name() string { return "bash_background" }
 func (t *bashBackgroundTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "在背景啟動一條長時間執行的 bash 命令（如 dev server、長時間建置/訓練），立即返回任務 ID，不受一般 bash 的 30 秒逾時限制。之後用 task_output 查輸出、task_kill 終止。注意：背景任務不會自動結束，用完請 task_kill。",
+		Description: "在背景啟動一條長時間執行的 bash 命令（如 dev server、長時間建置/訓練），立即回傳任務 ID，不受一般 bash 的 30 秒逾時限制。之後用 task_output 查輸出、task_kill 終止。注意：背景任務不會自動結束，用完請 task_kill。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

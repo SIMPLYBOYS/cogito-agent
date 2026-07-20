@@ -8,7 +8,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
-// stubProvider 返回固定 Usage 的假 provider，用於離線驗證計費邏輯（不打真實 API）。
+// stubProvider 回傳固定 Usage 的假 provider，用於離線驗證計費邏輯（不打真實 API）。
 type stubProvider struct{ prompt, completion int }
 
 func (s *stubProvider) Generate(ctx context.Context, msgs []schema.Message, tools []schema.ToolDefinition) (*schema.Message, error) {
@@ -54,7 +54,7 @@ func TestCostTracker_PerSessionAccounting(t *testing.T) {
 	if !approxEq(sessA.TotalCostUSD, 2*perCall) {
 		t.Errorf("A 成本錯: got %.6f want %.6f", sessA.TotalCostUSD, 2*perCall)
 	}
-	// B 必須獨立，不受 A 的兩次調用影響
+	// B 必須獨立，不受 A 的兩次呼叫影響
 	if sessB.TotalPromptTokens != 1000 || !approxEq(sessB.TotalCostUSD, perCall) {
 		t.Errorf("B 應獨立計費(隔離): tokens=%d cost=%.6f", sessB.TotalPromptTokens, sessB.TotalCostUSD)
 	}

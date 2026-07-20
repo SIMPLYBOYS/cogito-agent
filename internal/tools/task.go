@@ -23,7 +23,7 @@ const (
 	doneTaskRetention = 10
 )
 
-// syncBuffer 是併發安全、有上限的輸出緩衝：背景進程 goroutine 寫、Output 工具讀。
+// syncBuffer 是併發安全、有上限的輸出緩衝：背景行程 goroutine 寫、Output 工具讀。
 // 超過上限時丟棄最舊的位元組（保留尾部，因為人通常看最新輸出）。
 type syncBuffer struct {
 	mu        sync.Mutex
@@ -197,7 +197,7 @@ func (tm *TaskManager) Output(id string) (string, error) {
 	return fmt.Sprintf("任務 %s [%s]\n指令: %s\n--- 輸出 ---\n%s", id, status, ts.command, out), nil
 }
 
-// Kill 終止一個背景任務（取消其 context → 進程被殺）。
+// Kill 終止一個背景任務（取消其 context → 行程被殺）。
 func (tm *TaskManager) Kill(id string) error {
 	ts := tm.get(id)
 	if ts == nil {
@@ -243,7 +243,7 @@ func (tm *TaskManager) List() string {
 	return string(b)
 }
 
-// KillAll 終止所有任務（cmd 優雅關閉時呼叫，避免殘留孤兒進程）。
+// KillAll 終止所有任務（cmd 優雅關閉時呼叫，避免殘留孤兒行程）。
 func (tm *TaskManager) KillAll() {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()

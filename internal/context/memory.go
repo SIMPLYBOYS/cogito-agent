@@ -50,8 +50,8 @@ func (m *MemoryLoader) dir() string { return filepath.Join(m.workDir, ".claw", "
 
 const memUsageFile = "memory-usage.json"
 
-// memUsageMu 序列化帳本的 read-modify-write：同一 bot 進程內多頻道共用同一記憶目錄、recall 可能併發；
-// 不同「員工」是不同 workDir、各自帳本，無跨進程競爭。recall 非熱路徑，單一全域鎖足矣。
+// memUsageMu 序列化帳本的 read-modify-write：同一 bot 行程內多頻道共用同一記憶目錄、recall 可能併發；
+// 不同「員工」是不同 workDir、各自帳本，無跨行程競爭。recall 非熱路徑，單一全域鎖足矣。
 var memUsageMu sync.Mutex
 
 type memoryUsage struct {
@@ -182,7 +182,7 @@ func (m *MemoryLoader) loadAll() []MemoryRecord {
 	return recs
 }
 
-// LoadIndex 把記憶的【元數據】放進 System Prompt（漸進式）；正文不載入，模型需要時用 recall 取回。
+// LoadIndex 把記憶的【元資料】放進 System Prompt（漸進式）；正文不載入，模型需要時用 recall 取回。
 func (m *MemoryLoader) LoadIndex() string {
 	recs := m.loadAll()
 	if len(recs) == 0 {

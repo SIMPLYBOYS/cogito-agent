@@ -31,9 +31,9 @@ func TestTruncRunes(t *testing.T) {
 	if got := TruncRunes(zh, 4, ""); got != "命令執行" {
 		t.Errorf("max 應以字元計，got %q", got)
 	}
-	// 不足長度原樣返回（不加 suffix）
+	// 不足長度原樣回傳（不加 suffix）
 	if got := TruncRunes(zh, 100, "…"); got != zh {
-		t.Errorf("未超長應原樣返回，got %q", got)
+		t.Errorf("未超長應原樣回傳，got %q", got)
 	}
 	// 邊界
 	if got := TruncRunes("", 10, "…"); got != "" {
@@ -43,7 +43,7 @@ func TestTruncRunes(t *testing.T) {
 		t.Errorf("max=0 應只剩 suffix，got %q", got)
 	}
 	if got := TruncRunes("abc", -1, "…"); got != "abc" {
-		t.Errorf("負 max 應原樣返回（別 panic），got %q", got)
+		t.Errorf("負 max 應原樣回傳（別 panic），got %q", got)
 	}
 	// 剛好等於上限不截斷
 	if got := TruncRunes("abcd", 4, "…"); got != "abcd" {

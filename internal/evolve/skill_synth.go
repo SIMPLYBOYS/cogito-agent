@@ -45,7 +45,7 @@ type reflection struct {
 }
 
 const reflectSystemPrompt = `你是一個負責「技能萃取」的反思者。看完一段【已成功完成】的任務軌跡後，
-判斷其中是否存在一個「可複用、可泛化」的操作流程，值得寫成技能（SKILL.md）供未來類似任務直接調用。
+判斷其中是否存在一個「可複用、可泛化」的操作流程，值得寫成技能（SKILL.md）供未來類似任務直接呼叫。
 
 判準（從嚴）：
 - 只有當流程【具體、可重複、跨任務有價值】時才保存；一次性瑣事、與本任務資料強綁定的步驟不要保存。
@@ -72,7 +72,7 @@ func (s *SkillSynthesizer) Reflect(ctx context.Context, taskPrompt string, histo
 
 	resp, err := s.provider.Generate(ctx, msgs, nil)
 	if err != nil {
-		return "", fmt.Errorf("反思 LLM 調用失敗: %w", err)
+		return "", fmt.Errorf("反思 LLM 呼叫失敗: %w", err)
 	}
 
 	var r reflection

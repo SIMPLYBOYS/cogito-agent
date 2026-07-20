@@ -14,7 +14,7 @@ func TestListInterrupted_FindsOnlyRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 進程 A：一個任務進行中被硬砍（running 落盤），一個正常閒置（running=false）。
+	// 行程 A：一個任務進行中被硬砍（running 落盤），一個正常閒置（running=false）。
 	smA := &SessionManager{sessions: map[string]*Session{}}
 	smA.SetStore(store)
 	busy := smA.GetOrCreate("slack:C1", "/tmp/w1")
@@ -22,7 +22,7 @@ func TestListInterrupted_FindsOnlyRunning(t *testing.T) {
 	idle := smA.GetOrCreate("slack:C2", "/tmp/w2")
 	idle.Append(schema.Message{Role: schema.RoleUser, Content: "hi"}) // 有歷史但 running=false
 
-	// 進程 B（重啟）：全新 manager 綁同一 store。
+	// 行程 B（重啟）：全新 manager 綁同一 store。
 	smB := &SessionManager{sessions: map[string]*Session{}}
 	smB.SetStore(store)
 	got := smB.ListInterrupted()

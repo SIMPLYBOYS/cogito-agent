@@ -1,12 +1,12 @@
 # Spec：知識圖譜記憶（Knowledge-Graph Memory）
 
-> **狀態**：**Stage 1 + Stage 2 已實作** —— Stage 1（`[[links]]` 建圖 + 子圖 recall，[graph.go](../internal/context/graph.go)）；Stage 2a（多文件 md **結構式 ingest** → 節點 + `edges.jsonl`，[ingest.go](../internal/context/ingest.go)）；Stage 2b（**gated LLM typed 關係抽取**：[evolve/kg_extract.go](../internal/evolve/kg_extract.go) 抽 → [context/kg_gate.go](../internal/context/kg_gate.go) 把關 → 併入，入口 `cmd/ingest -llm / -review-edges / -apply-edges`）；Stage 3a（**embedding 混合選種子**，opt-in：[embed.go](../internal/context/embed.go) + [provider/embedding.go](../internal/provider/embedding.go)，`cmd/ingest -embed` 建向量快取，未配置則退回關鍵字）。**Stage 3b**（持久化 / ANN 索引）待做——巨量才需，觸發未到。本文是可迭代的設計。
+> **狀態**：**Stage 1 + Stage 2 已實作** —— Stage 1（`[[links]]` 建圖 + 子圖 recall，[graph.go](../internal/context/graph.go)）；Stage 2a（多檔案 md **結構式 ingest** → 節點 + `edges.jsonl`，[ingest.go](../internal/context/ingest.go)）；Stage 2b（**gated LLM typed 關係抽取**：[evolve/kg_extract.go](../internal/evolve/kg_extract.go) 抽 → [context/kg_gate.go](../internal/context/kg_gate.go) 把關 → 併入，入口 `cmd/ingest -llm / -review-edges / -apply-edges`）；Stage 3a（**embedding 混合選種子**，opt-in：[embed.go](../internal/context/embed.go) + [provider/embedding.go](../internal/provider/embedding.go)，`cmd/ingest -embed` 建向量快取，未配置則退回關鍵字）。**Stage 3b**（持久化 / ANN 索引）待做——巨量才需，觸發未到。本文是可迭代的設計。
 > 背景與取捨見 [DESIGN.md](../DESIGN.md) 的「長期記憶」維度；現有記憶實作見 [internal/context/memory.go](../internal/context/memory.go)。
 
 ## 目標
-把「離散記錄 + 關鍵字檢索」升級成「**可遍歷的圖 + 子圖檢索**」，讓 agent 能做 **RAG 做不到的多跳關係推理**；並支援**多文件 md ingest** 成圖。核心理念：**KG 提供結構，LLM 在明確的關係子圖上做推理**。
+把「離散記錄 + 關鍵字檢索」升級成「**可遍歷的圖 + 子圖檢索**」，讓 agent 能做 **RAG 做不到的多跳關係推理**；並支援**多檔案 md ingest** 成圖。核心理念：**KG 提供結構，LLM 在明確的關係子圖上做推理**。
 
-為什麼是 KG 而非 RAG：平面相似度檢索撈「相關片段」，但答不出「X 與 Y 透過什麼連、沿關係多跳會到哪」。對長期累積記憶、多文件交叉引用、以及**自我進化（撈對的慣例/教訓）**，關係結構是乘數。代價是：**KG 的威力完全取決於抽取品質**，故護欄是設計重點（見 §6）。
+為什麼是 KG 而非 RAG：平面相似度檢索撈「相關片段」，但答不出「X 與 Y 透過什麼連、沿關係多跳會到哪」。對長期累積記憶、多檔案交叉引用、以及**自我進化（撈對的慣例/教訓）**，關係結構是乘數。代價是：**KG 的威力完全取決於抽取品質**，故護欄是設計重點（見 §6）。
 
 ## 1. 圖模型（複用現有結構，不重建）
 | 元素 | 落點 | 說明 |
@@ -34,7 +34,7 @@
 - 仍是 `recall`，但回傳**子圖**而非平面 top-k；新增可選 `hops`（預設 1）。
 - agent 可對鄰居 name 再 `recall` 往外走（多跳由多次呼叫或一次 k 跳達成）。
 
-## 5. 多文件 md ingest 路徑
+## 5. 多檔案 md ingest 路徑
 - 入口 `cmd`/工具：`ingest <dir>` → 每個 .md：
   - **結構抽取（確定性）**：檔→節點（name=標題/slug、tags=frontmatter）、`[[links]]` 與標題層級→邊。免費、立即可用。
   - **LLM 關係抽取（可選，gated）**：抽隱含 typed 關係 → `edges.jsonl` 提案 → 審核。
@@ -43,7 +43,7 @@
 ## 6. 抽取品質護欄（KG 的成敗在此）
 - LLM 抽的邊**一律提案、不自動生效**（gated，同自我進化）。
 - **去重**（same subject-type-object 收斂）、**每節點邊數封頂**（防 hub 爆炸）、**指向不存在節點的邊**丟棄或建 stub 標記。
-- LLM 邊帶 **confidence + provenance**（來自哪份文件），低信心丟棄或標註；可審計。
+- LLM 邊帶 **confidence + provenance**（來自哪份檔案），低信心丟棄或標註；可審計。
 - 檢索端：`hops` / `budget` 雙封頂，防子圖爆 context。
 
 ## 7. 介面（Go，新增 `internal/context/graph.go`）
@@ -60,7 +60,7 @@ recall 工具改用 `Graph().Seeds → Subgraph → RenderSubgraph`。
 
 ## 8. 分階段（各有觸發）
 1. **Stage 1（先做）— 把現有記錄當圖**：`graph.go`（解析 `[[links]]` + 鄰接表）+ recall 改子圖檢索。**最小、純複用、立刻有多跳。不含 ingest、不含 LLM。**
-2. **Stage 2（觸發：開始多文件 ingest）**：`ingest` 路徑 + typed `edges.jsonl` + gated LLM 關係抽取。
+2. **Stage 2（觸發：開始多檔案 ingest）**：`ingest` 路徑 + typed `edges.jsonl` + gated LLM 關係抽取。
 3. **Stage 3（觸發：種子不準 / 巨量）**：embedding 選種子（混合）、持久化圖索引。
 
 ## 9. 與既有怎麼接

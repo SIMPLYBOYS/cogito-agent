@@ -32,7 +32,7 @@ func (s *Span) EndSpan() {
 	}
 }
 
-// AddAttribute 為當前 Span 記錄一條元數據（映射為 OTel attribute）。
+// AddAttribute 為當前 Span 記錄一條元資料（映射為 OTel attribute）。
 func (s *Span) AddAttribute(key string, value interface{}) {
 	if s == nil || s.otel == nil {
 		return

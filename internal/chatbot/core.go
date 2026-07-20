@@ -1,6 +1,6 @@
 // Package chatbot 是【與平台無關】的「聊天 → Agent」橋接核心：指令閘（approve/apply memory/edges）、
 // 每頻道 session+磁碟隔離、per-WorkDir 鎖、跑任務管線、進度回報。Slack / Telegram 等只是薄傳輸層，
-// 各自做入站解析 + 提供一個 send 函式，其餘共用本核心。多平台同進程時，session / 工作目錄【預設】
+// 各自做入站解析 + 提供一個 send 函式，其餘共用本核心。多平台同行程時，session / 工作目錄【預設】
 // 靠 platform 前綴命名空間隔開（"slack:C123" vs "telegram:123"）——但 COGITO_USER_LINK 是【刻意的
 // 例外】：已連結使用者的 DM 會歸一成 "user:<canonical>"，跨平台共用同一份狀態（見 stateID）。
 // 因此凡是掛在「狀態 key」上的東西（忙碌鎖等）都必須是 package 級、跨 Core 生效，不能是 Core 欄位。
@@ -37,7 +37,7 @@ const maxGoalContinue = 5
 // resumeNudge 是續跑時補進歷史的系統提示（走 RoleUser，與成本軟著陸等系統提醒一致）。
 const resumeNudge = "[系統] 先前因暫時性錯誤（如網路中斷）使任務未完成；連線現已恢復。請檢視目前進度，從中斷處接續完成，不要重做已完成的步驟。"
 
-// EngineFactory 為每個會話動態組裝引擎（掛該頻道專屬 CostTracker；reporter 接給子智能體串流進度）。
+// EngineFactory 為每個會話動態組裝引擎（掛該頻道專屬 CostTracker；reporter 接給子 agent串流進度）。
 type EngineFactory func(session *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine
 
 // PostRunHook 在任務【成功】後呼叫（如技能自生成反思）。可為 nil。
@@ -51,7 +51,7 @@ type PostFailureHook func(ctx context.Context, session *ctxpkg.Session, taskProm
 type LearnHook func(ctx context.Context, session *ctxpkg.Session) (skillName string, err error)
 
 // senders：platform → 該平台的原生發送函式。讓 SendMessage 能用命名空間 convID 路由回正確傳輸層，
-// 使審批/提案通知在「同進程多平台」下也送對人。ponytail: 全域 sync.Map 足矣（傳輸層數量極少）。
+// 使審批/提案通知在「同行程多平台」下也送對人。ponytail: 全域 sync.Map 足矣（傳輸層數量極少）。
 var senders sync.Map
 
 // SendMessage 把命名空間 convID（"platform:rawID"）路由到擁有它的傳輸層發送。非命名空間字串直接忽略。
@@ -99,7 +99,7 @@ type Core struct {
 // running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
 // `/stop` 取出對應頻道的 cancel 中止其 Run。
 //
-// 【為何是 package 級而非 Core 欄位】同進程可能有多個 Core（Slack + Telegram），而 COGITO_USER_LINK
+// 【為何是 package 級而非 Core 欄位】同行程可能有多個 Core（Slack + Telegram），而 COGITO_USER_LINK
 // 讓已連結使用者的 DM 在【跨 Core】共用同一個 workDir（"user:<canonical>"）。鎖若掛在 Core 上，兩個
 // Core 各鎖各的 → 同一份 session 被併發 Run → history 交錯出 tool_use 沒配對 tool_result 的壞歷史並
 // 落盤（該 session 永久磚化），且 /stop 跨平台失效。workDir 路徑本就全域唯一（含 platform 前綴或
@@ -270,7 +270,7 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 // 成功觸發 postRun、失敗觸發 postFailure。convID 已含平台前綴。
 func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTask bool) {
 	workDir := c.channelWorkDir(convID)
-	defer c.release(workDir) // 運行結束（含審批被拒/超時/崩潰/被 /stop 取消）釋放鎖並 cancel context
+	defer c.release(workDir) // 執行結束（含審批被拒/超時/崩潰/被 /stop 取消）釋放鎖並 cancel context
 
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		SendMessage(convID, fmt.Sprintf("❌ 無法建立工作目錄: %v", err))
@@ -278,7 +278,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	}
 
 	session := c.sessionFor(convID)
-	session.SetRunning(true)        // 標記任務進行中；程序被硬砍時此旗標留在磁碟供啟動時掃出續跑
+	session.SetRunning(true)        // 標記任務進行中；行程被硬砍時此旗標留在磁碟供啟動時掃出續跑
 	defer session.SetRunning(false) // 正常結束（成功/終局失敗）都清掉——只有硬砍才會留 true
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
@@ -385,7 +385,7 @@ func (c *Core) sessionFor(convID string) *ctxpkg.Session {
 	return ctxpkg.GlobalSessionMgr.GetOrCreate(convID, c.channelWorkDir(convID))
 }
 
-// ResumeInterrupted 在程序啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍
+// ResumeInterrupted 在行程啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍
 // 標記進行中」的自動從斷點續跑。只處理本平台（platform 前綴）的 session；連續多次續跑仍中斷則停手
 // 防崩潰迴圈。需 COGITO_AUTO_RESUME=1 且有持久化（COGITO_SESSION_DIR），否則自然 no-op。
 func (c *Core) ResumeInterrupted() {
@@ -410,7 +410,7 @@ func (c *Core) ResumeInterrupted() {
 			continue // 該頻道已忙（極少見）→ 跳過，handleAgentRun 期望呼叫端已持鎖
 		}
 		s.BumpResumeAttempts()
-		SendMessage(id, "🔄 偵測到程序上次中斷時有未完成的任務，正在從斷點自動續跑…")
+		SendMessage(id, "🔄 偵測到行程上次中斷時有未完成的任務，正在從斷點自動續跑…")
 		go c.handleAgentRun(ctx, id, resumeNudge, false)
 	}
 }
@@ -744,7 +744,7 @@ func (c *Core) tryEdgesCommand(convID, text string) bool {
 	return false
 }
 
-// tryResolveApproval 攔截 approve/reject 口令（裸口令按本頻道解析，亦兼容 approve <taskID>）。命中即消費。
+// tryResolveApproval 攔截 approve/reject 口令（裸口令按本頻道解析，亦相容 approve <taskID>）。命中即消費。
 // 只有管理員（COGITO_ADMIN_USERS）能放行/否決高危操作——杜絕「發起者＝批准者」自我放行繞過人在迴路。
 func (c *Core) tryResolveApproval(convID, userID, text string) bool {
 	text = strings.TrimSpace(text)

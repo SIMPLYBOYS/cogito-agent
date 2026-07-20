@@ -65,6 +65,6 @@ func TestMCPTool_TimesOutOnHangingServer(t *testing.T) {
 			t.Errorf("超時錯誤應指出是哪個工具，got: %v", err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("呼叫沒有在 timeout 後返回——吊死的 server 會永久佔住併發令牌")
+		t.Fatal("呼叫沒有在 timeout 後回傳——吊死的 server 會永久佔住併發令牌")
 	}
 }

@@ -13,8 +13,8 @@ import (
 
 // Gateway 是 MCP 工具的「漸進式暴露」閘道：不把 N 個 MCP 工具逐一放進 LLM 的 tools 清單
 // （那會讓每輪重送大量 schema），而是只暴露兩個通用工具——
-//   - mcp_call_tool(name, arguments)：description 內含輕量目錄（每工具一行），調用指定 MCP 工具。
-//   - mcp_describe_tool(name)：按需返回某工具的完整 JSON Schema。
+//   - mcp_call_tool(name, arguments)：description 內含輕量目錄（每工具一行），呼叫指定 MCP 工具。
+//   - mcp_describe_tool(name)：按需回傳某工具的完整 JSON Schema。
 //
 // 如此 context 只帶「2 個 gateway 定義 + N 行目錄」，full schema 用到才載入。
 type Gateway struct {
@@ -80,12 +80,12 @@ func (t *callTool) Name() string { return "mcp_call_tool" }
 func (t *callTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name: "mcp_call_tool",
-		Description: "調用一個外部 MCP 工具。可用工具目錄（名稱: 說明）如下；需要精確參數、或想了解該 server 的用法時，先用 mcp_describe_tool 查（會回傳完整 schema，該 server 若附使用說明也一併回傳）：\n\n" +
+		Description: "呼叫一個外部 MCP 工具。可用工具目錄（名稱: 說明）如下；需要精確參數、或想了解該 server 的用法時，先用 mcp_describe_tool 查（會回傳完整 schema，該 server 若附使用說明也一併回傳）：\n\n" +
 			t.g.catalog(),
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
-				"name":      map[string]interface{}{"type": "string", "description": "要調用的 MCP 工具名（見本說明的目錄）"},
+				"name":      map[string]interface{}{"type": "string", "description": "要呼叫的 MCP 工具名（見本說明的目錄）"},
 				"arguments": map[string]interface{}{"type": "object", "description": "傳給該工具的參數物件"},
 			},
 			"required": []string{"name"},
@@ -120,7 +120,7 @@ func (t *describeTool) Name() string { return "mcp_describe_tool" }
 func (t *describeTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        "mcp_describe_tool",
-		Description: "返回某個 MCP 工具的完整參數 JSON Schema 與說明（在 mcp_call_tool 調用前先查清楚參數結構）。",
+		Description: "回傳某個 MCP 工具的完整參數 JSON Schema 與說明（在 mcp_call_tool 呼叫前先查清楚參數結構）。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

@@ -10,7 +10,7 @@ import (
 )
 
 // ReadSkillTool 是漸進式技能載入（Progressive Disclosure）的按需載入端：System Prompt 只放
-// 技能索引（名稱+描述），模型判定需要某技能時調用本工具載入其完整正文，避免開局就吃光 token。
+// 技能索引（名稱+描述），模型判定需要某技能時呼叫本工具載入其完整正文，避免開局就吃光 token。
 type ReadSkillTool struct {
 	loader *ctxpkg.SkillLoader
 }
@@ -25,7 +25,7 @@ func (t *ReadSkillTool) Name() string { return "read_skill" }
 func (t *ReadSkillTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "按名稱載入一個專業技能的完整正文（操作指南）。當任務符合 System Prompt 中『技能索引』的某條描述時，先調用此工具取得正文再執行。",
+		Description: "按名稱載入一個專業技能的完整正文（操作指南）。當任務符合 System Prompt 中『技能索引』的某條描述時，先呼叫此工具取得正文再執行。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

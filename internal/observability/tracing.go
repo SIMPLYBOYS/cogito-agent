@@ -22,7 +22,7 @@ import (
 //     或（未手設時）由 LANGFUSE_PUBLIC_KEY+SECRET_KEY 自動組 Basic auth（見 deriveLangfuseAuthHeader）。
 //   - 兩者皆未設 → no-op（span 零成本空操作，離線/測試不受影響）。
 //
-// 返回的 shutdown 應在程式結束時調用以 flush 緩衝的 span。
+// 回傳的 shutdown 應在程式結束時呼叫以 flush 緩衝的 span。
 func InitTracing(ctx context.Context, serviceName string) (func(context.Context) error, error) {
 	var (
 		exp  sdktrace.SpanExporter
@@ -40,7 +40,7 @@ func InitTracing(ctx context.Context, serviceName string) (func(context.Context)
 		exp, err = otlptracehttp.New(ctx)
 		mode = "OTLP → " + otlpEndpoint()
 	default:
-		log.Println("[Tracing] 未設定 exporter（OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_TRACES_EXPORTER），鏈路追蹤以 no-op 運行。")
+		log.Println("[Tracing] 未設定 exporter（OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_TRACES_EXPORTER），鏈路追蹤以 no-op 執行。")
 		return func(context.Context) error { return nil }, nil
 	}
 	if err != nil {

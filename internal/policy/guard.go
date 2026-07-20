@@ -28,7 +28,7 @@ func IsUnattended(ctx context.Context) bool {
 // Asker 詢問人類是否放行。回 (false, 原因) 即拒絕。
 type Asker func(ctx context.Context, call schema.ToolCall) (allowed bool, reason string)
 
-// Guard 組出工具調用的守門中介層，裁決順序 Deny > Ask > Allow。
+// Guard 組出工具呼叫的守門中介層，裁決順序 Deny > Ask > Allow。
 //
 //   - 政策檔有裁決 → 依政策。
 //   - 政策沒意見 → 落回 builtinDangerous（既有的危險黑名單）：命中＝Ask，否則 Allow。

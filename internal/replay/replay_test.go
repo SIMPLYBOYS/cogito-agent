@@ -100,7 +100,7 @@ func TestBuild_SubagentDepth(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("子 agent 內部 turns 應含它的 read_file 調用")
+		t.Error("子 agent 內部 turns 應含它的 read_file 呼叫")
 	}
 
 	// 不給 workDir → 只到委派層（不掛子深度），保持 M1 行為

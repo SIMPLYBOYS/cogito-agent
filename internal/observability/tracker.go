@@ -14,7 +14,7 @@ import (
 )
 
 // PricingModel 是各模型每百萬 Token 的美元單價（輸入/輸出）。
-// 數據來自 Anthropic 官方定價；切換模型時在此登記即可。
+// 資料來自 Anthropic 官方定價；切換模型時在此登記即可。
 var PricingModel = map[string]struct {
 	InputPrice  float64
 	OutputPrice float64
@@ -44,7 +44,7 @@ func envFloatOr(key string, def float64) float64 {
 	return def
 }
 
-// CostTracker 用 decorator 模式包裹一個 LLMProvider：它本身也實現 LLMProvider 接口，
+// CostTracker 用 decorator 模式包裹一個 LLMProvider：它本身也實現 LLMProvider 介面，
 // 在轉調真實 provider 前後計時、抽取 Token 消耗、計算費用並累加進 Session。引擎對此毫不知情。
 type CostTracker struct {
 	nextProvider provider.LLMProvider
@@ -71,7 +71,7 @@ func (t *CostTracker) ModelName() string {
 }
 
 // Configure 讓子 agent 選模型/effort 仍保有成本追蹤：配置內層 provider 後重新包一層 CostTracker，
-// 以新模型名計價、記進同一 session。內層不支援配置則原樣返回（model/effort 靜默忽略）。
+// 以新模型名計價、記進同一 session。內層不支援配置則原樣回傳（model/effort 靜默忽略）。
 func (t *CostTracker) Configure(model string, maxTokens int) provider.LLMProvider {
 	cfg, ok := t.nextProvider.(provider.Configurable)
 	if !ok {
@@ -88,7 +88,7 @@ func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, avail
 	startTime := time.Now()
 	respMsg, err := t.nextProvider.Generate(ctx, msgs, availableTools)
 	if err != nil {
-		log.Printf("[Tracker] ❌ API 調用失敗，耗時: %v\n", time.Since(startTime))
+		log.Printf("[Tracker] ❌ API 呼叫失敗，耗時: %v\n", time.Since(startTime))
 		return respMsg, err
 	}
 	t.account(respMsg, time.Since(startTime))
@@ -105,7 +105,7 @@ func (t *CostTracker) GenerateStream(ctx context.Context, msgs []schema.Message,
 	startTime := time.Now()
 	respMsg, err := sp.GenerateStream(ctx, msgs, availableTools, onDelta)
 	if err != nil {
-		log.Printf("[Tracker] ❌ API 串流調用失敗，耗時: %v\n", time.Since(startTime))
+		log.Printf("[Tracker] ❌ API 串流呼叫失敗，耗時: %v\n", time.Since(startTime))
 		return respMsg, err
 	}
 	t.account(respMsg, time.Since(startTime))
@@ -134,7 +134,7 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 			float64(cacheCreation)*price.InputPrice*1.25 +
 			float64(completionTokens)*price.OutputPrice) / 1000000.0
 
-		log.Printf("[Tracker] 📊 API 調用完成 | 耗時: %v | 輸入: %d tk (快取讀 %d / 寫 %d) | 輸出: %d tk | 花費: $%.6f\n",
+		log.Printf("[Tracker] 📊 API 呼叫完成 | 耗時: %v | 輸入: %d tk (快取讀 %d / 寫 %d) | 輸出: %d tk | 花費: $%.6f\n",
 			latency, promptTokens, cacheRead, cacheCreation, completionTokens, cost)
 
 		if t.session != nil {
@@ -144,6 +144,6 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.CostUSD())
 		}
 	} else {
-		log.Printf("[Tracker] ⚠️ API 調用完成，但未返回 Usage 數據 | 耗時: %v\n", latency)
+		log.Printf("[Tracker] ⚠️ API 呼叫完成，但未回傳 Usage 資料 | 耗時: %v\n", latency)
 	}
 }

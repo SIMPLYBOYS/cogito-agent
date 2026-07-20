@@ -2,7 +2,7 @@ package schema
 
 import "unicode/utf8"
 
-// TruncRunes 按【字元】截斷字串，超長時接上 suffix；未超長則原樣返回。
+// TruncRunes 按【字元】截斷字串，超長時接上 suffix；未超長則原樣回傳。
 //
 // 【為什麼不能用 s[:n]】Go 的字串切片是按 byte 切的。本專案的工具輸出、報錯訊息、技能描述幾乎
 // 都含中文（UTF-8 每字 3 bytes），在第 n 個 byte 切下去有很高機率切在多位元組字元中間，產生

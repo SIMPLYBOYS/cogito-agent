@@ -25,7 +25,7 @@ func (e *AgentEngine) JudgeGoal(ctx context.Context, session *ctxpkg.Session, cr
 		{Role: schema.RoleUser, Content: user},
 	}, nil)
 	if err != nil {
-		return false, "", fmt.Errorf("驗收 LLM 調用失敗: %w", err)
+		return false, "", fmt.Errorf("驗收 LLM 呼叫失敗: %w", err)
 	}
 	var r struct {
 		Done   bool   `json:"done"`

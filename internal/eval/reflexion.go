@@ -39,7 +39,7 @@ func ReflectOnFailure(ctx context.Context, p provider.LLMProvider, taskPrompt st
 	}
 	resp, err := p.Generate(ctx, msgs, nil)
 	if err != nil {
-		return "", fmt.Errorf("反思 LLM 調用失敗: %w", err)
+		return "", fmt.Errorf("反思 LLM 呼叫失敗: %w", err)
 	}
 	var out struct {
 		Lesson string `json:"lesson"`

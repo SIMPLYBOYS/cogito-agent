@@ -22,7 +22,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
+		log.Fatal("請先在 .env 或環境變數中設置 ANTHROPIC_API_KEY")
 	}
 
 	// 自包含：準備 Session A 的工作區與含密鑰的 README，便於直接觀察行為
@@ -30,7 +30,7 @@ func main() {
 	if err := os.MkdirAll(frontDir, 0755); err != nil {
 		log.Fatalf("創建演示目錄失敗: %v", err)
 	}
-	readme := "# 項目說明\n\n部署密鑰（僅本文件記錄）：DEPLOY_KEY=sk-demo-9f3a-7c21\n"
+	readme := "# 項目說明\n\n部署密鑰（僅本檔案記錄）：DEPLOY_KEY=sk-demo-9f3a-7c21\n"
 	if err := os.WriteFile(filepath.Join(frontDir, "README.md"), []byte(readme), 0644); err != nil {
 		log.Fatalf("寫入演示 README 失敗: %v", err)
 	}
@@ -39,7 +39,7 @@ func main() {
 
 	registry := tools.NewRegistry()
 	// 已知侷限：tools 的 workDir 寫死為 Session A 的目錄，與 session.WorkDir 尚未對齊；
-	// Session B 用"不準調用工具"規避（per-session 工具沙箱留待後續章節）。
+	// Session B 用"不準呼叫工具"規避（per-session 工具沙箱留待後續章節）。
 	registry.Register(tools.NewReadFileTool(frontDir))
 
 	eng := engine.NewAgentEngine(llmProvider, registry, false, false)
@@ -63,8 +63,8 @@ func main() {
 			sessionA.Append(schema.Message{Role: schema.RoleAssistant, Content: "好的，收到閒聊。"})
 		}
 
-		log.Println("\n>>> 🙋 [Session A / Turn 2]: 剛才第一輪查到的密鑰是什麼？（不準調用工具）")
-		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "請直接告訴我，剛才第一輪你查到的那個密鑰是什麼？不準調用工具！"})
+		log.Println("\n>>> 🙋 [Session A / Turn 2]: 剛才第一輪查到的密鑰是什麼？（不準呼叫工具）")
+		sessionA.Append(schema.Message{Role: schema.RoleUser, Content: "請直接告訴我，剛才第一輪你查到的那個密鑰是什麼？不準呼叫工具！"})
 		_ = eng.Run(context.Background(), sessionA, reporter)
 	}()
 
@@ -76,8 +76,8 @@ func main() {
 
 		sessionB := ctxpkg.GlobalSessionMgr.GetOrCreate("chat_back_002", "/tmp/project_back")
 
-		log.Println("\n>>> 🙋 [Session B]: 別人查到了一個密鑰，你這裡能看到嗎？（不準調用工具）")
-		sessionB.Append(schema.Message{Role: schema.RoleUser, Content: "別人查到了一個密鑰，你這裡能看到嗎？不準調用工具！"})
+		log.Println("\n>>> 🙋 [Session B]: 別人查到了一個密鑰，你這裡能看到嗎？（不準呼叫工具）")
+		sessionB.Append(schema.Message{Role: schema.RoleUser, Content: "別人查到了一個密鑰，你這裡能看到嗎？不準呼叫工具！"})
 		_ = eng.Run(context.Background(), sessionB, reporter)
 	}()
 

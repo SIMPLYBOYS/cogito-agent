@@ -22,13 +22,13 @@ type BaseTool interface {
 type ToolHandler func(ctx context.Context, call schema.ToolCall) schema.ToolResult
 
 // MiddlewareFunc 是環繞式（around）工具中間件：拿到 call 與 next（鏈的下一步），可在 next() 前後
-// 插入邏輯（計時/日誌/重試/快取），也可不調用 next() 直接短路返回（如審批拒絕）。tools 包只
+// 插入邏輯（計時/日誌/重試/快取），也可不呼叫 next() 直接短路回傳（如審批拒絕）。tools 包只
 // 暴露這個 hook 點，完全不感知具體業務（如 IM 平臺審批）。
 type MiddlewareFunc func(ctx context.Context, call schema.ToolCall, next ToolHandler) schema.ToolResult
 
 type Registry interface {
 	Register(tool BaseTool)
-	Use(mw MiddlewareFunc) // 全局 middleware 掛載點
+	Use(mw MiddlewareFunc) // 全域 middleware 掛載點
 	GetAvailableTools() []schema.ToolDefinition
 	Execute(ctx context.Context, call schema.ToolCall) schema.ToolResult
 	Subset(names []string) Registry // 取只含指定工具的子註冊表（沿用同一組 middleware），供具名子 agent 限縮能力
@@ -101,7 +101,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 	}
 
 	// 最內層 handler：真正執行工具底層邏輯。executed 標記工具是否被觸達——若中間件短路
-	// （如審批拒絕，未調用 next），它會維持 false，據此在 span 標記攔截。
+	// （如審批拒絕，未呼叫 next），它會維持 false，據此在 span 標記攔截。
 	executed := false
 	handler := func(ctx context.Context, call schema.ToolCall) schema.ToolResult {
 		executed = true
@@ -113,7 +113,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 				IsError:    true,
 			}
 		}
-		// 截前 N 字符放進 Trace 預覽，防止 trace 膨脹（過小會讓 Langfuse 看到一堆 ...）
+		// 截前 N 字元放進 Trace 預覽，防止 trace 膨脹（過小會讓 Langfuse 看到一堆 ...）
 		span.AddAttribute("output_preview", truncate(output, maxPreviewChars))
 		return schema.ToolResult{
 			ToolCallID: call.ID,
@@ -122,7 +122,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 		}
 	}
 
-	// 由內而外包裝中間件：註冊順序靠前者位於外層（最先進入、最後返回）。
+	// 由內而外包裝中間件：註冊順序靠前者位於外層（最先進入、最後回傳）。
 	// 環繞式 middleware 可在 next() 前後計時/日誌，或不調 next() 直接短路（如審批拒絕）。
 	for i := len(r.middlewares) - 1; i >= 0; i-- {
 		mw := r.middlewares[i]
@@ -144,7 +144,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 	return result
 }
 
-// maxPreviewChars 是放進 trace 預覽屬性的字符上限（rune，非 byte）。100 太小會讓 Langfuse
+// maxPreviewChars 是放進 trace 預覽屬性的字元上限（rune，非 byte）。100 太小會讓 Langfuse
 // 滿屏 ...；放大到 2000 仍遠小於工具原始輸出，避免 span 膨脹。
 const maxPreviewChars = 2000
 

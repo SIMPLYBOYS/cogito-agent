@@ -14,7 +14,7 @@ import (
 
 // platformData 是 /platform 頁的唯讀資料：實際驅動 agent 的平台設定（全 env 驅動，本專案無集中 config
 // struct）。祕密（API key / token / secret）一律只顯示「已設定/未設」，絕不露值——即使綁 loopback。
-// provider 解析對照 internal/provider.FromEnv（此處唯讀鏡像，故設定即使不完整也看得到，不像 FromEnv 會報錯）。
+// provider 解析對照 internal/provider.FromEnv（此處唯讀映像，故設定即使不完整也看得到，不像 FromEnv 會報錯）。
 type platformData struct {
 	// LLM（可就地編輯 provider/模型；金鑰仍只看狀態）
 	Provider    string // 解析後：Claude / OpenAI 相容 / 未知（目前生效）
@@ -103,7 +103,7 @@ func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	s.writeLayout(w, "Platform", template.HTML(b.String()), cspChat) // 放寬 script/connect 'self'：眼睛顯示祕密
 }
 
-// resolveProviderInto 鏡像 provider.FromEnv 的選擇邏輯（唯讀，不建構 provider、不因缺 key 報錯）。
+// resolveProviderInto 映像 provider.FromEnv 的選擇邏輯（唯讀，不建構 provider、不因缺 key 報錯）。
 func resolveProviderInto(d *platformData) {
 	switch strings.ToLower(strings.TrimSpace(d.ProviderRaw)) {
 	case "openai", "openai-compatible", "oai":

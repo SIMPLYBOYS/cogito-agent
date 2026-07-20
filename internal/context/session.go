@@ -35,7 +35,7 @@ type Session struct {
 	// 空＝無 goal；goalPaused＝保留目標但暫停自動續跑。
 	goal       string
 	goalPaused bool
-	// running＝有任務正在跑。正常結束清 false；程序被硬砍時留 true，供啟動時掃出續跑。
+	// running＝有任務正在跑。正常結束清 false；行程被硬砍時留 true，供啟動時掃出續跑。
 	// resumeAttempts＝跨重啟續跑已嘗試次數（防同一任務崩潰迴圈燒錢）。
 	running        bool
 	resumeAttempts int
@@ -148,7 +148,7 @@ func (s *Session) Reset() {
 	s.persistLocked()
 }
 
-// GetWorkingMemory 返回短期工作記憶：末尾 limit 條的滑動窗口。
+// GetWorkingMemory 回傳短期工作記憶：末尾 limit 條的滑動窗口。
 // 關鍵防禦：若窗口首條是 ToolResult（RoleUser + ToolCallID），說明它對應的
 // assistant tool_use 已被截斷在窗口外——把"無主的 tool_result"發給 LLM API 會報錯，
 // 因此從頭部一路剝掉孤兒，直到窗口首條是合法的 turn 起點。
@@ -410,12 +410,12 @@ func (sm *SessionManager) SetStore(store SessionStore) {
 	sm.store = store
 }
 
-// GlobalSessionMgr 是包級全局單例，方便各 IM adapter（Slack 等）共享同一 session 池。
+// GlobalSessionMgr 是包級全域單例，方便各 IM adapter（Slack 等）共享同一 session 池。
 var GlobalSessionMgr = &SessionManager{
 	sessions: make(map[string]*Session),
 }
 
-// RecordUsage 供外部 CostTracker 調用，累加本 Session 的 Token 與費用賬單並落盤——
+// RecordUsage 供外部 CostTracker 呼叫，累加本 Session 的 Token 與費用賬單並落盤——
 // 賬單是金錢資料，即時持久化（不與回合尾的 Append 合併），確保崩潰不丟計費。
 func (s *Session) RecordUsage(prompt int, completion int, cost float64) {
 	s.mu.Lock()

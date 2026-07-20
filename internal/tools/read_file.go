@@ -25,13 +25,13 @@ func (t *ReadFileTool) Name() string {
 func (t *ReadFileTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "讀取指定路徑的文件內容。請提供相對工作區的路徑。",
+		Description: "讀取指定路徑的檔案內容。請提供相對工作區的路徑。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "要讀取的文件路徑，如 cmd/claw/main.go",
+					"description": "要讀取的檔案路徑，如 cmd/claw/main.go",
 				},
 			},
 			"required": []string{"path"},
@@ -56,7 +56,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 
 	file, err := os.Open(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("打開文件失敗: %w", err)
+		return "", fmt.Errorf("打開檔案失敗: %w", err)
 	}
 	defer file.Close()
 
@@ -68,7 +68,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	const readLimit = maxRunes*4 + 1
 	content, err := io.ReadAll(io.LimitReader(file, readLimit))
 	if err != nil {
-		return "", fmt.Errorf("讀取文件內容失敗: %w", err)
+		return "", fmt.Errorf("讀取檔案內容失敗: %w", err)
 	}
 
 	// 按【字元】截斷：byte 切會切在多位元組字元中間，讀中文檔就吐非法 UTF-8 給模型。

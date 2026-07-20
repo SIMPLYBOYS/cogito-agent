@@ -1,6 +1,6 @@
 // Package mcp 是一個極簡的 Model Context Protocol 客戶端：以 JSON-RPC 2.0 連接外部 MCP 工具
 // 伺服器，做 initialize → tools/list → tools/call。v1 只支援 tools（不含 resources/prompts）。
-// 傳輸有兩種：stdio（子進程，stdio_transport）與 Streamable HTTP（遠端，http_transport）。
+// 傳輸有兩種：stdio（子行程，stdio_transport）與 Streamable HTTP（遠端，http_transport）。
 package mcp
 
 import (
@@ -137,7 +137,7 @@ type contentBlock struct {
 	Text string `json:"text"`
 }
 
-// callTool 調用遠端工具，把回傳的 text 內容塊合併成字串；isError=true 時以 error 回傳
+// callTool 呼叫遠端工具，把回傳的 text 內容塊合併成字串；isError=true 時以 error 回傳
 // （交給 Registry 走 error-as-observation）。
 func (c *Client) callTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	if args == nil {
@@ -166,10 +166,10 @@ func (c *Client) callTool(ctx context.Context, name string, args map[string]any)
 	return text, nil
 }
 
-// Close 關閉連線（結束子進程 / 釋放 HTTP 資源）。
+// Close 關閉連線（結束子行程 / 釋放 HTTP 資源）。
 func (c *Client) Close() error { return c.t.close() }
 
-// Dial 依設定建立連線並完成握手：有 url/type=http 走 Streamable HTTP，否則 stdio 子進程。
+// Dial 依設定建立連線並完成握手：有 url/type=http 走 Streamable HTTP，否則 stdio 子行程。
 func Dial(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	if cfg.isHTTP() {
 		return dialHTTP(ctx, cfg)
@@ -200,7 +200,7 @@ func dialStdio(ctx context.Context, cfg ServerConfig) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("mcp[%s]: 啟動失敗: %w", cfg.Name, err)
 	}
-	// 子進程 stderr 轉印到日誌，避免緩衝塞滿阻塞。
+	// 子行程 stderr 轉印到日誌，避免緩衝塞滿阻塞。
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
@@ -218,7 +218,7 @@ func dialStdio(ctx context.Context, cfg ServerConfig) (*Client, error) {
 
 // ---- stdio 傳輸 ----
 
-// stdioTransport 走子進程 stdin/stdout（換行分隔 JSON）。背景 reader 讀回應、按 id 路由到等待中的
+// stdioTransport 走子行程 stdin/stdout（換行分隔 JSON）。背景 reader 讀回應、按 id 路由到等待中的
 // 呼叫，因此可安全併發。
 type stdioTransport struct {
 	name string
@@ -270,7 +270,7 @@ func (t *stdioTransport) readLoop(r io.Reader) {
 			ch <- resp
 		}
 	}
-	// 讀取結束（EOF / 進程退出）：喚醒所有等待者並標記關閉。
+	// 讀取結束（EOF / 行程退出）：喚醒所有等待者並標記關閉。
 	t.mu.Lock()
 	t.closed = true
 	for id, ch := range t.pending {

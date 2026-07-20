@@ -15,8 +15,8 @@ import (
 
 // Bootstrap 載入 .env 並初始化 OTel 鏈路追蹤（設了 OTEL_EXPORTER_OTLP_ENDPOINT 才上報，否則 no-op）。
 //
-// 回傳的 flush 必須在程序退出前呼叫一次以送出緩衝的 span。建議：
-//   - 一律 `defer flush()`（涵蓋正常返回）；
+// 回傳的 flush 必須在行程退出前呼叫一次以送出緩衝的 span。建議：
+//   - 一律 `defer flush()`（涵蓋正常回傳）；
 //   - 並在任何 log.Fatal / os.Exit【之前】再顯式呼叫一次（它們會略過 defer）。
 //
 // flush 內部以 sync.Once 去重，重複呼叫安全。

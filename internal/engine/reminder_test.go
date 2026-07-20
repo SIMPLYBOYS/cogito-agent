@@ -19,14 +19,14 @@ func TestReminderInjector_TriggersAfterThreeIdenticalFailures(t *testing.T) {
 	c := mkCall("read_file", `{"path":"x"}`)
 
 	if got := r.CheckAndInject(c, errResult()); got != nil {
-		t.Fatalf("第 1 次失敗不應觸發，卻返回: %v", got)
+		t.Fatalf("第 1 次失敗不應觸發，卻回傳: %v", got)
 	}
 	if got := r.CheckAndInject(c, errResult()); got != nil {
 		t.Fatalf("第 2 次失敗不應觸發")
 	}
 	got := r.CheckAndInject(c, errResult())
 	if got == nil {
-		t.Fatal("第 3 次相同參數失敗應觸發死循環提醒，卻返回 nil")
+		t.Fatal("第 3 次相同參數失敗應觸發無窮迴圈提醒，卻回傳 nil")
 	}
 	if got.Role != schema.RoleUser || !strings.Contains(got.Content, "SYSTEM REMINDER") {
 		t.Errorf("提醒消息格式不對: role=%q content=%q", got.Role, got.Content)
@@ -70,7 +70,7 @@ func TestReminderInjector_VaryingArgsTripsSameToolThreshold(t *testing.T) {
 	}
 	got := r.CheckAndInject(mkCall("read_file", `{"path":"e"}`), errResult())
 	if got == nil {
-		t.Fatal("同一工具連續 5 次失敗（即便每次參數不同）應觸發死循環提醒")
+		t.Fatal("同一工具連續 5 次失敗（即便每次參數不同）應觸發無窮迴圈提醒")
 	}
 	if got.Role != schema.RoleUser || !strings.Contains(got.Content, "SYSTEM REMINDER") {
 		t.Errorf("提醒消息格式不對: role=%q content=%q", got.Role, got.Content)
@@ -108,7 +108,7 @@ func TestFingerprint_DoesNotOverNormalize(t *testing.T) {
 	}
 }
 
-// 端到端：三次「微差」重試（規範化後同一目標）應在第 3 次觸發死循環，不再被尾空格/冗餘 ./ 繞過。
+// 端到端：三次「微差」重試（規範化後同一目標）應在第 3 次觸發無窮迴圈，不再被尾空格/冗餘 ./ 繞過。
 func TestReminderInjector_TrivialDiffRetriesTripAtThree(t *testing.T) {
 	r := NewReminderInjector()
 	calls := []string{
@@ -121,7 +121,7 @@ func TestReminderInjector_TrivialDiffRetriesTripAtThree(t *testing.T) {
 		last = r.CheckAndInject(mkCall("read_file", a), errResult())
 	}
 	if last == nil {
-		t.Fatal("三次微差重試（規範化後同一目標）應在第 3 次觸發死循環提醒")
+		t.Fatal("三次微差重試（規範化後同一目標）應在第 3 次觸發無窮迴圈提醒")
 	}
 }
 
@@ -129,13 +129,13 @@ func TestReminderInjector_TrivialDiffRetriesTripAtThree(t *testing.T) {
 func TestReminderInjector_CheckTurnCountsAllParallelTools(t *testing.T) {
 	r := NewReminderInjector()
 	c := mkCall("bash", `{"command":"x"}`)
-	// 每輪兩個相同失敗調用：第 1 輪→計數 2，第 2 輪達到 3，CheckTurn 應返回提醒
+	// 每輪兩個相同失敗呼叫：第 1 輪→計數 2，第 2 輪達到 3，CheckTurn 應回傳提醒
 	calls := []schema.ToolCall{c, c}
 	results := []schema.ToolResult{errResult(), errResult()}
 	if got := r.CheckTurn(calls, results); got != nil {
 		t.Fatal("首輪同指紋累計 2 次，不應觸發")
 	}
 	if got := r.CheckTurn(calls, results); got == nil {
-		t.Fatal("第二輪累計達 ≥3 次，CheckTurn 應返回提醒（證明並行工具都被計入）")
+		t.Fatal("第二輪累計達 ≥3 次，CheckTurn 應回傳提醒（證明並行工具都被計入）")
 	}
 }

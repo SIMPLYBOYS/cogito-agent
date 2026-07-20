@@ -17,20 +17,20 @@ func TestRecoveryManager_AnalyzeAndInject(t *testing.T) {
 		wantHint bool   // 是否應注入救援指南
 		wantKey  string // wantHint 時，指南里應包含的關鍵詞
 	}{
-		{"edit_file 完全未匹配", "edit_file", "在文件中未找到 old_text：已嘗試精確比對、換行正規化、去縮排逐行比對，皆無匹配——調整縮排/空白再試沒有用，是內容本身與檔案現況不符", true, "read_file"}, // edit_file.go:149
-		{"edit_file 找不到片段", "edit_file", "找不到該代碼片段", true, "read_file"},
+		{"edit_file 完全未匹配", "edit_file", "在檔案中未找到 old_text：已嘗試精確比對、換行正規化、去縮排逐行比對，皆無匹配——調整縮排/空白再試沒有用，是內容本身與檔案現況不符", true, "read_file"}, // edit_file.go:149
+		{"edit_file 找不到片段", "edit_file", "找不到該程式碼片段", true, "read_file"},
 		// 退化情形（old_text 比檔案還長）的實際訊息帶了行數事實——前綴仍須命中救援規則。
 		// 這條鎖住 edit_file.go 與本檔的字串耦合：改了那邊的用詞、忘了這邊，這裡會紅。
 		{"edit_file 片段超過檔案行數", "edit_file",
-			"找不到該代碼片段：old_text 共 9 行，多於檔案的 3 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
+			"找不到該程式碼片段：old_text 共 9 行，多於檔案的 3 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
 			true, "read_file"},
 		// ⚠️ 以下 rawError 必須逐字抄自 internal/tools/edit_file.go 的【實際】錯誤（見該行註解）。
 		// 本檔曾用手寫的「old_text 匹配到了多處，請提供更多上下文」——那句話 edit_file 從來不會吐，
 		// 於是 pattern 早就對不上了測試也全綠（L1 多重匹配一直拿不到救援指南沒人發現）。
 		// 權威測試在 internal/tools/edit_file_test.go：那裡跑【真的】fuzzyReplace 再過 recovery。
-		{"edit_file L1 多重匹配", "edit_file", "old_text 匹配到了 3 處，請提供更多的上下文代碼以確保唯一性", true, "唯一性"}, // edit_file.go:92
-		{"edit_file L4 模糊多重匹配", "edit_file", "模糊匹配到了 2 處代碼，請提供更多上下文以定位", true, "唯一性"},          // edit_file.go:158
-		{"read_file 文件不存在", "read_file", "open /x/y: no such file or directory", true, "ls -la"},
+		{"edit_file L1 多重匹配", "edit_file", "old_text 匹配到了 3 處，請提供更多的上下文程式碼以確保唯一性", true, "唯一性"}, // edit_file.go:92
+		{"edit_file L4 模糊多重匹配", "edit_file", "模糊匹配到了 2 處程式碼，請提供更多上下文以定位", true, "唯一性"},          // edit_file.go:158
+		{"read_file 檔案不存在", "read_file", "open /x/y: no such file or directory", true, "ls -la"},
 		{"write_file 權限不足", "write_file", "open /etc/x: Permission denied", true, "權限"},
 		{"bash 命令不存在", "bash", "bash: foo: command not found", true, "替代命令"},
 		{"bash 超時", "bash", "命令執行超時(30s)，已被系統強制終止", true, "nohup"},
@@ -41,8 +41,8 @@ func TestRecoveryManager_AnalyzeAndInject(t *testing.T) {
 		{"Python 缺模組", "bash", "ModuleNotFoundError: No module named 'requests'", true, "pip install"},
 		{"MCP 參數驗證錯", "mcp_call_tool", "Error executing tool query_rows: 1 validation error", true, "mcp_describe_tool"},
 		{"MCP 一般錯不亂提示", "mcp_call_tool", "internal server error 500", false, ""},
-		{"未命中規則原樣返回", "edit_file", "某種我們沒見過的奇怪錯誤", false, ""},
-		{"未知工具原樣返回", "search_web", "open /x: no such file or directory", false, ""},
+		{"未命中規則原樣回傳", "edit_file", "某種我們沒見過的奇怪錯誤", false, ""},
+		{"未知工具原樣回傳", "search_web", "open /x: no such file or directory", false, ""},
 	}
 
 	for _, tc := range cases {
@@ -51,7 +51,7 @@ func TestRecoveryManager_AnalyzeAndInject(t *testing.T) {
 
 			if !tc.wantHint {
 				if got != tc.rawError {
-					t.Fatalf("期望原樣返回，卻被修改:\n原始: %q\n返回: %q", tc.rawError, got)
+					t.Fatalf("期望原樣回傳，卻被修改:\n原始: %q\n回傳: %q", tc.rawError, got)
 				}
 				return
 			}

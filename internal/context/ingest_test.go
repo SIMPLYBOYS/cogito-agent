@@ -57,10 +57,10 @@ func TestIngestDir_NodesAndEdges(t *testing.T) {
 		t.Error("Graph 應從 edges.jsonl 合併出 guide→sub/api 邊")
 	}
 
-	// recall 跨文件多跳：查 widgets → 命中 guide，子圖含鄰居 sub/api
+	// recall 跨檔案多跳：查 widgets → 命中 guide，子圖含鄰居 sub/api
 	out := m.RecallGraph("widgets", 1, nil)
 	if !strings.Contains(out, "## guide") || !strings.Contains(out, "## sub/api") {
-		t.Errorf("recall 子圖應跨 ingested 文件含 guide 與 sub/api:\n%s", out)
+		t.Errorf("recall 子圖應跨 ingested 檔案含 guide 與 sub/api:\n%s", out)
 	}
 }
 

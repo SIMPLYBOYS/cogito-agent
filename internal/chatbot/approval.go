@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// ApprovalManager 是 channel-based 的全局審批單例：危險工具調用在 WaitForApproval 處阻塞，
+// ApprovalManager 是 channel-based 的全域審批單例：危險工具呼叫在 WaitForApproval 處阻塞，
 // 直到人類通過 Slack 回覆 approve/reject，由 ResolveApproval / ResolveByChannel 喂入結果喚醒；
 // 超過 Timeout 無人響應則自動拒絕，避免 goroutine 永久洩漏。
 type ApprovalResult struct {
@@ -79,7 +79,7 @@ func (m *ApprovalManager) remove(taskID string) {
 	m.mu.Unlock()
 }
 
-// ResolveApproval 按 taskID 精確喚醒一個等待中的審批。返回是否命中。
+// ResolveApproval 按 taskID 精確喚醒一個等待中的審批。回傳是否命中。
 func (m *ApprovalManager) ResolveApproval(taskID string, allowed bool, reason string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -93,7 +93,7 @@ func (m *ApprovalManager) ResolveApproval(taskID string, allowed bool, reason st
 }
 
 // ResolveByChannel 喚醒某頻道下所有等待中的審批（弱點修補①：裸 approve/reject 無需手打長 taskID）。
-// 返回處理的數量。
+// 回傳處理的數量。
 func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reason string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -114,14 +114,14 @@ func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reaso
 var bashDangerPatterns = []string{
 	`rm\s+-\S*[rf]`,            // rm 帶 r/f 旗標的任意組合：-rf/-fr/-r/-f/-Rf…（原 rm\s+-r 漏掉 -fr）
 	`rm\s+--(recursive|force)`, // 長旗標形式
-	`find\s+.*-delete`,         // find … -delete 遞歸刪除
+	`find\s+.*-delete`,         // find … -delete 遞迴刪除
 	`sudo\s+`,                  // 提權
 	`drop\s+`,                  // SQL DROP
 	`truncate\s+table`,         // SQL TRUNCATE
-	`>.*\.go`,                  // 重定向覆蓋 .go 文件（防 LLM 絕望時清空源碼）
+	`>.*\.go`,                  // 重定向覆蓋 .go 檔案（防 LLM 絕望時清空源碼）
 	`nginx\s+-s`,               // 重啟/停止 nginx（會中斷線上服務）
 	`systemctl\s+`,             // 系統服務管理（start/stop/restart）
-	`kill\s+`,                  // 殺進程
+	`kill\s+`,                  // 殺行程
 	`printenv`,                 // 傾印環境變數（含金鑰）
 }
 
@@ -136,8 +136,8 @@ var mcpDangerVerbs = []string{
 	"exec", "deploy", "install", "write", "upload",
 }
 
-// IsDangerousCommand 判斷工具調用是否命中高危黑名單，命中則觸發人工審批。
-//   - bash：命中危險指令模式（遞歸刪除/提權/重啟服務/殺進程/覆蓋源碼…）。
+// IsDangerousCommand 判斷工具呼叫是否命中高危黑名單，命中則觸發人工審批。
+//   - bash：命中危險指令模式（遞迴刪除/提權/重啟服務/殺行程/覆蓋源碼…）。
 //   - write_file / edit_file：寫入路徑試圖逃出工作區（絕對路徑 / .. 穿越）或觸及敏感目標
 //     （.env 機密、.git/.ssh/.aws 憑證、.claw 自身配置）。正常的工作區內源碼寫入不攔，保留 UX。
 //   - mcp_call_tool：遠端 MCP 工具語意未知，用啟發式——工具名像破壞性、或參數命中危險指令/
@@ -159,7 +159,7 @@ func IsDangerousCommand(toolName string, args string) bool {
 			}
 		}
 	case "mcp_call_tool":
-		// gateway 以 {"name":<遠端工具>,"arguments":{...}} 調用遠端 MCP 工具。解析不出 → 保守審批。
+		// gateway 以 {"name":<遠端工具>,"arguments":{...}} 呼叫遠端 MCP 工具。解析不出 → 保守審批。
 		var a struct {
 			Name      string          `json:"name"`
 			Arguments json.RawMessage `json:"arguments"`
@@ -199,7 +199,7 @@ func IsDangerousCommand(toolName string, args string) bool {
 		if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 			return true
 		}
-		// 敏感目標：機密文件與憑證/版控/自身配置目錄
+		// 敏感目標：機密檔案與憑證/版控/自身配置目錄
 		if base := filepath.Base(cleaned); base == ".env" || strings.HasPrefix(base, ".env.") {
 			return true
 		}

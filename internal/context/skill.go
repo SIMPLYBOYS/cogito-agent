@@ -46,7 +46,7 @@ func (s *SkillLoader) loadAll() []Skill {
 // List 回全部已載入的技能（含正文，供面板檢視）。
 func (s *SkillLoader) List() []Skill { return s.loadAll() }
 
-// LoadIndex 只把技能的【元數據】（名稱 + 觸發描述）放進 System Prompt（漸進式暴露）；
+// LoadIndex 只把技能的【元資料】（名稱 + 觸發描述）放進 System Prompt（漸進式暴露）；
 // 正文不在此載入，避免技能多時開局就吃掉大量 token。模型需要時用 read_skill 工具按需載入。
 func (s *SkillLoader) LoadIndex() string {
 	skills := s.loadAll()
@@ -57,14 +57,14 @@ func (s *SkillLoader) LoadIndex() string {
 	b.WriteString("\n### 可用專業技能索引 (Agent Skills)\n")
 	b.WriteString("以下是你擁有的技能【索引】（僅名稱與適用場景）。當任務符合某技能的描述時，依其正文指令執行。載入正文有兩種方式：\n")
 	b.WriteString("1. **`read_skill`**：把技能正文載入【你自己的 context】，適合你要親自一步步操作的情境。\n")
-	b.WriteString("2. **`spawn_subagent` 的 `skill` 參數**：把技能正文只載入【子智能體的隔離 context】，由它執行完只回傳結論——適合長篇操作指南或你想保持主 context 精簡時。\n\n")
+	b.WriteString("2. **`spawn_subagent` 的 `skill` 參數**：把技能正文只載入【子 agent的隔離 context】，由它執行完只回傳結論——適合長篇操作指南或你想保持主 context 精簡時。\n\n")
 	for _, sk := range skills {
 		b.WriteString(fmt.Sprintf("- **%s**：%s\n", sk.Name, sk.Description))
 	}
 	return b.String()
 }
 
-// ReadSkill 返回指定技能的完整正文（供 read_skill 工具按需載入）。
+// ReadSkill 回傳指定技能的完整正文（供 read_skill 工具按需載入）。
 func (s *SkillLoader) ReadSkill(name string) (string, error) {
 	for _, sk := range s.loadAll() {
 		if sk.Name == name {

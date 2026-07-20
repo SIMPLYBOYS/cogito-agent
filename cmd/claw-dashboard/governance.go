@@ -14,7 +14,7 @@ import (
 )
 
 // governanceData 是 /governance 頁的唯讀資料：提案佇列（on-disk）+ 授權名單（env）。
-// 待審批（pending approvals）是 bot 進程內的 in-memory 狀態，獨立的 dashboard 進程看不到——誠實標示，
+// 待審批（pending approvals）是 bot 行程內的 in-memory 狀態，獨立的 dashboard 行程看不到——誠實標示，
 // 不假裝（要看得到需先把審批狀態落地磁碟，屬 bot 端改動、延後）。
 type governanceData struct {
 	Workspace      string
@@ -269,6 +269,6 @@ var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct":
 </dl>
 
 <h2>待審批</h2>
-<p class="muted">⚠️ 待審批的高危操作是 bot 進程內的即時狀態（in-memory），獨立的 dashboard 進程看不到。
+<p class="muted">⚠️ 待審批的高危操作是 bot 行程內的即時狀態（in-memory），獨立的 dashboard 行程看不到。
 要在面板看到需先把審批狀態落地磁碟（屬 bot 端改動，尚未做）。目前請在 chat 回覆 <code>approve</code>/<code>reject</code>。</p>
 `))

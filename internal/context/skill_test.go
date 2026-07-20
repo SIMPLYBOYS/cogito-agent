@@ -19,7 +19,7 @@ func writeSkill(t *testing.T, base, name, desc, body string) {
 	}
 }
 
-// 漸進式暴露：LoadIndex 只給元數據（名稱+描述），不含正文；正文由 ReadSkill 按需取。
+// 漸進式暴露：LoadIndex 只給元資料（名稱+描述），不含正文；正文由 ReadSkill 按需取。
 func TestSkillLoader_IndexAndRead(t *testing.T) {
 	base := t.TempDir()
 	writeSkill(t, base, "git-workflow", "提交與 PR 流程", "BODY-GIT-步驟一二三")

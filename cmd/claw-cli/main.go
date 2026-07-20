@@ -1,6 +1,6 @@
 // cmd/claw-cli 是升級後的生產級命令行入口：把前面累積的全部能力組裝成一個通用 CLI。
 // 事件經 TerminalReporter 實時打到 stdout；provider 外掛 CostTracker 自動記賬；trace 經 OTel
-// 產生（設 OTEL_EXPORTER_OTLP_ENDPOINT 才上報，否則 no-op）；結束打印花費 + token 報表。
+// 產生（設 OTEL_EXPORTER_OTLP_ENDPOINT 才上報，否則 no-op）；結束印出花費 + token 報表。
 //
 // 用法：
 //
@@ -32,14 +32,14 @@ import (
 )
 
 func main() {
-	promptPtr := flag.String("prompt", "", "要交給 Agent 執行的任務描述（留空則用內置默認任務）")
-	// 默認 ./workspace 而非書本的 "."：保持工作區沙箱、避免汙染本倉庫。需要時可顯式指定任意目錄。
+	promptPtr := flag.String("prompt", "", "要交給 Agent 執行的任務描述（留空則用內置預設任務）")
+	// 預設 ./workspace 而非書本的 "."：保持工作區沙箱、避免汙染本倉庫。需要時可顯式指定任意目錄。
 	dirPtr := flag.String("dir", "./workspace", "Agent 工作區目錄")
-	sessionPtr := flag.String("session", "cli-session", "會話 ID，支持斷點續傳")
+	sessionPtr := flag.String("session", "cli-session", "會話 ID，支援斷點續傳")
 	planPtr := flag.Bool("plan", false, "開啟 Plan Mode：狀態外部化到 PLAN.md / TODO.md")
-	verifyPtr := flag.String("verify", "", "goal 循環：驗證 bash 指令（退出碼 0 = 目標達成）。設了即跑到通過或用盡次數")
-	judgePtr := flag.String("verify-judge", "", "goal 循環：用 LLM 依此【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）。與 -verify 二擇一")
-	attemptsPtr := flag.Int("max-attempts", 5, "goal 循環最大嘗試次數")
+	verifyPtr := flag.String("verify", "", "goal 迴圈：驗證 bash 指令（退出碼 0 = 目標達成）。設了即跑到通過或用盡次數")
+	judgePtr := flag.String("verify-judge", "", "goal 迴圈：用 LLM 依此【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）。與 -verify 二擇一")
+	attemptsPtr := flag.Int("max-attempts", 5, "goal 迴圈最大嘗試次數")
 	flag.Parse()
 
 	cmdutil.PrintBanner() // 啟動 logo（非終端自動不印）
@@ -179,10 +179,10 @@ func main() {
 		}
 	}
 
-	flush() // 顯式 flush（log.Fatal 走 os.Exit 會略過 defer；defer 仍涵蓋正常返回，once 去重）
+	flush() // 顯式 flush（log.Fatal 走 os.Exit 會略過 defer；defer 仍涵蓋正常回傳，once 去重）
 
 	if runErr != nil {
-		log.Fatalf("\n💥 引擎運行崩潰: %v", runErr)
+		log.Fatalf("\n💥 引擎執行崩潰: %v", runErr)
 	}
 
 	fmt.Println("\n==================================================")
@@ -191,7 +191,7 @@ func main() {
 	fmt.Println("==================================================")
 }
 
-// runGoalLoop 是 /goal 式的循環：跑 agent → 驗收目標是否達成 → 沒達成就把評語當反饋追加進對話、
+// runGoalLoop 是 /goal 式的迴圈：跑 agent → 驗收目標是否達成 → 沒達成就把評語當反饋追加進對話、
 // 重試，直到通過或用盡次數。驗收兩種模式（judgeCriteria 非空優先）：
 //   - bash：跑 verifyCmd，退出碼 0 = 達成（適合可程式驗證的任務）。
 //   - LLM judge：用 judgeCriteria 讓模型判定產出是否達標（適合寫文件/設計等 bash 難驗的任務）。

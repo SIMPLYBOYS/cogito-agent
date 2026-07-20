@@ -21,10 +21,10 @@ import (
 type TestCase struct {
 	ID             string // 用例唯一標識
 	Name           string // 用例名稱
-	SetupScript    string // 【可選】Agent 運行前執行的 bash（準備靶機文件）
+	SetupScript    string // 【可選】Agent 執行前執行的 bash（準備靶機檔案）
 	TaskPrompt     string // 發送給 Agent 的任務指令
-	ValidateScript string // 【核心】Agent 運行後執行的 bash 校驗腳本，exit 0 視為成功
-	MaxTurns       int    // 允許的最大輪數；>0 時覆蓋引擎默認回合上限（<=0 用引擎默認）
+	ValidateScript string // 【核心】Agent 執行後執行的 bash 校驗腳本，exit 0 視為成功
+	MaxTurns       int    // 允許的最大輪數；>0 時覆蓋引擎預設回合上限（<=0 用引擎預設）
 }
 
 // TestResult 存放單次跑分結果。除了「結果/總成本/總耗時」，還收集兩個【過程】指標來區分
@@ -92,7 +92,7 @@ func NewBenchmarkRunner(model string) *BenchmarkRunner {
 	return &BenchmarkRunner{modelName: model, MaxAttempts: 1}
 }
 
-// RunSuite 順序執行一組評測集，打印跑分報告，並回傳機器可讀的 SuiteReport（供 CI/儀表板）。
+// RunSuite 順序執行一組評測集，印出跑分報告，並回傳機器可讀的 SuiteReport（供 CI/儀表板）。
 func (b *BenchmarkRunner) RunSuite(ctx context.Context, testcases []TestCase) *SuiteReport {
 	log.Println("==================================================")
 	log.Printf("🚀 啟動自動化 Harness Benchmark 評估... | 模型: %s\n", b.modelName)

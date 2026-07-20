@@ -5,7 +5,7 @@
 //	-review-edges    印出待審的提案邊
 //	-apply-edges     提案邊過 gate（信心/幻覺/去重/封頂）後併入生效的 edges.jsonl
 //
-// 之後 agent 的 recall 子圖檢索即可跨文件、沿 typed 關係做多跳推理。
+// 之後 agent 的 recall 子圖檢索即可跨檔案、沿 typed 關係做多跳推理。
 package main
 
 import (
@@ -119,7 +119,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("ingest 失敗: %v", err)
 		}
-		log.Printf("✅ ingest 完成：%d 個節點、%d 條新邊 → %s/.claw/（用 recall 即可跨文件多跳檢索）", nodes, edges, *root)
+		log.Printf("✅ ingest 完成：%d 個節點、%d 條新邊 → %s/.claw/（用 recall 即可跨檔案多跳檢索）", nodes, edges, *root)
 
 	default:
 		log.Fatal("請指定 -src（結構 ingest）/ -llm / -review-edges / -apply-edges 其一")

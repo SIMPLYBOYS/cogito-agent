@@ -56,7 +56,7 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 
 	resp, err := m.provider.Generate(ctx, msgs, nil)
 	if err != nil {
-		return nil, fmt.Errorf("記憶反思 LLM 調用失敗: %w", err)
+		return nil, fmt.Errorf("記憶反思 LLM 呼叫失敗: %w", err)
 	}
 
 	var out struct {
@@ -84,7 +84,7 @@ func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt strin
 	}
 	resp, err := m.provider.Generate(ctx, msgs, nil)
 	if err != nil {
-		return nil, fmt.Errorf("失敗反思 LLM 調用失敗: %w", err)
+		return nil, fmt.Errorf("失敗反思 LLM 呼叫失敗: %w", err)
 	}
 	var out struct {
 		Lesson string `json:"lesson"`

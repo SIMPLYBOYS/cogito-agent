@@ -103,7 +103,7 @@ func (m multiReporter) OnMessage(ctx context.Context, c string) {
 }
 
 // chatStream 是 SSE 端點：尾隨 hub、把當前 run 的事件逐筆推給瀏覽器；run 結束送 done 收線。
-// 用伺服端 150ms tick 輪詢共享緩衝（非阻塞 channel），簡單且無洩漏：run 結束或客戶端斷線即返回。
+// 用伺服端 150ms tick 輪詢共享緩衝（非阻塞 channel），簡單且無洩漏：run 結束或客戶端斷線即回傳。
 func (s *server) chatStream(w http.ResponseWriter, r *http.Request) {
 	if s.chat == nil {
 		http.NotFound(w, r)

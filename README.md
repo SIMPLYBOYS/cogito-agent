@@ -332,7 +332,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `-session` | `cli-session` | 會話 ID，配 `COGITO_SESSION_DIR` 可斷點續傳 |
    | `-plan` | `false` | 開 Plan Mode |
    | `-verify` | — | goal 迴圈：驗證 bash 指令（退出碼 0 = 達成），設了就跑到通過或用盡 |
-   | `-verify-judge` | — | goal 迴圈：用 LLM 依【自然語言標準】驗收（給寫檔案/設計等 bash 難驗的任務）；與 `-verify` 二擇一 |
+   | `-verify-judge` | — | goal 迴圈：用 LLM 依【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）；與 `-verify` 二擇一 |
    | `-max-attempts` | `5` | goal 迴圈最大嘗試次數 |
 
 機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度即時回覆到對應會話。

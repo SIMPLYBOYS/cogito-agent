@@ -1,4 +1,4 @@
-// Package policy 是工具調用的權限模型：Deny > Ask > Allow。
+// Package policy 是工具呼叫的權限模型：Deny > Ask > Allow。
 //
 // 【為何需要 DENY 這一層】原本只有兩種結果：命中危險黑名單→找人審批（ASK），否則放行（ALLOW）。
 // 這在「有人在現場」時夠用，但排程任務是【無人值守】跑的——沒有人可以問，ASK 就退化成「阻塞到
@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-// Action 是對一次工具調用的裁決。
+// Action 是對一次工具呼叫的裁決。
 type Action string
 
 const (
@@ -113,7 +113,7 @@ func Load(path string) (*Policy, error) {
 	return p, nil
 }
 
-// Decide 對一次工具調用裁決。無任何規則命中時回 ("", "")，代表「政策沒意見」，由呼叫端走內建預設。
+// Decide 對一次工具呼叫裁決。無任何規則命中時回 ("", "")，代表「政策沒意見」，由呼叫端走內建預設。
 // 參數比對前一律 lowercase，故政策檔的正則寫小寫即可涵蓋大小寫變體。
 func (p *Policy) Decide(tool, args string) (Action, string) {
 	if p == nil {

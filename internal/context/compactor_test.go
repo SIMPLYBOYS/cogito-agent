@@ -35,7 +35,7 @@ func TestCompactor_AdaptiveTriggerByWindow(t *testing.T) {
 	large := NewCompactor(1_000_000, 0.75, 2) // 窗口 1M → 水位遠高於內容 → 不壓縮
 	out2 := large.Compact(msgs)
 	if len(out2) != len(msgs) || large.estimateLength(out2) != large.estimateLength(msgs) {
-		t.Error("大窗口不應觸發壓縮，內容應原樣返回")
+		t.Error("大窗口不應觸發壓縮，內容應原樣回傳")
 	}
 }
 

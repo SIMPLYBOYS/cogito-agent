@@ -37,7 +37,7 @@ plan on
 3. 頻道打：`繼續`
 
 **預期**：agent **不重做**已打勾的步驟，直接從第一個 `- [ ]` 續。原理：
-- `PLAN.md`/`TODO.md` 在 workspace 硬碟上（不隨進程消失）；
+- `PLAN.md`/`TODO.md` 在 workspace 硬碟上（不隨行程消失）；
 - 框架每輪把 **TODO.md 的下一步**當權威進度帳本、**PLAN.md 的目標**當目標錨，注入 system 訊息
   （[internal/context/plan.go](../internal/context/plan.go)、[internal/engine/loop.go](../internal/engine/loop.go)）——續跑點由框架確定性指定，而非模型重讀猜測。
 

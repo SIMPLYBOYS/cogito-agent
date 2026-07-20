@@ -28,7 +28,7 @@ func setupMemory(t *testing.T) string {
 	return root
 }
 
-// LoadIndex 只放元數據（名稱+描述+標籤），不放正文——正文留給 recall 按需取。
+// LoadIndex 只放元資料（名稱+描述+標籤），不放正文——正文留給 recall 按需取。
 func TestMemoryLoader_IndexHasMetaNotBody(t *testing.T) {
 	idx := NewMemoryLoader(setupMemory(t)).LoadIndex()
 	if !strings.Contains(idx, "用-pnpm") || !strings.Contains(idx, "pnpm 而非 npm") {

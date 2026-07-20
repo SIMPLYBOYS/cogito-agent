@@ -1,9 +1,9 @@
 // cmd/claw-demo-mcp 是 MCP 接入的驗收 demo：連接 .mcp.json 裡的外部 MCP 伺服器，列出其工具，
-// 並可用 -call 直接調用一個工具（經 Registry，與引擎執行同一路徑）——純 MCP，不經 LLM/Slack。
+// 並可用 -call 直接呼叫一個工具（經 Registry，與引擎執行同一路徑）——純 MCP，不經 LLM/Slack。
 //
 //	export COGITO_MCP_CONFIG=./.mcp.json
 //	go run ./cmd/claw-demo-mcp                                   # 連接並列出所有工具
-//	go run ./cmd/claw-demo-mcp -call everything__echo -args '{"message":"hi"}'   # 直接調用驗證 tools/call
+//	go run ./cmd/claw-demo-mcp -call everything__echo -args '{"message":"hi"}'   # 直接呼叫驗證 tools/call
 package main
 
 import (
@@ -27,9 +27,9 @@ func main() {
 	defer cmdutil.Bootstrap("cogito-agent-demo-mcp")()
 
 	cfgPath := flag.String("config", os.Getenv("COGITO_MCP_CONFIG"), ".mcp.json 路徑")
-	callName := flag.String("call", "", "要調用的工具（exposed 名，如 filesystem__list_directory）")
-	callArgs := flag.String("args", "{}", "調用參數（JSON）")
-	prompt := flag.String("prompt", "", "給 agent 的任務（設了則由 Claude 經 ReAct 迴圈自行調用 MCP 工具，需 ANTHROPIC_API_KEY）")
+	callName := flag.String("call", "", "要呼叫的工具（exposed 名，如 filesystem__list_directory）")
+	callArgs := flag.String("args", "{}", "呼叫參數（JSON）")
+	prompt := flag.String("prompt", "", "給 agent 的任務（設了則由 Claude 經 ReAct 迴圈自行呼叫 MCP 工具，需 ANTHROPIC_API_KEY）")
 	flag.Parse()
 
 	if *cfgPath == "" {
@@ -76,7 +76,7 @@ func main() {
 		registry.Register(gt)
 	}
 
-	log.Printf("\n===== MCP 工具目錄（共 %d 個，經 mcp_call_tool 調用）=====", gw.Count())
+	log.Printf("\n===== MCP 工具目錄（共 %d 個，經 mcp_call_tool 呼叫）=====", gw.Count())
 	for _, name := range gw.Names() {
 		log.Printf("  • %s", name)
 	}
@@ -91,16 +91,16 @@ func main() {
 		eng := engine.NewAgentEngine(llm, registry, false, false)
 		sess := ctxpkg.NewSession("mcp-demo", workDir)
 		sess.Append(schema.Message{Role: schema.RoleUser, Content: *prompt})
-		log.Printf("\n===== L2：agent 執行任務（自行經 gateway 調用 MCP 工具）=====\n>>> %s", *prompt)
+		log.Printf("\n===== L2：agent 執行任務（自行經 gateway 呼叫 MCP 工具）=====\n>>> %s", *prompt)
 		if err := eng.Run(ctx, sess, engine.NewTerminalReporter()); err != nil {
-			log.Fatalf("agent 運行失敗: %v", err)
+			log.Fatalf("agent 執行失敗: %v", err)
 		}
 		return
 	}
 
-	// 模式 B：直接調用一個工具（經 gateway 的 mcp_call_tool，不經 LLM）。
+	// 模式 B：直接呼叫一個工具（經 gateway 的 mcp_call_tool，不經 LLM）。
 	if *callName != "" {
-		log.Printf("\n===== 經 gateway 調用 %s args=%s =====", *callName, *callArgs)
+		log.Printf("\n===== 經 gateway 呼叫 %s args=%s =====", *callName, *callArgs)
 		wrapped := fmt.Sprintf(`{"name":%q,"arguments":%s}`, *callName, *callArgs)
 		res := registry.Execute(ctx, schema.ToolCall{
 			ID:        "demo-1",
@@ -116,5 +116,5 @@ func main() {
 	}
 
 	// 模式 A：僅列出目錄（預設）。
-	log.Println("\n（-call <工具名> -args '<JSON>' 經 gateway 直接調用；-prompt '<任務>' 讓 Claude 自行調用驗全鏈路）")
+	log.Println("\n（-call <工具名> -args '<JSON>' 經 gateway 直接呼叫；-prompt '<任務>' 讓 Claude 自行呼叫驗全鏈路）")
 }

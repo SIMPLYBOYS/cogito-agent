@@ -33,7 +33,7 @@ type Run struct {
 	Meta        Meta
 }
 
-// Turn 是主 agent 的一步：thinking + 若干 action（工具調用）；或最終回答；或一條系統提醒。
+// Turn 是主 agent 的一步：thinking + 若干 action（工具呼叫）；或最終回答；或一條系統提醒。
 type Turn struct {
 	Index       int // 只有 action/answer turn 有編號（從 1 起）；Note turn 為 0
 	Thinking    string
@@ -43,7 +43,7 @@ type Turn struct {
 	Usage       *schema.Usage
 }
 
-// Action 是一次工具調用。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）；
+// Action 是一次工具呼叫。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）；
 // SubTurns 為該子 agent 的【內部】執行（M2：從 subagents/<CallID>.json 掛回，可展開）。
 type Action struct {
 	Tool        string

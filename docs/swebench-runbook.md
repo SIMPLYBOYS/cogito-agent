@@ -2,7 +2,7 @@
 
 兩段式：**生成（cogito）→ 官方評測（Docker）**。生成的 patch 交給官方 harness，在官方映像內套用+跑測試，得出可引用的 `resolved%`（= pass@1）。
 
-> 機器需求：**x86_64**（Intel/AMD）。官方映像是 x86_64，Apple Silicon 要 emulation、不建議。需 Docker daemon 運行；磁碟每實例 ~1–2GB（子集 10–20 題 ≈ 20–40GB）。
+> 機器需求：**x86_64**（Intel/AMD）。官方映像是 x86_64，Apple Silicon 要 emulation、不建議。需 Docker daemon 執行；磁碟每實例 ~1–2GB（子集 10–20 題 ≈ 20–40GB）。
 
 > **一鍵版**：`scripts/run_swebench_lite.sh` 把下面 0→3 串起來（含前置檢查、dry-run、解析 pass@1、選配 prune）。
 > 例：`N=10 MODEL=claude-haiku-4-5 scripts/run_swebench_lite.sh`。想手動逐步跑就照下面各段。

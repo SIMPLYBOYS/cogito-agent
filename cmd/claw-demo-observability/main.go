@@ -1,6 +1,6 @@
 // cmd/claw-demo-observability 是可觀測性/成本追蹤演示：用 decorator 模式把
-// CostTracker 套在真實 LLMProvider 外面，引擎毫不知情地照常調用，而每次調用的 Token 與
-// 費用被透明地計量、累加進 Session，跑完打印一張"財務報表"。
+// CostTracker 套在真實 LLMProvider 外面，引擎毫不知情地照常呼叫，而每次呼叫的 Token 與
+// 費用被透明地計量、累加進 Session，跑完印出一張"財務報表"。
 package main
 
 import (
@@ -20,7 +20,7 @@ import (
 func main() {
 	_ = godotenv.Load()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
+		log.Fatal("請先在 .env 或環境變數中設置 ANTHROPIC_API_KEY")
 	}
 
 	workDir := "/tmp/claw_observability_demo"
@@ -35,7 +35,7 @@ func main() {
 
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate("test_observability_001", workDir)
 
-	// 2. 核心拼裝：用 CostTracker 把真實 provider 包裹起來（它也實現 LLMProvider 接口）
+	// 2. 核心拼裝：用 CostTracker 把真實 provider 包裹起來（它也實現 LLMProvider 介面）
 	trackedProvider := observability.NewCostTracker(realProvider, modelName, sess)
 
 	registry := tools.NewRegistry()
@@ -51,7 +51,7 @@ func main() {
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	if err := eng.Run(context.Background(), sess, reporter); err != nil {
-		log.Fatalf("引擎運行崩潰: %v", err)
+		log.Fatalf("引擎執行崩潰: %v", err)
 	}
 
 	log.Printf("\n================ 財務報表 ================\n")

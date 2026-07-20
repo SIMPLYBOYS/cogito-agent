@@ -34,7 +34,7 @@ func (t *ConsolidateTool) Name() string { return "consolidate" }
 func (t *ConsolidateTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "把目前這段工作主動沉澱成長期資產：反思軌跡，萃取可複用技能、耐久慣例/教訓、記憶間的關係（皆為提案，須人工 review/gate 才生效）。當你剛完成一個有可複用價值的子任務、或學到值得記住的慣例時調用——平時 harness 也會在任務結束自動做，這個工具讓你在當下覺得有價值時提前沉澱。",
+		Description: "把目前這段工作主動沉澱成長期資產：反思軌跡，萃取可複用技能、耐久慣例/教訓、記憶間的關係（皆為提案，須人工 review/gate 才生效）。當你剛完成一個有可複用價值的子任務、或學到值得記住的慣例時呼叫——平時 harness 也會在任務結束自動做，這個工具讓你在當下覺得有價值時提前沉澱。",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

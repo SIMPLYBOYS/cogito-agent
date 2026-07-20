@@ -11,7 +11,7 @@ import (
 )
 
 // RecallTool 是長期記憶的按需檢索端（對齊 read_skill）：System Prompt 只放記憶索引（名稱+描述），
-// 模型判定當前任務與某條記憶相關時調用本工具。回傳的是「連通子圖」（種子節點 + k 跳鄰域 + 它們之間
+// 模型判定當前任務與某條記憶相關時呼叫本工具。回傳的是「連通子圖」（種子節點 + k 跳鄰域 + 它們之間
 // 的明確關係），讓模型能做多跳關係推理，而非孤立片段。
 type RecallTool struct {
 	loader *ctxpkg.MemoryLoader
@@ -27,7 +27,7 @@ func (t *RecallTool) Name() string { return "recall" }
 func (t *RecallTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "依關鍵字檢索你的長期記憶，回傳相關的『連通子圖』——命中的記憶 + 與它直接相關（透過 [[連結]]）的鄰近記憶 + 它們之間的關係。當任務與 System Prompt『長期記憶索引』某條相關，或你需要過往沉澱的慣例/教訓/事實、或想看某主題如何牽連其他主題時調用（支援中英關鍵字）。",
+		Description: "依關鍵字檢索你的長期記憶，回傳相關的『連通子圖』——命中的記憶 + 與它直接相關（透過 [[連結]]）的鄰近記憶 + 它們之間的關係。當任務與 System Prompt『長期記憶索引』某條相關，或你需要過往沉澱的慣例/教訓/事實、或想看某主題如何牽連其他主題時呼叫（支援中英關鍵字）。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

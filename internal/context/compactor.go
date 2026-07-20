@@ -19,7 +19,7 @@ const (
 // 與滑動窗口的分工：窗口（GetWorkingMemory）防"歷史太長"（消息條數），Compactor 防"總量
 // 逼近模型上下文上限"。
 //
-// 自適應壓縮：觸發水位不再是寫死的字符數，而是「模型真實上下文窗口（token）× 水位率」。
+// 自適應壓縮：觸發水位不再是寫死的字元數，而是「模型真實上下文窗口（token）× 水位率」。
 // 由於當前 context 還沒送出、無法預知其精確 token，Compactor 以位元組估算，並用每次 API 回傳的
 // 真實 PromptTokens 自校準「位元組/Token 比」(Calibrate)，使估算隨真實 tokenizer 收斂——
 // 從而自動適配不同窗口的模型（Claude 200k / Gemini 1M / 本地 Llama 8k）。
@@ -68,7 +68,7 @@ func (c *Compactor) Calibrate(sentMsgs []schema.Message, promptTokens int) {
 	c.mu.Unlock()
 }
 
-// budgetTokens 是觸發壓縮的 token 水位（窗口 × 水位率）。窗口未知（<=0）時返回 0。
+// budgetTokens 是觸發壓縮的 token 水位（窗口 × 水位率）。窗口未知（<=0）時回傳 0。
 func (c *Compactor) budgetTokens() int {
 	if c.MaxContextTokens <= 0 {
 		return 0
@@ -122,7 +122,7 @@ func (c *Compactor) Compact(msgs []schema.Message) []schema.Message {
 			// tool_result 是最大威脅：早期的整段替換為佔位符，近期的頭尾保留
 			if !isInWorkingMemory {
 				if len(msg.Content) > 200 {
-					newMsg.Content = fmt.Sprintf("...[為了節省內存，早期的工具輸出已被系統強制清理。原始長度: %d 字節]...", len(msg.Content))
+					newMsg.Content = fmt.Sprintf("...[為了節省記憶體，早期的工具輸出已被系統強制清理。原始長度: %d 字節]...", len(msg.Content))
 				}
 			} else {
 				// rune 安全：按【字元】切頭尾，避免切到中文多位元組字元中間產生非法 UTF-8（送進 LLM）。

@@ -15,7 +15,7 @@ import (
 
 // maxResponseBytes 是單次 JSON 回應的讀取上限。正常 MCP 回應（含大型 tools/list）遠小於此；
 // 設上限是因為 httpClient 刻意不設 client 級 timeout（會殺掉合法的長 SSE 串流），故無限 body
-// 沒有別的東西擋得住——一個故障或惡意的 server 就能把整個 bot 進程 OOM 掉。
+// 沒有別的東西擋得住——一個故障或惡意的 server 就能把整個 bot 行程 OOM 掉。
 const maxResponseBytes = 32 << 20 // 32 MiB
 
 // httpTransport 走 MCP 的 Streamable HTTP 傳輸（spec 2025-03-26+）：每個 JSON-RPC 訊息是一個 POST，
@@ -195,7 +195,7 @@ func (h *httpTransport) close() error {
 }
 
 // readSSEResponse 從 SSE 串流讀到 id 相符的 JSON-RPC 回應。串流中可能先夾帶 server→client 的
-// 請求/通知（id 不符或無 id），略過;讀到相符回應即返回。
+// 請求/通知（id 不符或無 id），略過;讀到相符回應即回傳。
 func readSSEResponse(r io.Reader, wantID int) (rpcResponse, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)

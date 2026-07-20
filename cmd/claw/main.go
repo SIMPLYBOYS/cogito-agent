@@ -67,20 +67,20 @@ func main() {
 		log.Printf("[Session] 純記憶體模式（設 COGITO_SESSION_DIR 可跨重啟續傳）")
 	}
 
-	// 背景任務管理器：每會話一個（session 級作用域），統一收集供優雅關閉時 kill 掉所有殘留進程。
+	// 背景任務管理器：每會話一個（session 級作用域），統一收集供優雅關閉時 kill 掉所有殘留行程。
 	var taskMgrs []*tools.TaskManager
 	var taskMgrsMu sync.Mutex
 
-	// bot 先聲明後賦值：factory/中介層的閉包按引用捕獲 bot，工廠在服務啟動後才被調用，屆時已賦值。
+	// bot 先聲明後賦值：factory/中介層的閉包按引用捕獲 bot，工廠在服務啟動後才被呼叫，屆時已賦值。
 	var bot *slackbot.SlackBot
 
 	// engine factory —— 每個會話（頻道）現造引擎：工具 rooted 在【該會話自己的 WorkDir】
-	// （per-channel 磁碟隔離的關鍵——不再全局共用一個 registry），並掛上專屬 CostTracker 與
+	// （per-channel 磁碟隔離的關鍵——不再全域共用一個 registry），並掛上專屬 CostTracker 與
 	// 審批 middleware。EnableThinking=false（手動兩階段思考對 Claude 會退化成 <invoke> 文本）；
-	// Slack 對話式入口默認不開 Plan Mode。
-	// 高危操作審批 middleware（環繞式）：命中黑名單（如 bash rm -r / sudo / 覆蓋 .go）的工具調用
+	// Slack 對話式入口預設不開 Plan Mode。
+	// 高危操作審批 middleware（環繞式）：命中黑名單（如 bash rm -r / sudo / 覆蓋 .go）的工具呼叫
 	// 會被掛起，把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），等管理員回
-	// approve/reject 才放行（不調 next 即短路）。抽成函式以便主工具池與子智能體只讀池共用
+	// approve/reject 才放行（不調 next 即短路）。抽成函式以便主工具池與子 agent只讀池共用
 	//（子 agent 的 bash 同樣要過審批，不留後門）。
 	// 政策檔（.claw/policy.json，選填）：可宣告 deny/ask/allow 覆蓋內建判斷。載入失敗直接退出——
 	// 靜默忽略會讓人以為有保護、其實整份政策沒生效。
@@ -103,7 +103,7 @@ func main() {
 		})
 	}
 
-	// 守門 middleware（環繞式）：Deny > Ask > Allow。抽成變數以便主工具池與子智能體只讀池共用
+	// 守門 middleware（環繞式）：Deny > Ask > Allow。抽成變數以便主工具池與子 agent只讀池共用
 	//（子 agent 的 bash 同樣要過，不留後門）。
 	approval := policy.Guard(pol, chatbot.IsDangerousCommand, askHuman)
 
@@ -167,11 +167,11 @@ func main() {
 		// 工具 rooted 在 sess.WorkDir（各頻道子目錄），但配置/技能是全 bot 共用資產。
 		eng.AssetsDir = rootDir
 
-		// 子智能體工具池（超集）：read_file + bash 供探索；write_file + edit_file 供【實作型】具名
+		// 子 agent工具池（超集）：read_file + bash 供探索；write_file + edit_file 供【實作型】具名
 		// agent（須在 .claw/agents/<name>.md 的 tools 明確宣告才拿得到；預設探路者只取唯讀子集，見
 		// defaultSubagentTools）。無 spawn_subagent（杜絕遞迴）。同掛審批——子 agent 的危險 bash /
 		// 敏感寫入也要人工放行。抽成 factory 以支援 worktree 隔離（依 worktree 目錄重建同款工具）。
-		// 子智能體工具池（超集）：read/bash 供探索、write/edit 供實作型具名 agent；同掛 approval/timing
+		// 子 agent工具池（超集）：read/bash 供探索、write/edit 供實作型具名 agent；同掛 approval/timing
 		// 中介層（子 agent 的危險 bash / 敏感寫入也要人工放行、計時）。reporter 串進子 agent（進度以
 		// 「[Subagent] …」前綴回報回頻道）。WithWorktreeIsolation 在 WireSubagent 內：isolation:worktree
 		// 的 agent 在 git worktree 隔離跑、完事序列化 apply 回主工作區。skillsBaseDir=rootDir。
@@ -273,7 +273,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 多平台（opt-in）：設了 TELEGRAM_BOT_TOKEN 就同時開 Telegram 長輪詢，與 Slack 同進程、共用
+	// 多平台（opt-in）：設了 TELEGRAM_BOT_TOKEN 就同時開 Telegram 長輪詢，與 Slack 同行程、共用
 	// 同一 factory 與自我進化鉤子；會話/工作目錄【預設】靠 platform 前綴命名空間隔開（slack: vs
 	// telegram:），但設了 COGITO_USER_LINK 時，已連結使用者的 DM 會刻意跨平台共用同一份狀態。
 	if os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
@@ -289,7 +289,7 @@ func main() {
 	// 共用同一份 .claw/cron.json；跨行程檔案鎖保證同一輪只有一邊真的執行。沒有 job 就什麼都不做。
 	go cron.New(rootDir, &botCronRunner{factory: factory, workDir: rootDir}, "bot").Run(ctx.Done())
 
-	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外端口，零基建。
+	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外連接埠，零基建。
 	go bot.Start(ctx)
 	bot.ResumeInterrupted() // 跨重啟續跑：續上次被硬砍中斷的 Slack 任務（需 AUTO_RESUME + SESSION_DIR）
 
@@ -298,11 +298,11 @@ func main() {
 	stop()  // 取消 ctx → Slack websocket / Telegram 長輪詢各自收線
 	flush() // flush OTel span（內部自帶 timeout + once 去重）
 	for _, cl := range mcpClients {
-		_ = cl.Close() // 結束 MCP 伺服器子進程，避免殘留
+		_ = cl.Close() // 結束 MCP 伺服器子行程，避免殘留
 	}
 	taskMgrsMu.Lock()
 	for _, tm := range taskMgrs {
-		tm.KillAll() // 收掉所有背景任務，避免殘留孤兒進程
+		tm.KillAll() // 收掉所有背景任務，避免殘留孤兒行程
 	}
 	taskMgrsMu.Unlock()
 	if c, ok := executor.(interface{ Close() error }); ok {

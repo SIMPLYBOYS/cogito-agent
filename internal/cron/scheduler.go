@@ -93,7 +93,7 @@ func (s *Scheduler) Run(stop <-chan struct{}) {
 
 // Tick 掃一輪：到點且啟用的 job 逐一執行。
 //
-// 開頭先搶跨行程鎖：另一個行程（bot／dashboard）正在跑排程就直接返回，不重複執行。鎖持有整輪，
+// 開頭先搶跨行程鎖：另一個行程（bot／dashboard）正在跑排程就直接回傳，不重複執行。鎖持有整輪，
 // 因此對方在我們跑任務期間會跳過——這正是要的，任務已經有人在跑。
 func (s *Scheduler) Tick() {
 	unlock, ok := acquireLock(s.lockPath)
@@ -159,7 +159,7 @@ func (s *Scheduler) baseline(j Job, now time.Time) time.Time {
 // Fire 立刻執行一個 job（面板的「立即執行」用，不等排程）。
 func (s *Scheduler) Fire(j Job) { s.fire(j, s.now()) }
 
-// fire 執行一個 job 並回寫結果。忙碌時直接返回且【不動基準】，下一輪自然重試。
+// fire 執行一個 job 並回寫結果。忙碌時直接回傳且【不動基準】，下一輪自然重試。
 func (s *Scheduler) fire(j Job, now time.Time) {
 	if !s.tryMarkRunning(j.ID) {
 		return // 已有 job 在跑：不排隊，下輪再試

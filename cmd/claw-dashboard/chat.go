@@ -105,7 +105,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 }
 
 // start 非阻塞地跑一輪 operator agent：先【同步】Append user 訊息（讓它立刻顯示），再在背景 goroutine
-// 跑 engine.Run（可能數十秒），執行事件經 hub 即時串流。POST 因此立刻返回。忙碌（已有 run 進行中）時
+// 跑 engine.Run（可能數十秒），執行事件經 hub 即時串流。POST 因此立刻回傳。忙碌（已有 run 進行中）時
 // 回 false、不排隊。mu 於 goroutine 內 Unlock（Go 允許跨 goroutine 解鎖）。
 func (c *chatRunner) start(userMsg string) bool {
 	if !c.mu.TryLock() {
@@ -210,7 +210,7 @@ func (s *server) chatReset(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/chat", http.StatusSeeOther)
 }
 
-// chatView / bubble 是 chat 頁的精簡對話視圖：只呈現 user 提問 + agent 最終回覆（工具調用/子 agent 的
+// chatView / bubble 是 chat 頁的精簡對話視圖：只呈現 user 提問 + agent 最終回覆（工具呼叫/子 agent 的
 // 完整執行樹在 /runs/operator，不在此重造）。usedTools 標記該回合動過工具，提示去看執行樹。
 type chatView struct {
 	Msgs    []bubble
@@ -295,7 +295,7 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
 </style>
 <div class="chat">
   {{if .Running}}<noscript><meta http-equiv="refresh" content="3"></noscript>{{end}}
-  <p class="note">operator 就地驅動 agent（session <code>operator</code>，工作區同 bot／CLI）。完整執行樹（工具調用、子 agent）見 <a href="/runs/operator">/runs/operator</a>。</p>
+  <p class="note">operator 就地驅動 agent（session <code>operator</code>，工作區同 bot／CLI）。完整執行樹（工具呼叫、子 agent）見 <a href="/runs/operator">/runs/operator</a>。</p>
   {{if and .Msgs (not .Running)}}<form method="POST" action="/chat/reset" class="resetform"><button type="submit" class="reset">＋ 新對話（清空上下文）</button></form>{{end}}
   {{if .LastErr}}{{if not .Running}}<div class="banner">⚠️ 上次執行出錯：{{.LastErr}}</div>{{end}}{{end}}
   {{if .Msgs}}<div class="thread">

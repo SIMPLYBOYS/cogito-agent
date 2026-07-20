@@ -25,17 +25,17 @@ func (t *EditFileTool) Name() string {
 func (t *EditFileTool) Definition() schema.ToolDefinition {
 	return schema.ToolDefinition{
 		Name:        t.Name(),
-		Description: "對現有文件進行局部的字符串替換。這比重寫整個文件更安全、更快速。請提供足夠的 old_text 上下文以確保匹配的唯一性。",
+		Description: "對現有檔案進行局部的字元串替換。這比重寫整個檔案更安全、更快速。請提供足夠的 old_text 上下文以確保匹配的唯一性。",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
 				"path": map[string]interface{}{
 					"type":        "string",
-					"description": "要修改的文件路徑",
+					"description": "要修改的檔案路徑",
 				},
 				"old_text": map[string]interface{}{
 					"type":        "string",
-					"description": "文件中原有的文本。必須包含足夠的上下文，以確保在文件中的唯一性。",
+					"description": "檔案中原有的文本。必須包含足夠的上下文，以確保在檔案中的唯一性。",
 				},
 				"new_text": map[string]interface{}{
 					"type":        "string",
@@ -66,7 +66,7 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 
 	contentBytes, err := os.ReadFile(fullPath)
 	if err != nil {
-		return "", fmt.Errorf("讀取文件失敗，請確認路徑是否正確: %w", err)
+		return "", fmt.Errorf("讀取檔案失敗，請確認路徑是否正確: %w", err)
 	}
 	originalContent := string(contentBytes)
 
@@ -76,10 +76,10 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 
 	if err := os.WriteFile(fullPath, []byte(newContent), 0644); err != nil {
-		return "", fmt.Errorf("寫回文件失敗: %w", err)
+		return "", fmt.Errorf("寫回檔案失敗: %w", err)
 	}
 
-	return fmt.Sprintf("✅ 成功修改文件: %s", input.Path), nil
+	return fmt.Sprintf("✅ 成功修改檔案: %s", input.Path), nil
 }
 
 func fuzzyReplace(originalContent, oldText, newText string) (string, error) {
@@ -89,7 +89,7 @@ func fuzzyReplace(originalContent, oldText, newText string) (string, error) {
 		return strings.Replace(originalContent, oldText, newText, 1), nil
 	}
 	if count > 1 {
-		return "", fmt.Errorf("old_text 匹配到了 %d 處，請提供更多的上下文代碼以確保唯一性", count)
+		return "", fmt.Errorf("old_text 匹配到了 %d 處，請提供更多的上下文程式碼以確保唯一性", count)
 	}
 
 	// L2: 換行符歸一化
@@ -118,12 +118,12 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	contentLines := strings.Split(content, "\n")
 	oldLines := strings.Split(strings.TrimSpace(oldText), "\n")
 
-	// 注意：前綴「找不到該代碼片段」被 context.RecoveryManager 以 strings.Contains 匹配以注入
+	// 注意：前綴「找不到該程式碼片段」被 context.RecoveryManager 以 strings.Contains 匹配以注入
 	// 「先 read_file 重讀」的救援指南——改字串前先看 internal/context/recovery.go。
 	// 這裡是【還沒搜就放棄】的退化情形（old_text 比整個檔案還長），與 matchCount==0 不同：
 	// 只說「找不到」會誤導模型去微調縮排重試，故把實際事實（行數對比）講出來。
 	if len(contentLines) < len(oldLines) { // strings.Split 永不回空 slice，故不必檢查 len(oldLines)==0
-		return "", fmt.Errorf("找不到該代碼片段：old_text 共 %d 行，多於檔案的 %d 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
+		return "", fmt.Errorf("找不到該程式碼片段：old_text 共 %d 行，多於檔案的 %d 行，不可能匹配——你可能改錯了檔案，或 old_text 是憑記憶構造而非來自檔案實際內容",
 			len(oldLines), len(contentLines))
 	}
 
@@ -153,11 +153,11 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 
 	if matchCount == 0 {
 		// 走到這裡代表 L1~L4（精確 → 換行正規化 → TrimSpace → 逐行去縮排）全部沒中，所以【不是】
-		// 縮排或空白問題——把這件事說出來，才不會誘導模型微調空白盲目重試（非同構重試死循環的燃料）。
-		return "", fmt.Errorf("在文件中未找到 old_text：已嘗試精確比對、換行正規化、去縮排逐行比對，皆無匹配——調整縮排/空白再試沒有用，是內容本身與檔案現況不符")
+		// 縮排或空白問題——把這件事說出來，才不會誘導模型微調空白盲目重試（非同構重試無窮迴圈的燃料）。
+		return "", fmt.Errorf("在檔案中未找到 old_text：已嘗試精確比對、換行正規化、去縮排逐行比對，皆無匹配——調整縮排/空白再試沒有用，是內容本身與檔案現況不符")
 	}
 	if matchCount > 1 {
-		return "", fmt.Errorf("模糊匹配到了 %d 處代碼，請提供更多上下文以定位", matchCount)
+		return "", fmt.Errorf("模糊匹配到了 %d 處程式碼，請提供更多上下文以定位", matchCount)
 	}
 
 	// 提取匹配塊首行的「基礎縮進前綴」，把 newText 重新對齊到該縮進層級，避免深層巢狀塊
@@ -172,7 +172,7 @@ func lineByLineReplace(content, oldText, newText string) (string, error) {
 	return strings.Join(newContentLines, "\n"), nil
 }
 
-// leadingWhitespace 返回一行開頭的空白前綴（空格/Tab）。
+// leadingWhitespace 回傳一行開頭的空白前綴（空格/Tab）。
 func leadingWhitespace(line string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }

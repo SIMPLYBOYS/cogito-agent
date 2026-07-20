@@ -30,7 +30,7 @@ func main() {
 	swebench := flag.String("swebench", "", "SWE-bench 資料檔(JSONL/JSON)路徑；設了就改跑 SWE-bench 實例而非內建用例")
 	limit := flag.Int("limit", 0, "只取前 N 個 SWE-bench 實例（0=全部）")
 	sweEnvSetup := flag.String("swe-env-setup", "", "每個 SWE-bench 實例的環境安裝 bash（各 repo 不同；正式跑常用官方 Docker 映像，依賴已備時可留空）")
-	sweRepoPrefix := flag.String("swe-repo-prefix", "", "clone 來源前綴，覆蓋預設 https://github.com/（可指向本地鏡像快取或本地 repo 加速/離線）")
+	sweRepoPrefix := flag.String("swe-repo-prefix", "", "clone 來源前綴，覆蓋預設 https://github.com/（可指向本地映像快取或本地 repo 加速/離線）")
 	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
@@ -103,10 +103,10 @@ func main() {
 	}
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY 進行跑分測試")
+		log.Fatal("請先在 .env 或環境變數中設置 ANTHROPIC_API_KEY 進行跑分測試")
 	}
 
-	// 跑分是真實 API 調用、要花錢：默認選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
+	// 跑分是真實 API 呼叫、要花錢：預設選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
 	// 想測更強能力可換 -model claude-opus-4-8。
 	runner := eval.NewBenchmarkRunner(*model)
 	runner.MaxAttempts = *reflexion // >1 啟用 Reflexion 反思重試
@@ -153,7 +153,7 @@ func loadTestCases(swebenchPath, envSetup, repoPrefix, testRunner string, limit 
 	return cases, nil
 }
 
-// builtinTestCases 是不指定 -swebench 時的內建煙霧測試（驗工具/代碼生成的基本能力）。
+// builtinTestCases 是不指定 -swebench 時的內建煙霧測試（驗工具/程式碼生成的基本能力）。
 func builtinTestCases() []eval.TestCase {
 	return []eval.TestCase{
 		{
@@ -165,10 +165,10 @@ func builtinTestCases() []eval.TestCase {
 		},
 		{
 			ID:   "test_002_code_gen",
-			Name: "測試代碼閱讀與創建新文件的綜合能力",
-			// 用 printf 而非 echo：macOS 的 bash echo 默認不解釋 \n，會寫出字面量導致 math.go 損壞
+			Name: "測試程式碼閱讀與創建新檔案的綜合能力",
+			// 用 printf 而非 echo：macOS 的 bash echo 預設不解釋 \n，會寫出字面量導致 math.go 損壞
 			SetupScript:    `printf 'package math\n\nfunc Multiply(a, b int) int {\n\treturn a * b\n}\n' > math.go`,
-			TaskPrompt:     `當前目錄下有一個 math.go。請你仔細閱讀它，然後在同級目錄下，幫我寫一個規範的單元測試文件 math_test.go，用來測試 Multiply 函數。請務必包含正常的測試用例。`,
+			TaskPrompt:     `當前目錄下有一個 math.go。請你仔細閱讀它，然後在同級目錄下，幫我寫一個規範的單元測試檔案 math_test.go，用來測試 Multiply 函式。請務必包含正常的測試用例。`,
 			ValidateScript: `go mod init bench && go test -v ./...`,
 		},
 	}

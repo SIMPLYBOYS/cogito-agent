@@ -6,7 +6,7 @@ import (
 )
 
 // RecoveryManager 在工具執行失敗時，按工具名 + 錯誤特徵匹配，給原始報錯拼接一段
-// 可執行的"救援指南"，把冰冷的錯誤字符串升級為"下一步該怎麼做"的指示。純規則、無狀態。
+// 可執行的"救援指南"，把冰冷的錯誤字元串升級為"下一步該怎麼做"的指示。純規則、無狀態。
 //
 // 【架構邊界 —— 請勿無腦擴充】這是【有界的 first-aid】，不是恢復系統的全部，也【不該】持續長大：
 //   - 主模型本就讀得懂多數錯誤（error-as-observation 已回灌），rule 多為冗餘的輕推；
@@ -21,8 +21,8 @@ func NewRecoveryManager() *RecoveryManager {
 	return &RecoveryManager{}
 }
 
-// AnalyzeAndInject 接收原始報錯，匹配已知特徵模式，返回增強後的報錯信息。
-// 命中則在末尾追加 [系統救援指南]；未命中則原樣返回。
+// AnalyzeAndInject 接收原始報錯，匹配已知特徵模式，回傳增強後的報錯訊息。
+// 命中則在末尾追加 [系統救援指南]；未命中則原樣回傳。
 func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) string {
 	var hint string
 
@@ -34,20 +34,20 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 		// 匹配 fuzzyReplace 手寫的固定報錯。【字串耦合警告】這些 pattern 必須對得上
 		// internal/tools/edit_file.go 的實際錯誤字串；改任一邊都要跑 recovery_test.go
 		// （不能用 typed sentinel error：tools 已 import context，反向 import 會成環）。
-		if strings.Contains(rawError, "在文件中未找到 old_text") || strings.Contains(rawError, "找不到該代碼片段") {
+		if strings.Contains(rawError, "在檔案中未找到 old_text") || strings.Contains(rawError, "找不到該程式碼片段") {
 			// 不提「縮進」：fuzzyReplace 的 L3/L4 已用 TrimSpace 逐行比對吸收縮排差異，
 			// 能走到這裡就【不是】縮排問題——指向縮排只會誘導模型去微調縮排盲目重試。
-			hint = "你提供的 old_text 與文件當前內容不一致（可能檔案已變動，或 old_text 是憑記憶構造的）。請先使用 `read_file` 工具重新讀取該文件，獲取最新、準確的內容後，再重新發起編輯。"
+			hint = "你提供的 old_text 與檔案當前內容不一致（可能檔案已變動，或 old_text 是憑記憶構造的）。請先使用 `read_file` 工具重新讀取該檔案，獲取最新、準確的內容後，再重新發起編輯。"
 		} else if strings.Contains(rawError, "以確保唯一性") || strings.Contains(rawError, "以定位") {
-			hint = "你的 old_text 不夠具體，命中了多個相同代碼塊。請在 old_text 中增加上下相鄰的幾行代碼，以確保替換的唯一性。"
+			hint = "你的 old_text 不夠具體，命中了多個相同程式碼塊。請在 old_text 中增加上下相鄰的幾行程式碼，以確保替換的唯一性。"
 		}
 
 	case "read_file", "write_file":
 		// 匹配 Go os 包拋出的 POSIX 標準錯誤
 		if strings.Contains(lowerError, "no such file or directory") {
-			hint = "路徑似乎不正確。請不要憑空猜測，先使用 `bash` 執行 `ls -la` 或 `find . -name` 命令查找正確的目錄結構和文件名。"
+			hint = "路徑似乎不正確。請不要憑空猜測，先使用 `bash` 執行 `ls -la` 或 `find . -name` 命令查找正確的目錄結構和檔案名。"
 		} else if strings.Contains(lowerError, "permission denied") {
-			hint = "你沒有權限操作該文件。請檢查工作區限制，或者思考是否需要修改其他文件。"
+			hint = "你沒有權限操作該檔案。請檢查工作區限制，或者思考是否需要修改其他檔案。"
 		}
 
 	case "bash":
@@ -55,9 +55,9 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 			hint = "系統中未安裝該命令。請先思考：是否有替代命令？或者你需要先編寫腳本進行安裝？"
 		} else if strings.Contains(rawError, "超時") || strings.Contains(rawError, "DeadlineExceeded") {
 			// 匹配 bash 工具手寫的 30s context.WithTimeout 報錯
-			hint = "該命令執行被超時強殺。如果它是一個常駐服務（如 server 或 watch），請將其轉入後臺執行（例如使用 `nohup ... &`），不要阻塞主線程。"
+			hint = "該命令執行被超時強殺。如果它是一個常駐服務（如 server 或 watch），請將其轉入後臺執行（例如使用 `nohup ... &`），不要阻塞主執行緒。"
 		} else if strings.Contains(lowerError, "syntax error") {
-			hint = "Bash 語法錯誤。請檢查引號轉義或特殊字符，確保命令在終端中可直接運行。"
+			hint = "Bash 語法錯誤。請檢查引號轉義或特殊字元，確保命令在終端中可直接執行。"
 		} else if strings.Contains(lowerError, "imported and not used") || strings.Contains(lowerError, "declared and not used") {
 			hint = "Go 編譯錯誤：有未使用的 import 或變數。移除它（或必要時以 `_` 接收）後重新 build。"
 		} else if strings.Contains(lowerError, "undefined:") || strings.Contains(lowerError, "undeclared name") {
@@ -74,7 +74,7 @@ func (rm *RecoveryManager) AnalyzeAndInject(toolName string, rawError string) st
 		if strings.Contains(lowerError, "validation") || strings.Contains(lowerError, "unknown tool") ||
 			strings.Contains(lowerError, "not found") || strings.Contains(lowerError, "invalid") ||
 			strings.Contains(lowerError, "required") {
-			hint = "外部 MCP 工具調用失敗，多半是工具名或參數對不上。請用 `mcp_describe_tool` 確認該工具的【精確名稱與參數 schema】（對照 System Prompt 的工具目錄）；遠端工具名格式為 `<server>__<tool>`，arguments 必須符合其 schema。"
+			hint = "外部 MCP 工具呼叫失敗，多半是工具名或參數對不上。請用 `mcp_describe_tool` 確認該工具的【精確名稱與參數 schema】（對照 System Prompt 的工具目錄）；遠端工具名格式為 `<server>__<tool>`，arguments 必須符合其 schema。"
 		}
 	}
 

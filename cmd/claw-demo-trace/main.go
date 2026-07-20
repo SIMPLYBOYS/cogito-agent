@@ -1,4 +1,4 @@
-// cmd/claw-demo-trace 是鏈路追蹤演示：觸發一個"一輪內並行調用兩個不同工具"的任務，
+// cmd/claw-demo-trace 是鏈路追蹤演示：觸發一個"一輪內並行呼叫兩個不同工具"的任務，
 // 引擎產出一棵 OTel Span 樹（Agent.Run → Turn-1 → 並行的兩個 Tool.Execute）。
 // tracing 已改為 OTel SDK：設定 OTEL_EXPORTER_OTLP_ENDPOINT 後，span 會上報到 Jaeger/Langfuse
 // 等後端，可在瀏覽器看到並發工具時間重疊的甘特圖；未設定則為 no-op（不輸出檔案）。
@@ -22,7 +22,7 @@ func main() {
 	defer cmdutil.Bootstrap("cogito-agent-demo-trace")()
 
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變量中設置 ANTHROPIC_API_KEY")
+		log.Fatal("請先在 .env 或環境變數中設置 ANTHROPIC_API_KEY")
 	}
 
 	workDir := "/tmp/claw_trace_demo"
@@ -46,7 +46,7 @@ func main() {
 	為了加快執行速度，請你在一輪迴復中，【同時並行】完成以下兩件事：
 	1. 使用 bash 工具執行 'sleep 2 && echo "系統環境檢查完畢"'
 	2. 使用 write_file 工具，在當前目錄下創建一個 'trace_test.md'，內容寫上 "測試併發的寫入"。
-	請確保你是分別調用兩個不同的工具，不要試圖把它們合併成一個命令！
+	請確保你是分別呼叫兩個不同的工具，不要試圖把它們合併成一個命令！
 	`
 
 	log.Println("\n>>> 🚀 啟動帶 Tracing 鏈路追蹤的測試...")

@@ -36,10 +36,10 @@ func (c DockerConfig) withDefaults() DockerConfig {
 //   - 首次對某 workDir 執行時 docker run -d ... sleep infinity 拉起容器（只掛 workDir:/workspace →
 //     宿主機其餘檔案系統不可見，cd / 逃不出去）；--network none 斷網、--memory/--cpus/--pids-limit 限資源；
 //   - 之後同 workDir 的命令都走 docker exec，省去每命令啟動容器的延遲，且容器內安裝的套件 / 寫入的檔案 /
-//     背景進程在同 session 多次呼叫間【持久保留】。注意：每條命令是獨立的 docker exec ... bash -c（全新
-//     進程），故 shell 的 export 環境變數 / cd / 別名【不】跨呼叫保留——要持久得寫進檔案（如 ~/.bashrc）。
+//     背景行程在同 session 多次呼叫間【持久保留】。注意：每條命令是獨立的 docker exec ... bash -c（全新
+//     行程），故 shell 的 export 環境變數 / cd / 別名【不】跨呼叫保留——要持久得寫進檔案（如 ~/.bashrc）。
 //
-// 容器名由 workDir 雜湊決定（穩定、可在崩潰重啟後辨識並清理）。Close 會移除本進程拉起的所有容器。
+// 容器名由 workDir 雜湊決定（穩定、可在崩潰重啟後辨識並清理）。Close 會移除本行程拉起的所有容器。
 type DockerExecutor struct {
 	cfg     DockerConfig
 	mu      sync.Mutex
@@ -97,7 +97,7 @@ func (d *DockerExecutor) ensure(ctx context.Context, workDir string) (string, er
 	}
 
 	name := containerName(workDir)
-	// 清掉可能殘留的同名容器（上次進程崩潰留下的），再起全新常駐容器。best-effort。
+	// 清掉可能殘留的同名容器（上次行程崩潰留下的），再起全新常駐容器。best-effort。
 	_ = exec.Command("docker", "rm", "-f", name).Run()
 
 	if out, err := exec.CommandContext(ctx, "docker", d.runArgs(name, workDir)...).CombinedOutput(); err != nil {
@@ -126,7 +126,7 @@ func (d *DockerExecutor) Run(ctx context.Context, command, workDir string) ([]by
 	return cmd.CombinedOutput()
 }
 
-// Close 移除本進程拉起的所有常駐容器（cmd 優雅關閉時呼叫）。
+// Close 移除本行程拉起的所有常駐容器（cmd 優雅關閉時呼叫）。
 func (d *DockerExecutor) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

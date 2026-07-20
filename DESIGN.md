@@ -1,6 +1,6 @@
 # 設計取捨（Design Decisions）
 
-這份文件說明 cogito-agent 在 agent 設計各維度上**做了什麼決定、為什麼、以及刻意收斂（scoped）了什麼**。重點不是「功能多」，而是**判斷**——每個維度都標出取捨，並對照主流 agent（Claude Code、OpenAI Codex、Nous Hermes）的做法。競品定位見 [POSITIONING.md](POSITIONING.md)；逐輪 prompt 組裝的資料流見 [README 的架構圖](README.md#architecture)。
+這份檔案說明 cogito-agent 在 agent 設計各維度上**做了什麼決定、為什麼、以及刻意收斂（scoped）了什麼**。重點不是「功能多」，而是**判斷**——每個維度都標出取捨，並對照主流 agent（Claude Code、OpenAI Codex、Nous Hermes）的做法。競品定位見 [POSITIONING.md](POSITIONING.md)；逐輪 prompt 組裝的資料流見 [README 的架構圖](README.md#architecture)。
 
 > 立場：單人 Go 專案**不與有產品團隊/實驗室的 agent 拼功能或廣度**——那是不同量級。本專案的價值在**設計深度、安全控制的連貫性、可觀測/評測的嚴謹，以及對自身取捨的完全自覺**。
 
@@ -12,7 +12,7 @@
 2. **漸進式揭露無所不在**。技能、長期記憶、外部 MCP 工具都是「**索引常駐、正文按需**」——System Prompt 只放目錄，需要時才用工具取回。常駐上下文小，能力可無限長。
 3. **能確定性就不放 LLM 進迴圈**。壓縮折疊、危險指令黑名單、參數調優建議都走**確定性規則**——更便宜、可審計、不額外燒 API、行為可預測。
 4. **自我進化不繞過控制**。所有改寫未來行為的產物（技能/記憶/參數）一律「**只寫提案 → 人工或確定性閘把關 → 才生效**」，永不自動套用。
-5. **重用同一抽象**。SWE-bench 實例＝既有三段式 TestCase；`recall` 鏡像 `read_skill`；MCP 危險審批重用 bash 黑名單。新東西盡量是舊抽象的一個實例。
+5. **重用同一抽象**。SWE-bench 實例＝既有三段式 TestCase；`recall` 映像 `read_skill`；MCP 危險審批重用 bash 黑名單。新東西盡量是舊抽象的一個實例。
 
 ---
 
@@ -21,10 +21,10 @@
 ### 1. Agent 控制流
 - **決定**：ReAct（Thinking→Action→Observation）多輪迴圈（[engine/loop.go](internal/engine/loop.go)），但**三道硬防線由框架強制**：回合上限、per-task 成本熔斷、死迴圈指紋偵測（參數正規化看穿尾空格/路徑微差）。另加**成本軟著陸**——花費跨 80% 即提醒模型「停工具、立刻交付」，避免「錢花了、做好了、卻在交付前一刻被硬砍」。
 - **對照**：Claude Code/Codex 也有 turn/權限上限；cogito 把「失控控制」當**第一主題**，且軟著陸這種「優雅降級」是多數 harness 沒做的。
-- **scoped**：無動態重規劃（plan 改寫）；Plan Mode 靠把計畫外部化到 `PLAN.md`/`TODO.md`（狀態外部化）而非內存。其價值是**狀態durability、與模型 IQ 正交**：實測中斷一個 6 步任務後，重啟一個零對話記憶的新進程只說「繼續」，agent 仍能讀 `TODO.md` 從第 5 步續跑、零重工——再強的模型也贏不了「重啟後 context 歸零」，檔案化的計畫贏得了。預設關（短任務不需要）：CLI 走 `-plan` flag，Slack/Telegram 走 **per-channel 切換**（`plan on`/`plan off`，狀態存 Session 隨之落盤）——長任務手動開、閒聊免計畫檔儀式，而非全域常開。
+- **scoped**：無動態重規劃（plan 改寫）；Plan Mode 靠把計畫外部化到 `PLAN.md`/`TODO.md`（狀態外部化）而非記憶體。其價值是**狀態durability、與模型 IQ 正交**：實測中斷一個 6 步任務後，重啟一個零對話記憶的新行程只說「繼續」，agent 仍能讀 `TODO.md` 從第 5 步續跑、零重工——再強的模型也贏不了「重啟後 context 歸零」，檔案化的計畫贏得了。預設關（短任務不需要）：CLI 走 `-plan` flag，Slack/Telegram 走 **per-channel 切換**（`plan on`/`plan off`，狀態存 Session 隨之落盤）——長任務手動開、閒聊免計畫檔儀式，而非全域常開。
 - **確定性步驟跳過**（[plan.go](internal/context/plan.go)）：斷點續跑「跳過已完成步驟」原本靠 LLM 自己重讀 `TODO.md` 猜位置（機率性、可能重做/漏做）。改由**框架每輪確定性解析 `TODO.md` 的 checkbox**，把「已完成幾步、下一個未完成步驟是哪一個」當**權威進度帳本**注入 system 訊息——由框架指定續跑點，而非模型猜。帳本準確性仍取決於模型誠實打勾（`- [x]`），但「讀哪裡、跳哪些」不再是模型的機率行為。
 - **目標錨點注入 / 抗上下文漂移**（[plan.go](internal/context/plan.go) `ReadPlanGoal`）：多輪之後 agent 焦點會逐漸偏離原始目標（Context Drift，業界高頻坑）。故 Plan Mode 下框架**每輪自 `PLAN.md` 讀原始目標、固定釘進 system 訊息**當「目標錨」——目標不靠滾動摘要的 salience「盡量保留」（軟），而是每輪從檔案硬注入（不會被摘要截斷），行動偏離即拉回。與進度帳本同機制、同來源（外部化檔案），零額外 LLM。
-- **自動續跑分兩層（opt-in `COGITO_AUTO_RESUME=1`，[chatbot/core.go](internal/chatbot/core.go)）**：① 進程活著時，任務因【暫時性】錯誤（網路/5xx/429）中止 → 退避 2/4/8s 帶完整歷史重跑；終局錯誤（回合/成本熔斷）不重試。② 進程被【硬砍】（OOM/SIGKILL/斷電）→ Session 的 `running` 旗標留在磁碟（正常結束會清），啟動時掃出未完成任務、補續跑提示自動接續（需 `COGITO_SESSION_DIR`）。兩層各有上限（3 次）防崩潰迴圈燒錢；硬砍續跑只在「defer 來不及清 running」時觸發，故不會誤續已正常失敗的任務。
+- **自動續跑分兩層（opt-in `COGITO_AUTO_RESUME=1`，[chatbot/core.go](internal/chatbot/core.go)）**：① 行程活著時，任務因【暫時性】錯誤（網路/5xx/429）中止 → 退避 2/4/8s 帶完整歷史重跑；終局錯誤（回合/成本熔斷）不重試。② 行程被【硬砍】（OOM/SIGKILL/斷電）→ Session 的 `running` 旗標留在磁碟（正常結束會清），啟動時掃出未完成任務、補續跑提示自動接續（需 `COGITO_SESSION_DIR`）。兩層各有上限（3 次）防崩潰迴圈燒錢；硬砍續跑只在「defer 來不及清 running」時觸發，故不會誤續已正常失敗的任務。
 - **狀態管理三模式的取捨（刻意只選 Checkpoint-Resume）**：對照業界三種 agent 狀態管理——① Checkpoint-Resume（快照+續跑）② Event Sourcing（全量事件日誌+重放）③ FSM（顯式狀態機）。cogito **刻意只落在 ①**：SessionSnapshot 落盤 + Plan Mode 帳本 + 兩層自動續跑。**不做 ②**——其稽核/回放/時間旅行價值我們已由 **OTel 全鏈追蹤 + append 導向的 history** 拿到 ~80%，重建成事件日誌是過度設計。**不做 ③**——顯式 FSM 會扼殺 ReAct 的彈性，且「異常可攔截/行為可控」已由護欄（回合/成本熔斷、HITL 審批、RecoveryManager）達成。呼應「沒有銀彈、按任務選模式」：這是**有意識的不做**，非缺漏。
 - **錯誤恢復是分層的，且各層的「成長」放對地方**（[recovery.go](internal/context/recovery.go)）：
   1. **RecoveryManager = 有界 first-aid**——規則式，只收「模型沒提示就會做錯」的少數高價值 nudge（如 edit_file stale old_text→先 read_file）。**刻意不追求覆蓋率、不該一直加 rule**（會變打地鼠）；主模型本就讀得懂多數錯誤。
@@ -58,10 +58,10 @@
 ①②的上下文工程細節見上節 2；以下深入第③層長期記憶。
 
 - **決定**：對齊 CoALA 四型記憶。離散記錄（`.claw/memory/<slug>.md`）+ **索引常駐封頂 + `recall` 按需檢索**（[memory.go](internal/context/memory.go)，關鍵字評分、中文 bigram、零依賴）+ **LRU（檔案 mtime）+ 超量歸檔（可復原非刪除）**。寫入走 synth→提案→人工放行。
-- **對照**：Hermes 有三層記憶 + 跨 session 用戶模型；cogito 的記憶是**檔案式、關鍵字檢索、無 embedding**（scoped），但**可審計、可手改、git 友善**，且遺忘用歸檔（接「失控控制」——記憶操作是新的失控面）。
+- **對照**：Hermes 有三層記憶 + 跨 session 使用者模型；cogito 的記憶是**檔案式、關鍵字檢索、無 embedding**（scoped），但**可審計、可手改、git 友善**，且遺忘用歸檔（接「失控控制」——記憶操作是新的失控面）。
 - **抗幻覺記憶（Hallucinated Memory）**：兩道防線——① **來源標註（provenance）**：放行的記錄自帶 `recorded:` 時間戳 + body 的「由誰/何時/從哪個任務沉澱」（[memory_synth.go](internal/evolve/memory_synth.go)），recall 時渲染給模型看，讓「真實檢索到的記憶」可溯源、與模型自產內容區分；② **強制不確定性聲明**：recall 查無時明確回「我沒有相關的長期記憶、切勿杜撰來源/時間/內容」（[recall.go](internal/tools/recall.go)），而非回空讓模型腦補。另加結構性防線：recall 是 tool_result（**檢索**）與模型**生成**天然分離；記憶即磁碟檔本身（無「索引 vs 原文」分岔，故 hash 交叉驗證 N/A）。
 - **KG（已做 Stage 1）**：記錄=節點、`[[links]]`=邊、`tags`=label；`recall` 回的是**連通子圖**（種子 + k 跳鄰域 + 它們之間的明確關係，[graph.go](internal/context/graph.go)），讓模型做 RAG 做不到的多跳關係推理。
-- **多文件 ingest（Stage 2a 已做）**：`cmd/ingest` 把 md 目錄結構式 ingest 成節點 + `edges.jsonl`（[ingest.go](internal/context/ingest.go)，確定性、不花錢），ingested 文件即進同一張圖供 recall 跨檔多跳。
+- **多檔案 ingest（Stage 2a 已做）**：`cmd/ingest` 把 md 目錄結構式 ingest 成節點 + `edges.jsonl`（[ingest.go](internal/context/ingest.go)，確定性、不花錢），ingested 檔案即進同一張圖供 recall 跨檔多跳。
 - **typed 關係抽取（Stage 2b 已做）**：LLM 從節點文字抽 typed 關係（depends-on/part-of…，[evolve/kg_extract.go](internal/evolve/kg_extract.go)）→ 提案 → **gate**（信心門檻/幻覺端點丟棄/去重/每節點封頂，[kg_gate.go](internal/context/kg_gate.go)）→ 併入 `edges.jsonl`。完全走 propose→gate→apply，與自我進化同一安全鐵律——這是 KG 勝 RAG 的來源，且不繞過控制。
 - **混合選種子（Stage 3a 已做，opt-in）**：設了 `COGITO_EMBED_MODEL`（OpenAI 相容 `/embeddings`，雲端或本地）時，`recall` 用 embedding 語意選種子（[embed.go](internal/context/embed.go)，暴力 cosine + sidecar 向量檔），未配置則零依賴退回關鍵字。Anthropic 無 embeddings 端點，故語意檢索一律經 OpenAI 相容端點——與多 Provider DNA 一致。
 - **scoped**：持久化 / ANN 索引（Stage 3b）待巨量才做。分階段設計見 [docs/kg-spec.md](docs/kg-spec.md)。
@@ -128,7 +128,7 @@
 - **記憶召回 hash 交叉驗證**（抗幻覺 §3）：記憶即磁碟檔本身，無「索引 vs 原文」分岔，故 N/A；改用 provenance 標註 + 強制不確定性聲明。
 - **mid-tool 檢查點**：斷點續跑粒度是**回合**；一個跑到一半的長 bash 被中斷不可續（整回合重來）。token/工具級檢查點 ROI 低。
 
-**已從此清單畢業**（曾標 scoped、後來做了）：KG（Stage 1/2a/2b/3a）+ embedding 混合選種子（§3）、多即時通訊平台（Telegram + Socket Mode，傳輸無關核心 `internal/chatbot`，見 README 集成段）、滾動摘要式壓縮（§2，原「不做 LLM 摘要」已按成熟產品思維修正）。
+**已從此清單畢業**（曾標 scoped、後來做了）：KG（Stage 1/2a/2b/3a）+ embedding 混合選種子（§3）、多即時通訊平台（Telegram + Socket Mode，傳輸無關核心 `internal/chatbot`，見 README 整合段）、滾動摘要式壓縮（§2，原「不做 LLM 摘要」已按成熟產品思維修正）。
 
 **敢標 scoped、並講清楚 why，本身就是設計判斷**——比假裝全能可信；而「畢業」清單則誠實記錄哪些取捨隨需求變了。
 

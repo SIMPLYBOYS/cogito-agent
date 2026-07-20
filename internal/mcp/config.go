@@ -8,7 +8,7 @@ import (
 
 // ServerConfig 描述一個 MCP 伺服器（與 Claude Desktop / .mcp.json 的 mcpServers 條目同構）。
 // 兩種傳輸：
-//   - stdio（預設）：填 command/args/env，啟動子進程。
+//   - stdio（預設）：填 command/args/env，啟動子行程。
 //   - Streamable HTTP：填 url（或 type:"http"）+ 可選 headers（如 Authorization），連遠端端點。
 type ServerConfig struct {
 	Name    string            `json:"-"`

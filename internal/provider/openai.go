@@ -208,7 +208,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		resp.Body.Close()
 
-		// 429（限流）與 5xx（伺服器側瞬時錯誤）可重試；4xx（如 401/400）是用戶端錯誤，重試無益，直接落下。
+		// 429（限流）與 5xx（伺服器側瞬時錯誤）可重試；4xx（如 401/400）是使用者端錯誤，重試無益，直接落下。
 		if (statusCode == http.StatusTooManyRequests || statusCode >= 500) && attempt < maxRetries && ctx.Err() == nil {
 			log.Printf("[OpenAI] HTTP %d，退避後重試 %d/%d", statusCode, attempt+1, maxRetries)
 			if !sleepBackoff(ctx, attempt, retryAfter) {

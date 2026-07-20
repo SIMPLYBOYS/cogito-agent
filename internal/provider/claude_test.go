@@ -7,7 +7,7 @@ import (
 )
 
 // 驗證 Anthropic 的 user/assistant 嚴格交替不變式：一個完整 ReAct 回合 + 併發多工具結果
-// + 死循環提醒（普通 user 文本緊跟 tool_result）。這些歷史結構若映射不當會觸發 400。
+// + 無窮迴圈提醒（普通 user 文本緊跟 tool_result）。這些歷史結構若映射不當會觸發 400。
 func TestBuildAnthropicMessages_StrictAlternation(t *testing.T) {
 	msgs := []schema.Message{
 		{Role: schema.RoleSystem, Content: "you are claw"},

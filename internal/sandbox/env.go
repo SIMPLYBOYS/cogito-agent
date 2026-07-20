@@ -25,7 +25,7 @@ func FromEnv() Executor {
 	})
 }
 
-// WarnIfHost 供【開放入口】的服務（bot）啟動時呼叫：host 模式下 bash 直接在宿主機以本進程權限執行，
+// WarnIfHost 供【開放入口】的服務（bot）啟動時呼叫：host 模式下 bash 直接在宿主機以本行程權限執行，
 // 而 bot 的 prompt 來自聊天平台——「陌生 prompt → bash → 宿主機」就是一條 RCE 路徑。入口白名單擋得住
 // 陌生人，但擋不住 prompt injection（agent 讀到的網頁/MCP 資料裡藏指令，不是人發的）；黑名單是軟性的
 // （繞過寫法很多），workDir 對 bash 也只是慣例不是邊界（cd .. 就出去了）。
@@ -40,7 +40,7 @@ func WarnIfHost(ex Executor) {
 		"╔══════════════════════════════════════════════════════════════════════════╗\n" +
 		"║ ⚠️  安全警告：bash 正在【宿主機】直跑，無 OS 級隔離                        ║\n" +
 		"║                                                                          ║\n" +
-		"║ bot 是開放入口：聊天訊息會變成 bash 命令，在宿主機上以本進程的權限執行。  ║\n" +
+		"║ bot 是開放入口：聊天訊息會變成 bash 命令，在宿主機上以本行程的權限執行。  ║\n" +
 		"║ 入口白名單擋得住陌生人，但擋不住 prompt injection（agent 讀到的網頁 /     ║\n" +
 		"║ MCP 資料裡藏的指令）；黑名單與 workDir 對 bash 都只是軟性防線。           ║\n" +
 		"║                                                                          ║\n" +

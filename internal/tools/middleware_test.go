@@ -72,7 +72,7 @@ func TestMiddleware_AroundOrderAndShortCircuit(t *testing.T) {
 
 	res := reg.Execute(context.Background(), schema.ToolCall{ID: "1", Name: "rec", Arguments: []byte("{}")})
 	if !res.IsError || res.Output != "blocked" {
-		t.Errorf("內層短路應直接返回 blocked，got %+v", res)
+		t.Errorf("內層短路應直接回傳 blocked，got %+v", res)
 	}
 	if tool.didRun() {
 		t.Error("短路後工具不應被執行")
