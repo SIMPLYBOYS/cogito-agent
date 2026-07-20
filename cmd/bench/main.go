@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/joho/godotenv"
@@ -109,6 +110,14 @@ func main() {
 	// 想測更強能力可換 -model claude-opus-4-8。
 	runner := eval.NewBenchmarkRunner(*model)
 	runner.MaxAttempts = *reflexion // >1 啟用 Reflexion 反思重試
+
+	// 跑分要跑在【真的會生效的那組參數】上：讀 .claw/config.json（治理放行後的現行值），缺項補
+	// 引擎預設。少了這步，跑分永遠用預設值跑，-tune 卻拿觀測去跟現行值比——量的與建議改的不是同一個。
+	knobs := effectiveKnobs("workspace")
+	runner.MaxTurns, runner.MaxConcurrentTools, runner.MaxCostUSD = knobs.MaxTurns, knobs.MaxConcurrentTools, knobs.MaxCostUSD
+	log.Printf("[bench] 執行參數：回合上限 %d / 工具併發 %d / 成本熔斷 $%.2f",
+		knobs.MaxTurns, knobs.MaxConcurrentTools, knobs.MaxCostUSD)
+
 	report := runner.RunSuite(context.Background(), testcases)
 
 	// 輸出 JSON 報告（供儀表板/CI artifact）。
@@ -120,7 +129,7 @@ func main() {
 
 	// 參數自調（Tier 4 #15）：依跑分聚合指標產出【提案參數】到暫存區，不自動套用。
 	if *tune {
-		emitTuningProposals(report)
+		emitTuningProposals(report, knobs)
 	}
 
 	// CI 門檻：通過率低於 -min-pass-rate 即非 0 退出，讓 CI job 失敗。
@@ -183,10 +192,28 @@ func truncatePlan(s string, n int) string {
 	return s
 }
 
+// effectiveKnobs 回「這次跑分實際要用」的護欄：以 .claw/config.json（治理放行後的現行值）為主，
+// 缺項補引擎預設。
+//
+// 【為何不寫死數字】預設值住在 internal/engine，寫死在這裡會在引擎調整時默默漂移，
+// 讓「跑分用的」與「部署用的」不知不覺對不上——而調參建議正是建立在兩者一致的前提上。
+func effectiveKnobs(root string) evolve.Knobs {
+	k, _ := evolve.LoadKnobs(root) // 沒有 config.json 就是零值，下面逐項補預設
+	if k.MaxTurns <= 0 {
+		k.MaxTurns = engine.DefaultMaxTurns
+	}
+	if k.MaxConcurrentTools <= 0 {
+		k.MaxConcurrentTools = engine.DefaultMaxConcurrentTools
+	}
+	if k.MaxCostUSD <= 0 {
+		k.MaxCostUSD = engine.DefaultMaxCostUSD
+	}
+	return k
+}
+
 // emitTuningProposals 從跑分報告算出聚合指標，產出有界的調參提案到暫存區（不自動套用）。
-func emitTuningProposals(report *eval.SuiteReport) {
-	// current = 引擎預設（internal/engine/loop.go：defaultMaxTurns/ConcurrentTools/CostUSD）。
-	cur := evolve.Knobs{MaxTurns: 40, MaxConcurrentTools: 5, MaxCostUSD: 1.0}
+// cur 必須是【這次跑分實際生效】的那組參數——否則就是拿 A 的觀測去建議改 B。
+func emitTuningProposals(report *eval.SuiteReport, cur evolve.Knobs) {
 
 	n := len(report.Results)
 	if n == 0 {

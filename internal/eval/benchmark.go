@@ -76,6 +76,16 @@ type BenchmarkRunner struct {
 	modelName string
 	// MaxAttempts：Reflexion 重試上限。<=1 等於關閉（失敗就失敗）；>1 時失敗會反思出教訓、帶教訓重試。
 	MaxAttempts int
+
+	// Knobs 是跑分時要套用的執行期護欄（對應 .claw/config.json）。<=0 的欄位沿用引擎預設。
+	//
+	// 【為何必須有】沒有它，跑分永遠用引擎預設值執行，但 -tune 卻拿這些觀測去跟 config.json 的
+	// 現行值比、再提出調參建議——量的是 A、建議改的是 B。CeilingHitRate 尤其失真：它數的是
+	// 「失敗且 TurnCount >= 現行 MaxTurns」，可那輪根本不是用現行 MaxTurns 跑的。
+	// 要讓調參有意義，跑分就得跑在「真的會生效的那組參數」上。
+	MaxTurns           int
+	MaxConcurrentTools int
+	MaxCostUSD         float64
 }
 
 func NewBenchmarkRunner(model string) *BenchmarkRunner {
@@ -196,6 +206,17 @@ func (b *BenchmarkRunner) runOnce(ctx context.Context, tc TestCase, taskPrompt s
 	registry.Register(tools.NewEditFileTool(workDir))
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, false)
+	// 優先序：引擎預設 < 跑分旋鈕（.claw/config.json，讓跑分跑在真的會生效的參數上）
+	//        < 單一用例的 MaxTurns（最具體者勝，保留既有用例行為）。
+	if b.MaxTurns > 0 {
+		eng.MaxTurns = b.MaxTurns
+	}
+	if b.MaxConcurrentTools > 0 {
+		eng.MaxConcurrentTools = b.MaxConcurrentTools
+	}
+	if b.MaxCostUSD > 0 {
+		eng.MaxCostUSD = b.MaxCostUSD
+	}
 	if tc.MaxTurns > 0 {
 		eng.MaxTurns = tc.MaxTurns
 	}
