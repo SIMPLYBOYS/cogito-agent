@@ -176,11 +176,12 @@ flowchart TB
 cmd/
 ├── claw/                 伺服器端入口（生產用）：裝配 Provider/Registry/Engine + OTel，啟動 Slack Socket Mode（＋設了 token 則同時跑 Telegram 長輪詢）
 ├── claw-cli/             通用命令列入口（-prompt / -dir / -session / -plan）
+├── claw-dashboard/       維運面板（綁 loopback）：執行樹回放、用量切片、技能/排程/MCP/金鑰/政策，內嵌 chat
 ├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-dry-run）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 ├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
 ├── ingest/               把 markdown 目錄結構式 ingest 成知識圖譜節點+邊（-src/-root，確定性不花錢）
-└── claw-demo-*/          各能力的自包含演示（session / oom / subagent / observability / trace）
+└── claw-demo-*/          教學/診斷 harness（mcp 診斷、oom 壓縮、subagent 隔離）——詳見下方 cmd/ 導覽
 internal/
 ├── engine/                  Agent 核心引擎
 │   ├── loop.go              主迴圈 + RunSub（子 agent）；回合/成本熔斷、併發限流、無窮迴圈探測接線
@@ -444,6 +445,28 @@ go test ./...      # 執行測試
 go vet ./...       # 靜態檢查
 go build ./...     # 建置
 ```
+
+### `cmd/` 導覽
+
+| 目錄 | 是什麼 | 什麼時候用 |
+|---|---|---|
+| **`claw`** | 常駐 bot（Slack／Telegram）＋內建排程 | 正式跑一個「員工」 |
+| **`claw-cli`** | 一次性任務執行 | 腳本／OS crontab／CI |
+| **`claw-dashboard`** | 維運面板（loopback） | 回放執行樹、改技能／排程／政策／金鑰 |
+| **`bench`** | 評測跑分＋參數自調提案 | 改了 prompt／參數想知道有沒有變好 |
+| **`dashboard`** | bench 報告檢視器（另一支，埠 8090） | 看歷次跑分趨勢 |
+| **`ingest`** | 把 md 目錄 ingest 成知識圖譜 | 餵長期記憶語料 |
+| **`skillgate`** | 技能把關／晉升的 CLI 版 | 想寫進腳本時（面板 `/governance` 是 UI 版） |
+| **`claw-demo-mcp`** | 不經 LLM 直接連 MCP、列工具、`-call` 打一個 | **MCP 壞掉時二分問題在哪** |
+| `claw-demo-oom` | 上下文壓縮眼見為憑（自帶巨型檔 fixture） | 想看懂 Compactor 在幹嘛 |
+| `claw-demo-subagent` | 子 agent 隔離眼見為憑（自帶尋寶 fixture） | 想看懂為何主 session 不被搜尋噪音汙染 |
+
+前七支是實用入口；後三支是**教學／診斷** harness，各自演示一個難用嘴講清楚的機制。
+它們演示的能力都另有測試在守（`context/compactor_test.go`、`engine/subagent_e2e_test.go`、`mcp/*_test.go`），
+所以是**輔助理解**，不是驗收路徑。
+
+> 曾有 `claw-demo`（session 隔離）、`claw-demo-trace`（OTel span）、`claw-demo-observability`（成本追蹤）
+> 三支，已移除——面板的執行樹回放、Langfuse 的甘特圖、面板 Metrics 頁分別把同一件事呈現得更好。
 
 ### 評測（eval）與儀表板
 
