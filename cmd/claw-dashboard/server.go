@@ -50,6 +50,8 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("POST /governance/promote-skill", s.govPromoteSkill)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("GET /skills", s.skills)
+	mux.HandleFunc("POST /skills/save", s.skillSave)
+	mux.HandleFunc("POST /skills/remove", s.skillRemove)
 	mux.HandleFunc("GET /cron", s.cronPage)
 	mux.HandleFunc("POST /cron/add", s.cronAdd)
 	mux.HandleFunc("POST /cron/edit", s.cronEdit)

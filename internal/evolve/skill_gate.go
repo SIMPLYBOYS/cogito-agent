@@ -41,8 +41,14 @@ func Gate(skillPath string) (GateResult, error) {
 	if err != nil {
 		return GateResult{}, fmt.Errorf("讀取技能檔失敗: %w", err)
 	}
-	content := string(data)
+	return GateContent(string(data)), nil
+}
 
+// GateContent 是 Gate 的內容版：同一套判準，但不需要先落檔。
+//
+// 【為何需要】面板讓操作者手寫技能時，要在【寫入前】就驗——先寫再檢查等於中間存在一個
+// 未把關的技能檔，而技能是「未來行為的來源」，那個空窗期不該存在。
+func GateContent(content string) GateResult {
 	var issues []string
 
 	name, desc, body, ok := parseFrontmatter(content)
@@ -64,7 +70,7 @@ func Gate(skillPath string) (GateResult, error) {
 		issues = append(issues, "命中危險模式："+d)
 	}
 
-	return GateResult{Passed: len(issues) == 0, Issues: issues}, nil
+	return GateResult{Passed: len(issues) == 0, Issues: issues}
 }
 
 // scanDangerous 回傳文字命中的危險模式描述（空＝乾淨）。供技能把關與記憶自更新共用，避免黑名單漂移。
