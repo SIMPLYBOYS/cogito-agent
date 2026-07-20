@@ -11,10 +11,10 @@ import (
 
 func TestExtractJSONObject(t *testing.T) {
 	cases := map[string]string{
-		`{"done":true}`:                        `{"done":true}`,
+		`{"done":true}`: `{"done":true}`,
 		"前言 {\"done\":false,\"r\":\"x\"} 後語": `{"done":false,"r":"x"}`,
-		"```json\n{\"a\":{\"b\":1}}\n```":       `{"a":{"b":1}}`, // 巢狀 + 圍欄
-		"沒有 json":                              "沒有 json",
+		"```json\n{\"a\":{\"b\":1}}\n```":    `{"a":{"b":1}}`, // 巢狀 + 圍欄
+		"沒有 json":                            "沒有 json",
 	}
 	for in, want := range cases {
 		if got := extractJSONObject(in); got != want {
