@@ -27,20 +27,20 @@ func TestShouldNotify(t *testing.T) {
 func TestBuildCronNotice(t *testing.T) {
 	j := Job{ID: "abc", Name: "巡檢", Schedule: "0 9 * * *"}
 
-	ok := buildNotice(j, "ok", "", "有 3 個未推送的 commit。", 12*time.Second)
-	for _, want := range []string{"✅", "巡檢", "0 9 * * *", "12s", "3 個未推送", "/runs/cron-abc"} {
+	ok := buildNotice(j, "ok", "", "有 3 個未推送的 commit。", "bot", 12*time.Second)
+	for _, want := range []string{"✅", "巡檢", "0 9 * * *", "12s", "來源 bot", "3 個未推送", "/runs/cron-abc"} {
 		if !strings.Contains(ok, want) {
 			t.Errorf("成功通知缺少 %q：\n%s", want, ok)
 		}
 	}
 
-	bad := buildNotice(j, "error", "connection refused", "", 3*time.Second)
+	bad := buildNotice(j, "error", "connection refused", "", "dashboard", 3*time.Second)
 	if !strings.Contains(bad, "❌") || !strings.Contains(bad, "connection refused") {
 		t.Errorf("失敗通知應含 ❌ 與錯誤訊息：\n%s", bad)
 	}
 
 	// 過長回覆截斷——通知是提醒去看，不是搬全文
-	long := buildNotice(j, "ok", "", strings.Repeat("字", noticeReplyMax+50), time.Second)
+	long := buildNotice(j, "ok", "", strings.Repeat("字", noticeReplyMax+50), "bot", time.Second)
 	if !strings.Contains(long, "（截斷）") {
 		t.Error("過長回覆應截斷")
 	}

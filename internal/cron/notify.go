@@ -45,13 +45,17 @@ func ShouldNotify(target, status string) bool {
 }
 
 // buildNotice 組通知文字（純函式，好測）。回覆過長截斷——要看全文去 /runs。
-func buildNotice(j Job, status, errMsg, reply string, dur time.Duration) string {
+//
+// source 是執行者（bot／dashboard）。排程器兩邊都可能跑，收到通知時若不知道是誰送的，就得回頭
+// 翻 log 才能確認——這正是「關掉面板還會不會跑」最需要驗證的一點，標記該在看得到的地方。
+func buildNotice(j Job, status, errMsg, reply, source string, dur time.Duration) string {
 	icon := "✅"
 	if status != "ok" {
 		icon = "❌"
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s cron「%s」%s（%s，耗時 %s）\n", icon, j.Name, status, j.Schedule, dur.Round(time.Second))
+	fmt.Fprintf(&b, "%s cron「%s」%s（%s，耗時 %s · 來源 %s）\n",
+		icon, j.Name, status, j.Schedule, dur.Round(time.Second), source)
 	if errMsg != "" {
 		fmt.Fprintf(&b, "錯誤：%s\n", errMsg)
 	}

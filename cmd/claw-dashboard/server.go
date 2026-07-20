@@ -383,6 +383,16 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   button.gact:hover { filter:brightness(1.08); }
   button.gact.ghost { color:var(--mut); background:transparent; border:1px solid var(--line); }
   button.gact.ghost:hover { color:var(--acc); border-color:var(--acc); filter:none; }
+  /* 破壞性動作的兩段式確認：點「移除」先展開、讀完再按另一顆才真的送出。
+     不用 JS confirm()——這些頁是嚴格 CSP（無 script-src），且展開式比對話框更難「順手按掉」。 */
+  details.danger > summary { display:inline-block; cursor:pointer; list-style:none;
+    font:inherit; font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--mut);
+    border:1px solid var(--line); border-radius:6px; padding:4px 14px; }
+  details.danger > summary::-webkit-details-marker { display:none; }
+  details.danger > summary:hover, details.danger[open] > summary { color:var(--acc); border-color:var(--acc); }
+  details.danger .confirm { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-top:9px; padding:10px 13px; font-size:13px; border:1px solid var(--acc); border-radius:7px;
+    background:color-mix(in srgb,var(--acc) 8%,transparent); }
   .badge, .pill { display:inline-block; font-size:10.5px; letter-spacing:.03em; border-radius:5px; padding:1px 7px; margin-left:4px; }
   .pill.ok { color:var(--ok); border:1px solid var(--ok); }
   .pill.err { color:var(--acc); border:1px solid var(--acc); }

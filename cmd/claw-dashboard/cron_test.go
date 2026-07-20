@@ -89,3 +89,30 @@ func TestCronPage_TimezoneNudge(t *testing.T) {
 		t.Error("設好後設定區應收合（維持緊湊顯示）")
 	}
 }
+
+// 破壞性動作必須兩段式：頁面上「移除」只是展開，真正送出的是裡面另一顆按鈕。
+// 這條擋的是「把確認層拿掉」的回歸——單一按鈕直接送 POST 就等於誤點即刪。
+func TestCronPage_RemoveNeedsConfirm(t *testing.T) {
+	ws := t.TempDir()
+	if err := cron.Add(cron.ConfigPath(ws), "巡檢", "0 9 * * *", "檢查"); err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(nil, "", ws, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/cron", nil))
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `<details class="danger"><summary>移除</summary>`) {
+		t.Error("移除應包在 details.danger 的確認層裡")
+	}
+	if !strings.Contains(body, "確定移除") {
+		t.Error("確認層應有明確的二次確認按鈕")
+	}
+	if !strings.Contains(body, "無法復原") {
+		t.Error("確認層應說明後果")
+	}
+	// 表單本身仍在（確認後才送得出去），但不可有「直接就是 gact ghost 移除」的單擊路徑
+	if strings.Contains(body, `<button type="submit" class="gact ghost">移除</button>`) {
+		t.Error("不該還留著單擊即刪的移除按鈕")
+	}
+}

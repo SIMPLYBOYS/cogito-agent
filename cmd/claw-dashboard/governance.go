@@ -222,8 +222,13 @@ var govTmpl = template.Must(template.New("gov").Parse(`
 {{if .MemoryProposed}}<pre class="prev">{{.MemoryProposed}}</pre>
 <div class="grow">
   <form method="POST" action="/governance/apply-memory"><button type="submit" class="gact">放行記憶</button></form>
-  <form method="POST" action="/governance/discard-memory"><button type="submit" class="gact ghost">丟棄</button></form>
 </div>
+<details class="danger"><summary>丟棄</summary>
+  <div class="confirm">
+    <span>確定丟棄這份記憶提案？<code>AGENTS.proposed.md</code> 會被刪除，agent 反思出來的這段內容無法復原（下次要等它再次沉澱）。</span>
+    <form method="POST" action="/governance/discard-memory"><button type="submit" class="gact">確定丟棄</button></form>
+  </div>
+</details>
 {{else}}<p class="muted">無。</p>{{end}}
 
 <h3>調參提案 <span class="muted">config.proposed.json</span></h3>

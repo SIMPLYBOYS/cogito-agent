@@ -202,9 +202,14 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
     <span class="mcpinfo"><b>{{.Name}}</b> <span class="badge">{{.Type}}</span>{{if .Disabled}} <span class="muted">停用</span>{{end}}{{if .HasSecrets}} <span class="muted">🔒 有祕密</span>{{end}}<br><span class="muted">{{.Target}}</span></span>
     <span class="acts">
       <form method="POST" action="/mcp/toggle"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact ghost">{{if .Disabled}}啟用{{else}}停用{{end}}</button></form>
-      <form method="POST" action="/mcp/remove"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact ghost">移除</button></form>
     </span>
   </div>
+  <details class="danger"><summary>移除</summary>
+    <div class="confirm">
+      <span>確定從 <code>.mcp.json</code> 移除 server「<b>{{.Name}}</b>」？{{if .HasSecrets}}<b>連同它的 env／headers 祕密一併刪除</b>，{{end}}無法復原。只是暫時不用請改按「停用」。</span>
+      <form method="POST" action="/mcp/remove"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact">確定移除</button></form>
+    </div>
+  </details>
   <details class="mcpedit"><summary>編輯</summary>
     <form method="POST" action="/mcp/edit" class="knobs">
       <input type="hidden" name="name" value="{{.Name}}">

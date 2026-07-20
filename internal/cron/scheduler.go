@@ -171,7 +171,7 @@ func (s *Scheduler) fire(j Job, now time.Time) {
 
 	// 推播結果。失敗只記 log——通知掛掉不該影響排程本身。
 	if target := NotifyTarget(); ShouldNotify(target, status) {
-		notice := buildNotice(j, status, msg, reply, s.now().Sub(started))
+		notice := buildNotice(j, status, msg, reply, s.label, s.now().Sub(started))
 		if e := SendAll(target, notice); e != nil {
 			log.Printf("[cron] 推播失敗：%v", e)
 		}
