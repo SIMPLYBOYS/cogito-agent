@@ -1,4 +1,4 @@
-package main
+package cron
 
 import (
 	"strings"
@@ -7,40 +7,40 @@ import (
 )
 
 func TestShouldNotify(t *testing.T) {
-	t.Setenv(notifyErrOnlyKey, "")
-	if shouldNotify("", "error") {
+	t.Setenv(NotifyErrOnlyKey, "")
+	if ShouldNotify("", "error") {
 		t.Error("未設目標時不該推播")
 	}
-	if !shouldNotify("slack:C1", "ok") {
+	if !ShouldNotify("slack:C1", "ok") {
 		t.Error("設了目標、非只送失敗 → 成功也該推播")
 	}
 
-	t.Setenv(notifyErrOnlyKey, "1")
-	if shouldNotify("slack:C1", "ok") {
+	t.Setenv(NotifyErrOnlyKey, "1")
+	if ShouldNotify("slack:C1", "ok") {
 		t.Error("只送失敗時，成功不該推播")
 	}
-	if !shouldNotify("slack:C1", "error") {
+	if !ShouldNotify("slack:C1", "error") {
 		t.Error("只送失敗時，失敗仍該推播")
 	}
 }
 
 func TestBuildCronNotice(t *testing.T) {
-	j := cronJob{ID: "abc", Name: "巡檢", Schedule: "0 9 * * *"}
+	j := Job{ID: "abc", Name: "巡檢", Schedule: "0 9 * * *"}
 
-	ok := buildCronNotice(j, "ok", "", "有 3 個未推送的 commit。", 12*time.Second)
+	ok := buildNotice(j, "ok", "", "有 3 個未推送的 commit。", 12*time.Second)
 	for _, want := range []string{"✅", "巡檢", "0 9 * * *", "12s", "3 個未推送", "/runs/cron-abc"} {
 		if !strings.Contains(ok, want) {
 			t.Errorf("成功通知缺少 %q：\n%s", want, ok)
 		}
 	}
 
-	bad := buildCronNotice(j, "error", "connection refused", "", 3*time.Second)
+	bad := buildNotice(j, "error", "connection refused", "", 3*time.Second)
 	if !strings.Contains(bad, "❌") || !strings.Contains(bad, "connection refused") {
 		t.Errorf("失敗通知應含 ❌ 與錯誤訊息：\n%s", bad)
 	}
 
 	// 過長回覆截斷——通知是提醒去看，不是搬全文
-	long := buildCronNotice(j, "ok", "", strings.Repeat("字", noticeReplyMax+50), time.Second)
+	long := buildNotice(j, "ok", "", strings.Repeat("字", noticeReplyMax+50), time.Second)
 	if !strings.Contains(long, "（截斷）") {
 		t.Error("過長回覆應截斷")
 	}
@@ -51,20 +51,20 @@ func TestBuildCronNotice(t *testing.T) {
 
 func TestSendNotify_RejectsBadTarget(t *testing.T) {
 	for _, bad := range []string{"", "slack", "nochannel:", ":C123"} {
-		if err := sendNotify(bad, "x"); err == nil {
+		if err := sendOne(bad, "x"); err == nil {
 			t.Errorf("目標 %q 應被拒", bad)
 		}
 	}
-	if err := sendNotify("discord:123", "x"); err == nil || !strings.Contains(err.Error(), "不支援") {
+	if err := sendOne("discord:123", "x"); err == nil || !strings.Contains(err.Error(), "不支援") {
 		t.Errorf("未支援平台應明確回錯，得 %v", err)
 	}
 	// 缺 token 應回明確錯誤（而非靜默失敗）
 	t.Setenv("SLACK_BOT_TOKEN", "")
-	if err := sendNotify("slack:C1", "x"); err == nil || !strings.Contains(err.Error(), "SLACK_BOT_TOKEN") {
+	if err := sendOne("slack:C1", "x"); err == nil || !strings.Contains(err.Error(), "SLACK_BOT_TOKEN") {
 		t.Errorf("缺 Slack token 應明說，得 %v", err)
 	}
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
-	if err := sendNotify("telegram:1", "x"); err == nil || !strings.Contains(err.Error(), "TELEGRAM_BOT_TOKEN") {
+	if err := sendOne("telegram:1", "x"); err == nil || !strings.Contains(err.Error(), "TELEGRAM_BOT_TOKEN") {
 		t.Errorf("缺 Telegram token 應明說，得 %v", err)
 	}
 }
@@ -82,14 +82,14 @@ func TestNotifyTarget_RejectsPastedToken(t *testing.T) {
 		"slack:" + strings.Repeat("a", 41),              // 過長＝幾乎必然是憑證
 	}
 	for _, tk := range tokens {
-		if _, _, err := parseNotifyTarget(tk); err == nil {
+		if _, _, err := parseTarget(tk); err == nil {
 			t.Errorf("疑似 token 的目標 %q 應被擋下", tk)
 		}
 	}
 
 	// 正常的頻道／聊天室 id 不可被誤擋
 	for _, good := range []string{"slack:C0123ABC456", "telegram:12345678", "telegram:-1001234567890"} {
-		if _, _, err := parseNotifyTarget(good); err != nil {
+		if _, _, err := parseTarget(good); err != nil {
 			t.Errorf("合法目標 %q 不該被擋：%v", good, err)
 		}
 	}
@@ -97,7 +97,7 @@ func TestNotifyTarget_RejectsPastedToken(t *testing.T) {
 
 // 多目標：逗號分隔可同時送 Telegram 與 Slack；任一個不合法就整批擋下。
 func TestNotifyTargets_Multi(t *testing.T) {
-	got := splitNotifyTargets(" telegram:123 , slack:C0123ABC ,, ")
+	got := SplitTargets(" telegram:123 , slack:C0123ABC ,, ")
 	want := []string{"telegram:123", "slack:C0123ABC"}
 	if len(got) != len(want) {
 		t.Fatalf("預期拆出 %d 個目標，得 %d：%v", len(want), len(got), got)
@@ -108,17 +108,17 @@ func TestNotifyTargets_Multi(t *testing.T) {
 		}
 	}
 
-	if err := validateNotifyTargets("telegram:123, slack:C0123ABC"); err != nil {
+	if err := ValidateTargets("telegram:123, slack:C0123ABC"); err != nil {
 		t.Errorf("合法多目標不該被擋：%v", err)
 	}
 	// 一好一壞 → 整批擋下，避免存進「一半能用」的設定
-	if err := validateNotifyTargets("telegram:123, slack:x" + "oxb-000000000000-aaaa"); err == nil {
+	if err := ValidateTargets("telegram:123, slack:x" + "oxb-000000000000-aaaa"); err == nil {
 		t.Error("其中一個是 token 時應整批擋下")
 	}
-	if err := validateNotifyTargets("telegram:123, discord:999"); err == nil {
+	if err := ValidateTargets("telegram:123, discord:999"); err == nil {
 		t.Error("其中一個平台不支援時應整批擋下")
 	}
-	if err := validateNotifyTargets(""); err != nil {
+	if err := ValidateTargets(""); err != nil {
 		t.Errorf("空字串＝不推播，不該報錯：%v", err)
 	}
 }

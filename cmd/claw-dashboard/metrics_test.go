@@ -10,11 +10,11 @@ import (
 
 func TestPlatformOf(t *testing.T) {
 	cases := map[string]string{
-		"slack:C123":     "Slack",
-		"telegram:99":    "Telegram",
-		"operator":       "Operator（dashboard）",
-		"cli-session":    "本機／CLI",
-		"discord:x":      "discord", // 未知前綴原樣
+		"slack:C123":  "Slack",
+		"telegram:99": "Telegram",
+		"operator":    "Operator（dashboard）",
+		"cli-session": "本機／CLI",
+		"discord:x":   "discord", // 未知前綴原樣
 	}
 	for id, want := range cases {
 		if got := platformOf(id); got != want {
@@ -45,11 +45,11 @@ func TestMetrics_Aggregates(t *testing.T) {
 		t.Fatalf("/metrics → %d", rec.Code)
 	}
 	for _, want := range []string{
-		"$1.7500",       // 總花費 1.0+0.5+0.25
-		"Slack",         // 平台切片
+		"$1.7500", // 總花費 1.0+0.5+0.25
+		"Slack",   // 平台切片
 		"Telegram",
 		"claude-opus-4-8",
-		"bfill",         // 長條有渲染
+		"bfill", // 長條有渲染
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("/metrics 應含 %q", want)

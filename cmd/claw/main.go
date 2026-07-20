@@ -16,6 +16,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
@@ -276,6 +277,10 @@ func main() {
 		go tg.Start(ctx)
 		tg.ResumeInterrupted() // 跨重啟續跑：續本次被硬砍中斷的 Telegram 任務（需 AUTO_RESUME + SESSION_DIR）
 	}
+
+	// cron 排程器：bot 是常駐行程，故排程掛在這裡才會「dashboard 關掉也照跑」。與 dashboard 端
+	// 共用同一份 .claw/cron.json；跨行程檔案鎖保證同一輪只有一邊真的執行。沒有 job 就什麼都不做。
+	go cron.New(rootDir, &botCronRunner{factory: factory, workDir: rootDir}, "bot").Run(ctx.Done())
 
 	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外端口，零基建。
 	go bot.Start(ctx)

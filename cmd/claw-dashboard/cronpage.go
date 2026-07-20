@@ -7,11 +7,13 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 )
 
 // cronRow 是 UI 顯示用（job + 算好的下次觸發時間 + 回放連結）。
 type cronRow struct {
-	cronJob
+	cron.Job
 	NextRun   string
 	SessionID string
 	Running   bool
@@ -32,31 +34,31 @@ type cronData struct {
 // cron 頁：列出排程任務，可新增/編輯/停用/移除/立即執行。CRUD 只是編 .claw/cron.json（安全），
 // 【執行】需 COGITO_DASH_CHAT=1——cron 會驅動 agent（跑 bash/寫檔），沿用同一個寫入閘。
 func (s *server) cronPage(w http.ResponseWriter, r *http.Request) {
-	jobs, err := readCronJobs(cronConfigPath(s.workspace))
+	jobs, err := cron.ReadJobs(cron.ConfigPath(s.workspace))
 	if err != nil {
 		http.Error(w, "讀 cron.json 失敗："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	loc, tzWarn := cronLocation()
+	loc, tzWarn := cron.Location()
 	now := time.Now().In(loc)
 	d := cronData{
 		SchedulerOn:   s.cron != nil,
 		Flash:         s.readFlash(),
-		NotifyTarget:  cronNotifyTarget(),
-		NotifyTargets: splitNotifyTargets(cronNotifyTarget()),
-		NotifyErrOnly: cronNotifyErrorsOnly(),
+		NotifyTarget:  cron.NotifyTarget(),
+		NotifyTargets: cron.SplitTargets(cron.NotifyTarget()),
+		NotifyErrOnly: cron.NotifyErrorsOnly(),
 		TZName:        loc.String(),
-		TZValue:       strings.TrimSpace(os.Getenv(cronTZKey)),
+		TZValue:       strings.TrimSpace(os.Getenv(cron.TZKey)),
 		TZWarn:        tzWarn,
 	}
 	runningID := ""
 	if s.cron != nil {
-		runningID = s.cron.runningID()
+		runningID = s.cron.RunningID()
 	}
 	for _, j := range jobs {
-		row := cronRow{cronJob: j, SessionID: cronSessionID(j.ID), NextRun: "—", Running: j.ID == runningID}
-		if sched, e := cronParser.Parse(j.Schedule); e == nil {
-			row.NextRun = sched.Next(now).Format("01-02 15:04")
+		row := cronRow{Job: j, SessionID: cron.SessionID(j.ID), NextRun: "—", Running: j.ID == runningID}
+		if next, ok := cron.NextRun(j.Schedule, now); ok {
+			row.NextRun = next.Format("01-02 15:04")
 		}
 		d.Jobs = append(d.Jobs, row)
 	}
@@ -71,7 +73,7 @@ func (s *server) cronAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	err := addCronJob(cronConfigPath(s.workspace), r.FormValue("name"), r.FormValue("schedule"), r.FormValue("prompt"))
+	err := cron.Add(cron.ConfigPath(s.workspace), r.FormValue("name"), r.FormValue("schedule"), r.FormValue("prompt"))
 	s.cronDone(w, r, err, "✓ 已新增排程任務。")
 }
 
@@ -80,7 +82,7 @@ func (s *server) cronEdit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	err := editCronJob(cronConfigPath(s.workspace), r.FormValue("id"), r.FormValue("name"), r.FormValue("schedule"), r.FormValue("prompt"))
+	err := cron.Edit(cron.ConfigPath(s.workspace), r.FormValue("id"), r.FormValue("name"), r.FormValue("schedule"), r.FormValue("prompt"))
 	s.cronDone(w, r, err, "✓ 已更新排程任務。")
 }
 
@@ -89,7 +91,7 @@ func (s *server) cronRemove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	s.cronDone(w, r, removeCronJob(cronConfigPath(s.workspace), r.FormValue("id")), "✓ 已移除排程任務。")
+	s.cronDone(w, r, cron.Remove(cron.ConfigPath(s.workspace), r.FormValue("id")), "✓ 已移除排程任務。")
 }
 
 func (s *server) cronToggle(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +99,7 @@ func (s *server) cronToggle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	s.cronDone(w, r, toggleCronJob(cronConfigPath(s.workspace), r.FormValue("id")), "✓ 已切換啟用狀態。")
+	s.cronDone(w, r, cron.Toggle(cron.ConfigPath(s.workspace), r.FormValue("id")), "✓ 已切換啟用狀態。")
 }
 
 // cronRunNow 不等排程、立刻跑一次（背景 goroutine——engine.Run 可能數十秒，HTTP 不能等）。
@@ -111,15 +113,15 @@ func (s *server) cronRunNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.FormValue("id")
-	jobs, err := readCronJobs(cronConfigPath(s.workspace))
+	jobs, err := cron.ReadJobs(cron.ConfigPath(s.workspace))
 	if err != nil {
 		s.cronDone(w, r, err, "")
 		return
 	}
 	for _, j := range jobs {
 		if j.ID == id {
-			go s.cron.fire(j, time.Now())
-			s.cronDone(w, r, nil, "▶ 已觸發「"+j.Name+"」——執行樹見 /runs/"+cronSessionID(id))
+			go s.cron.Fire(j)
+			s.cronDone(w, r, nil, "▶ 已觸發「"+j.Name+"」——執行樹見 /runs/"+cron.SessionID(id))
 			return
 		}
 	}
@@ -141,8 +143,8 @@ var cronTmpl = template.Must(template.New("cron").Parse(`
 {{if .TZWarn}}<p class="banner">⚠️ {{.TZWarn}}</p>{{end}}
 <p class="muted">到點自動把任務交給 agent 執行。排程用標準 cron 運算式（分 時 日 月 週），
 時區 <b>{{.TZName}}</b>{{if not .TZValue}}（跟隨伺服器——雲端多為 UTC，建議明設）{{end}}。
-{{if .SchedulerOn}}排程器<b>執行中</b>——每 30 秒檢查一次。{{else}}<b class="warn">排程器未啟用</b>：設 <code>COGITO_DASH_CHAT=1</code> 重啟才會真的觸發（現在僅能編輯）。{{end}}
-只在本面板跑著時觸發，非 24/7 常駐。</p>
+{{if .SchedulerOn}}本面板的排程器<b>執行中</b>——每 30 秒檢查一次。{{else}}<b class="warn">本面板的排程器未啟用</b>：設 <code>COGITO_DASH_CHAT=1</code> 重啟才會在此觸發（現在僅能編輯）。{{end}}
+bot（<code>cmd/claw</code>）也會跑同一份排程，故<b>關掉本面板照樣會觸發</b>；跨行程鎖保證同一輪只有一邊執行。</p>
 
 {{if .Jobs}}
 <div class="cronlist">

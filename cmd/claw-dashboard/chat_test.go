@@ -12,11 +12,11 @@ import (
 // CSRF 防線矩陣：POST 會執行 agent，必須信 Sec-Fetch-Site、擋跨站。
 func TestSameOrigin_CSRF(t *testing.T) {
 	cases := []struct {
-		name       string
-		secFetch   string
-		origin     string
-		host       string
-		wantAllow  bool
+		name      string
+		secFetch  string
+		origin    string
+		host      string
+		wantAllow bool
 	}{
 		{"same-origin header", "same-origin", "", "x", true},
 		{"none header（使用者自輸網址）", "none", "", "x", true},
@@ -103,18 +103,28 @@ func TestChatPost_RejectsCrossSite(t *testing.T) {
 func TestSSEHub_SinceBuffers(t *testing.T) {
 	h := &sseHub{}
 	h.begin()
-	if !h.isRunning() { t.Fatal("begin 後應 running") }
+	if !h.isRunning() {
+		t.Fatal("begin 後應 running")
+	}
 	h.push(evJSON("tool", "bash"))
 	h.push(evJSON("msg", "done"))
 	evs, running, total := h.since(0)
-	if len(evs) != 2 || total != 2 || !running { t.Fatalf("since(0)：evs=%d total=%d running=%v", len(evs), total, running) }
+	if len(evs) != 2 || total != 2 || !running {
+		t.Fatalf("since(0)：evs=%d total=%d running=%v", len(evs), total, running)
+	}
 	evs2, _, _ := h.since(2)
-	if len(evs2) != 0 { t.Errorf("since(total) 應無新事件，got %d", len(evs2)) }
+	if len(evs2) != 0 {
+		t.Errorf("since(total) 應無新事件，got %d", len(evs2))
+	}
 	h.end()
-	if h.isRunning() { t.Error("end 後不應 running") }
+	if h.isRunning() {
+		t.Error("end 後不應 running")
+	}
 	// begin 重置緩衝
 	h.begin()
-	if _, _, total := h.since(0); total != 0 { t.Errorf("begin 應清空緩衝，got total=%d", total) }
+	if _, _, total := h.since(0); total != 0 {
+		t.Errorf("begin 應清空緩衝，got total=%d", total)
+	}
 }
 
 // 執行中：chat 頁應含串流區 #live + 載入 /chat.js，且 CSP 放寬到 script-src 'self'。

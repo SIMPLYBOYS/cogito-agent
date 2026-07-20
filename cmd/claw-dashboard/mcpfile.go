@@ -22,11 +22,11 @@ var mcpNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 // mcpServerRow 是 UI 顯示用。結構性欄位（type/command/url/args）可看可編輯；env/headers 只列 key、
 // 【不外洩值】——值遮罩，要改值請手動編 .mcp.json。
 type mcpServerRow struct {
-	Name, Type, Target   string
+	Name, Type, Target    string
 	Command, URL, ArgsStr string   // 供編輯表單預填（結構性，與列表 Target 同源，不算新洩漏）
-	EnvKeys, HeaderKeys  []string // 只 key、不含 value（遮罩）
-	HasSecrets           bool
-	Disabled             bool
+	EnvKeys, HeaderKeys   []string // 只 key、不含 value（遮罩）
+	HasSecrets            bool
+	Disabled              bool
 }
 
 // mcpConfigPath 回目前 .mcp.json 路徑（COGITO_MCP_CONFIG，預設 ./.mcp.json）。

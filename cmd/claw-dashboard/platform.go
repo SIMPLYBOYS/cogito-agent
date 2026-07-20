@@ -46,23 +46,23 @@ type platformData struct {
 	MCPServers []mcpServerRow
 	MCPPath    string
 	// 金鑰／祕密（loopback-only：眼睛顯示現值 + 輪替）
-	Secrets         []secretRow
-	SecretsAllowed  bool
+	Secrets        []secretRow
+	SecretsAllowed bool
 }
 
 type channelRow struct{ Name, Status string }
 
 func (s *server) platform(w http.ResponseWriter, r *http.Request) {
 	d := platformData{
-		ProviderRaw:   os.Getenv("COGITO_PROVIDER"),
-		ClaudeModel:   os.Getenv("CLAUDE_MODEL"),
-		OpenAIModel:   os.Getenv("OPENAI_MODEL"),
-		OpenAIBase:    os.Getenv("OPENAI_BASE_URL"),
-		EmbedModel:    os.Getenv("COGITO_EMBED_MODEL"),
-		EmbedBase:     os.Getenv("COGITO_EMBED_BASE_URL"),
-		Embedder:      envOr("COGITO_EMBED_MODEL", "關鍵字退回（未設 embedder）"),
-		Langfuse:      envSet("LANGFUSE_PUBLIC_KEY") && envSet("LANGFUSE_SECRET_KEY"),
-		OTelEndpoint:  firstNonEmpty(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
+		ProviderRaw:  os.Getenv("COGITO_PROVIDER"),
+		ClaudeModel:  os.Getenv("CLAUDE_MODEL"),
+		OpenAIModel:  os.Getenv("OPENAI_MODEL"),
+		OpenAIBase:   os.Getenv("OPENAI_BASE_URL"),
+		EmbedModel:   os.Getenv("COGITO_EMBED_MODEL"),
+		EmbedBase:    os.Getenv("COGITO_EMBED_BASE_URL"),
+		Embedder:     envOr("COGITO_EMBED_MODEL", "關鍵字退回（未設 embedder）"),
+		Langfuse:     envSet("LANGFUSE_PUBLIC_KEY") && envSet("LANGFUSE_SECRET_KEY"),
+		OTelEndpoint: firstNonEmpty(os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 	}
 	resolveProviderInto(&d)
 	d.Channels = []channelRow{

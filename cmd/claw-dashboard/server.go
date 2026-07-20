@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/replay"
 )
 
@@ -22,8 +23,8 @@ type server struct {
 	dir       string
 	workspace string
 	chat      *chatRunner
-	cron      *cronScheduler // nil＝未啟用 chat（cron 會驅動 agent，沿用同一個寫入閘）
-	flash     atomic.Value   // string：上次寫入動作（放行／設定）的結果，GET 時顯示一次即清
+	cron      *cron.Scheduler // nil＝未啟用 chat（cron 會驅動 agent，沿用同一個寫入閘）
+	flash     atomic.Value    // string：上次寫入動作（放行／設定）的結果，GET 時顯示一次即清
 }
 
 // newServer 組出 operator dashboard 的路由。用自己的 mux（不碰 http.DefaultServeMux——避免任何被
@@ -32,9 +33,10 @@ type server struct {
 func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunner) http.Handler {
 	s := &server{store: store, dir: dir, workspace: workspace, chat: chat}
 	// 排程器只在 chat（寫入）啟用時起——cron 到點會驅動 agent。stop 傳 nil＝跟著行程活到結束。
+	// bot（cmd/claw）也會跑一個同樣的排程器；跨行程檔案鎖保證同一輪只有一邊真的執行。
 	if chat != nil {
-		s.cron = newCronScheduler(workspace, chat)
-		go s.cron.run(nil)
+		s.cron = cron.New(workspace, dashCronRunner{chat: chat}, "dashboard")
+		go s.cron.Run(nil)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)

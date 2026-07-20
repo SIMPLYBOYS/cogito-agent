@@ -53,8 +53,10 @@ func evJSON(kind, label string) string {
 // sseReporter 把 engine 執行事件推進 hub，供瀏覽器即時串流。實作 engine.Reporter。
 type sseReporter struct{ hub *sseHub }
 
-func (r sseReporter) OnTurn(_ context.Context, turn int) { r.hub.push(evJSON("turn", fmt.Sprintf("回合 %d", turn))) }
-func (r sseReporter) OnThinking(_ context.Context)       { r.hub.push(evJSON("think", "思考中…")) }
+func (r sseReporter) OnTurn(_ context.Context, turn int) {
+	r.hub.push(evJSON("turn", fmt.Sprintf("回合 %d", turn)))
+}
+func (r sseReporter) OnThinking(_ context.Context) { r.hub.push(evJSON("think", "思考中…")) }
 func (r sseReporter) OnToolCall(_ context.Context, name, args string) {
 	r.hub.push(evJSON("tool", name+"  "+schema.TruncRunes(args, 120, "…")))
 }
@@ -74,11 +76,31 @@ func (r sseReporter) OnMessage(_ context.Context, content string) {
 // multiReporter 把事件同時打到終端（跑 dashboard 的 console）與 SSE hub（瀏覽器）。
 type multiReporter struct{ rs []engine.Reporter }
 
-func (m multiReporter) OnTurn(ctx context.Context, t int)                              { for _, r := range m.rs { r.OnTurn(ctx, t) } }
-func (m multiReporter) OnThinking(ctx context.Context)                                 { for _, r := range m.rs { r.OnThinking(ctx) } }
-func (m multiReporter) OnToolCall(ctx context.Context, n, a string)                    { for _, r := range m.rs { r.OnToolCall(ctx, n, a) } }
-func (m multiReporter) OnToolResult(ctx context.Context, n, res string, e bool)        { for _, r := range m.rs { r.OnToolResult(ctx, n, res, e) } }
-func (m multiReporter) OnMessage(ctx context.Context, c string)                        { for _, r := range m.rs { r.OnMessage(ctx, c) } }
+func (m multiReporter) OnTurn(ctx context.Context, t int) {
+	for _, r := range m.rs {
+		r.OnTurn(ctx, t)
+	}
+}
+func (m multiReporter) OnThinking(ctx context.Context) {
+	for _, r := range m.rs {
+		r.OnThinking(ctx)
+	}
+}
+func (m multiReporter) OnToolCall(ctx context.Context, n, a string) {
+	for _, r := range m.rs {
+		r.OnToolCall(ctx, n, a)
+	}
+}
+func (m multiReporter) OnToolResult(ctx context.Context, n, res string, e bool) {
+	for _, r := range m.rs {
+		r.OnToolResult(ctx, n, res, e)
+	}
+}
+func (m multiReporter) OnMessage(ctx context.Context, c string) {
+	for _, r := range m.rs {
+		r.OnMessage(ctx, c)
+	}
+}
 
 // chatStream 是 SSE 端點：尾隨 hub、把當前 run 的事件逐筆推給瀏覽器；run 結束送 done 收線。
 // 用伺服端 150ms tick 輪詢共享緩衝（非阻塞 channel），簡單且無洩漏：run 結束或客戶端斷線即返回。

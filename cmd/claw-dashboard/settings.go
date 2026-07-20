@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 )
 
 // 可編輯的【非祕密】操作型 env，依主題分組——每組在 platform 頁是一個獨立的小表單（就地看+改）。
@@ -36,7 +38,7 @@ var (
 	// model / base url；embedder 金鑰仍是祕密、不在此）。
 	providerEnvKeys = []string{"COGITO_PROVIDER", "CLAUDE_MODEL", "OPENAI_MODEL", "OPENAI_BASE_URL", "COGITO_EMBED_MODEL", "COGITO_EMBED_BASE_URL"}
 	// cron 結果推播設定（非祕密：只是頻道 id 與開關；token 走「金鑰／祕密」區）。表單在 cron 頁。
-	cronEnvKeys = []string{cronTZKey, notifyTargetKey, notifyErrOnlyKey}
+	cronEnvKeys = []string{cron.TZKey, cron.NotifyTargetKey, cron.NotifyErrOnlyKey}
 )
 
 // liveEnvKeys 是【本行程在使用時才讀】的設定（cronLocation/cronNotifyTarget… 每次都 os.Getenv），
@@ -118,8 +120,8 @@ func (s *server) envConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 推播目標會明碼顯示在頁面上：存檔就擋掉誤貼的 token，別等到執行才失敗（那時憑證已經寫進 .env）。
-	if v := updates[notifyTargetKey]; v != "" {
-		if err := validateNotifyTargets(v); err != nil {
+	if v := updates[cron.NotifyTargetKey]; v != "" {
+		if err := cron.ValidateTargets(v); err != nil {
 			s.setFlash("⚠️ 推播目標無效：" + err.Error())
 			http.Redirect(w, r, back, http.StatusSeeOther)
 			return

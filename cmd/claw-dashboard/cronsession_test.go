@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -18,7 +19,7 @@ func TestCronRun_PersistsSession(t *testing.T) {
 	ctxpkg.GlobalSessionMgr.SetStore(store)
 	defer ctxpkg.GlobalSessionMgr.SetStore(nil) // 全域單例：測完還原，別污染其他測試
 
-	id := cronSessionID("abc123")
+	id := cron.SessionID("abc123")
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(id, t.TempDir())
 	sess.Reset()
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: "檢查未推送的 commit"})
