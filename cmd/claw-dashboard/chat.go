@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/agentkit"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/policy"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -67,6 +70,21 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	mcpGW, _ := agentkit.LoadMCPGateway(mcpDialTimeout)
 	agentkit.RegisterMCPTools(registry, mcpGW)
 
+	// 守門（Deny > Ask > Allow）。先前這裡完全沒掛，dashboard 的 agent 可無條件跑高危命令。
+	//
+	// operator chat 是【人在鍵盤前】：任務是使用者自己下的、執行樹即時串流看得到，故 Ask 直接放行
+	// ——等同已審批（面板也沒有審批 UI 可問）。但兩件事照樣成立：
+	//   - DENY 仍然擋：政策不依賴誰在場，這正是加這一層的理由。
+	//   - 【排程任務】共用這個 registry，但它走 policy.WithUnattended 的 ctx，需審批的操作會被
+	//     自動拒絕——沒有人在現場時不該放行高危操作。
+	pol, err := policy.Load(policy.ConfigPath(workDir))
+	if err != nil {
+		return nil, fmt.Errorf("載入 policy.json 失敗（修好或移除該檔）：%w", err)
+	}
+	operatorPresent := func(context.Context, schema.ToolCall) (bool, string) { return true, "" }
+	guard := policy.Guard(pol, chatbot.IsDangerousCommand, operatorPresent)
+	registry.Use(guard)
+
 	eng := engine.NewAgentEngine(tracked, registry, false, false)
 
 	hub := &sseHub{}
@@ -77,6 +95,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 		Executor:      executor,
 		SkillsBaseDir: workDir,
 		Reporter:      reporter,
+		Middleware:    []tools.MiddlewareFunc{guard},                                  // 子 agent 同樣過守門，不留繞道
 		ExtraSubTools: func(r tools.Registry) { agentkit.RegisterMCPTools(r, mcpGW) }, // 子 agent 也能用 MCP
 	})
 

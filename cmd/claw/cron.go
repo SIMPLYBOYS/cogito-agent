@@ -8,6 +8,7 @@ import (
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/policy"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -37,7 +38,10 @@ func (b *botCronRunner) RunJob(sessionID, prompt string) (string, error) {
 
 	reporter := engine.NewTerminalReporter()
 	eng := b.factory(sess, reporter)
-	if err := eng.Run(context.Background(), sess, reporter); err != nil {
+	// 標記無人值守：排程沒有人在現場。少了這個，高危操作會把審批請求推去一個不存在的頻道
+	//（session id 是 cron-<id> 而非真頻道），然後卡到逾時才拒絕——慢，而且只是碰巧安全。
+	ctx := policy.WithUnattended(context.Background())
+	if err := eng.Run(ctx, sess, reporter); err != nil {
 		return "", err
 	}
 	return sess.LastAssistantText(), nil // 供推播摘要

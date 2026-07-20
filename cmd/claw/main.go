@@ -20,6 +20,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/policy"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/sandbox"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -81,24 +82,30 @@ func main() {
 	// 會被掛起，把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），等管理員回
 	// approve/reject 才放行（不調 next 即短路）。抽成函式以便主工具池與子智能體只讀池共用
 	//（子 agent 的 bash 同樣要過審批，不留後門）。
-	approval := func(ctx context.Context, call schema.ToolCall, next tools.ToolHandler) schema.ToolResult {
-		args := string(call.Arguments)
-		if chatbot.IsDangerousCommand(call.Name, args) {
-			channelID := ""
-			if s := engine.SessionFromContext(ctx); s != nil {
-				channelID = s.ID
-			}
-			allowed, reason := chatbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, args, func(text string) {
-				if channelID != "" {
-					bot.SendMessage(channelID, text)
-				}
-			})
-			if !allowed {
-				return schema.ToolResult{ToolCallID: call.ID, Output: fmt.Sprintf("執行被系統攔截。原因: %s", reason), IsError: true}
-			}
-		}
-		return next(ctx, call)
+	// 政策檔（.claw/policy.json，選填）：可宣告 deny/ask/allow 覆蓋內建判斷。載入失敗直接退出——
+	// 靜默忽略會讓人以為有保護、其實整份政策沒生效。
+	pol, errPol := policy.Load(policy.ConfigPath(rootDir))
+	if errPol != nil {
+		log.Fatalf("[policy] 載入失敗（修好或移除 %s 再啟動）：%v", policy.ConfigPath(rootDir), errPol)
 	}
+
+	// 詢問人類：把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），等管理員回
+	// approve/reject。排程任務走 policy.WithUnattended 的 ctx，Guard 不會呼叫這裡（沒人可問）。
+	askHuman := func(ctx context.Context, call schema.ToolCall) (bool, string) {
+		channelID := ""
+		if s := engine.SessionFromContext(ctx); s != nil {
+			channelID = s.ID
+		}
+		return chatbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, string(call.Arguments), func(text string) {
+			if channelID != "" {
+				bot.SendMessage(channelID, text)
+			}
+		})
+	}
+
+	// 守門 middleware（環繞式）：Deny > Ask > Allow。抽成變數以便主工具池與子智能體只讀池共用
+	//（子 agent 的 bash 同樣要過，不留後門）。
+	approval := policy.Guard(pol, chatbot.IsDangerousCommand, askHuman)
 
 	// 計時 middleware：記錄工具的物理執行耗時（如一個編譯 5 分鐘的 bash）。掛在 approval【之後】，
 	// 故只量工具本身、不含人工審批等待。捕獲不修改 bash.go 等任何工具源碼（裝飾器攔截）。

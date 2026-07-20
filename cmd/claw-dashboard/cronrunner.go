@@ -6,6 +6,7 @@ import (
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cron"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/policy"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -28,7 +29,9 @@ func (d dashCronRunner) RunJob(sessionID, prompt string) (string, error) {
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(sessionID, c.workDir)
 	sess.Reset()
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
-	if err := c.eng.Run(context.Background(), sess, engine.NewTerminalReporter()); err != nil {
+	// 標記無人值守：排程沒有人在現場，需審批的高危操作一律拒絕而非等一個不會來的人。
+	ctx := policy.WithUnattended(context.Background())
+	if err := c.eng.Run(ctx, sess, engine.NewTerminalReporter()); err != nil {
 		return "", err
 	}
 	return sess.LastAssistantText(), nil // 供推播摘要
