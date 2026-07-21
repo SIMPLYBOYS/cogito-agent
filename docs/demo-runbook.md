@@ -61,13 +61,35 @@ if 'D' in format:
 `output_field` 是 numpy chararray，`.replace()` **回傳新陣列、不原地修改**。
 這行看起來完全正確，review 也容易放過，實際是 no-op——FITS 檔的 D 指數格式從來沒被寫出去。
 
-Agent 的 patch：
+Agent 的 patch vs astropy 維護者當初那個 PR 的修法（SWE-bench 稱 gold patch）：
 
 ```python
-    output_field[:] = output_field.replace(encode_ascii('E'), encode_ascii('D'))
+# agent
+output_field[:] = output_field.replace(encode_ascii('E'), encode_ascii('D'))
+# astropy 維護者
+output_field[:] = output_field.replace(b'E', b'D')
 ```
 
-與官方 gold patch **一字不差**，官方 harness 判定 resolved。
+**同一個修法，不是同一行字。** 兩者都是「用 slice 賦值把 replace 的結果寫回去」；
+差別只在 agent 保留了原本就在那裡的 `encode_ascii()` 呼叫，維護者順手簡化成 byte 字面量。
+語意等價（`encode_ascii('E')` 就是回 `b'E'`）。
+
+> ⚠️ 別說「一字不差」——不是事實，而且對方一查就破。準確的說法反而更強，見下。
+
+### 驗收機制要講清楚（這是重點，不是註腳）
+
+**SWE-bench 判定 resolved 時根本不比對 gold patch**，它跑測試：
+
+```
+FAIL_TO_PASS  test_ascii_table_data、test_ascii_table   ← 必須從紅變綠
+PASS_TO_PASS  既有測試                                   ← 一個都不准弄壞
+```
+
+gold patch 只用來**建題目**（從那個 PR 推導出哪些測試該從失敗變通過）。所以講法是：
+
+> 「它不是靠模仿人類的修法過關的——**驗收是跑測試**：兩個原本失敗的要變綠、既有的不准壞。
+> 而它**獨立收斂到了跟 astropy 維護者一樣的修法**。
+> 這個一致性是『找到真正根因』的證據——不是繞過測試，是修對了地方。」
 
 ### 這裡一定要主動講的誠實話
 
@@ -75,6 +97,12 @@ Agent 的 patch：
 > 它的用途是證明整條 pipeline 是真的：真 repo、真 issue、官方 harness、F2P/P2P 雙向驗收。」
 
 主動說出 benchmark 的侷限，比讓面試官問出來強得多。這是加分題不是扣分題。
+
+### 「官方」指誰（會被追問）
+
+gold patch 來自 **astropy/astropy 那個真實合併的 PR**，是 astropy 自己的維護者寫的——
+不是 SWE-bench 產的，也不是模型供應商給的。SWE-bench 做的事是把「issue ＋ 修它的 PR ＋
+相關測試」打包成可自動驗收的題目；判定用的 harness 才是 SWE-bench 官方的。
 
 ---
 
