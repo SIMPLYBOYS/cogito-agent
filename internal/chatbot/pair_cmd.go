@@ -8,7 +8,11 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/authz"
 )
 
-// 配對指令：未授權者用 /pair 自助發起，管理員用 `pair approve|reject|list|revoke` 回應。
+// 配對指令：未授權者用 `pair` 自助發起，管理員用 `pair approve|reject|list|revoke` 回應。
+//
+// 【一律不帶斜線】Slack 把 / 開頭的訊息當成自家 slash command 攔下（回「/pair 是無效指令」），
+// 訊息根本到不了 bot。裸字兩個平台都通，故對外提示一律用裸字；/pair 仍收，因為 Telegram 使用者
+// 習慣加斜線、且那邊送得到——與既有的 stop/"/stop" 同慣例。
 //
 // 【為何不沿用裸 approve】approve/reject 已被【高危操作審批】佔用（見 tryResolveApproval）。
 // 若配對也用它，`approve 7F2K` 就有兩種可能語意——是批准配對碼還是批准 taskID？加 "pair"

@@ -272,7 +272,7 @@ var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct":
 {{if .AuthzErr}}<p class="banner">⚠️ 授權記錄檔讀取失敗：{{.AuthzErr}}<br>
 <span class="muted">此時 bot 僅套用下方的 env bootstrap——不會放行任何人，也不會把你自己鎖在門外。</span></p>{{end}}
 
-<h3>待審配對 <span class="muted">使用者在 chat 發 <code>/pair</code> 產碼；批准後立即生效、免重啟</span></h3>
+<h3>待審配對 <span class="muted">使用者在 chat 發 <code>pair</code>（不加斜線，Slack 會吃掉 / 開頭的訊息）產碼；批准後立即生效、免重啟</span></h3>
 {{if .Pending}}
 <table class="runs">
   <tr><th>碼</th><th>條目</th><th>平台</th><th>請求時間</th><th></th></tr>

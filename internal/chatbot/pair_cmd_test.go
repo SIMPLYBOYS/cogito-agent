@@ -173,3 +173,36 @@ func TestPairAdmin_ConsumedNotPassedToAgent(t *testing.T) {
 		t.Errorf("應被消費並回拒，實得: %q", lastMsg(got))
 	}
 }
+
+// Slack 會把 / 開頭的訊息當成自家 slash command 攔下（回「/pair 是無效指令」），訊息根本
+// 到不了 bot。故【裸 pair 必須可用】——那是 Slack 唯一走得通的形式。斜線版仍收（Telegram 慣用）。
+func TestPairRequest_AcceptsBareAndSlashForms(t *testing.T) {
+	for i, form := range []string{"pair", "/pair", "PAIR", "  pair  "} {
+		plat := "pairForm" + string(rune('a'+i))
+		c, store, got := newPairCore(t, plat, []string{plat + ":boss"})
+
+		c.dispatch("chan", "newbie", form, false)
+
+		if !strings.Contains(lastMsg(got), "配對碼") {
+			t.Errorf("%q 應被當成配對請求，實得: %q", form, lastMsg(got))
+		}
+		if pending, _ := store.Pending(); len(pending) != 1 {
+			t.Errorf("%q 應產生待審請求", form)
+		}
+	}
+}
+
+// 拒絕訊息本身不能叫使用者去打 Slack 會吃掉的東西——這是實際踩到的坑。
+func TestUnauthorizedHint_DoesNotTellSlackUsersToTypeSlash(t *testing.T) {
+	c, _, got := newPairCore(t, "pairHint", []string{"pairHint:boss"})
+
+	c.dispatch("chan", "newbie", "你好", false)
+
+	msg := lastMsg(got)
+	if !strings.Contains(msg, "pair") {
+		t.Fatalf("拒絕訊息應告知如何自助配對，實得: %q", msg)
+	}
+	if strings.Contains(msg, "/pair") {
+		t.Errorf("提示不可帶斜線（Slack 會攔下），實得: %q", msg)
+	}
+}

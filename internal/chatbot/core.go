@@ -260,7 +260,9 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 			return
 		}
 		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
-		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。\n輸入 `/pair` 產生配對碼請管理員放行（或請管理員把你加進 COGITO_ALLOWED_USERS）。", userID))
+		// 提示【不帶斜線】：Slack 會把 / 開頭的訊息當成自家 slash command 攔下來，根本送不到這裡
+		// （回「/pair 是無效指令」）。裸 pair 兩個平台都通，故一律以它為準——與 stop/status 同慣例。
+		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。\n輸入 `pair`（不加斜線）產生配對碼請管理員放行，或請管理員把你加進 COGITO_ALLOWED_USERS。", userID))
 		return
 	}
 
@@ -465,6 +467,11 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"`learn` — 從本次對話蒸餾一個【提案】技能（過 skillgate 把關才生效）\n\n" +
 	"**審批（HITL）**\n" +
 	"`approve` / `reject` — 放行 / 否決待審批的高危操作（僅管理員；可帶 ID：`approve <id>`）\n\n" +
+	"**授權（誰能使喚我）**\n" +
+	"`pair` — 未授權者自助產生配對碼（不加斜線；Slack 會吃掉 / 開頭的訊息）\n" +
+	"`pair list` — 列出待審配對與生效中的授權（僅管理員）\n" +
+	"`pair approve <碼> [admin]` / `pair reject <碼>` — 放行 / 否決配對；加 `admin` 才給審批權\n" +
+	"`pair revoke <條目>` — 撤銷授權，立即失效（env 設定的 bootstrap 撤不掉）\n\n" +
 	"**Plan Mode（長任務斷點續傳）**\n" +
 	"`plan on` / `plan off` / `plan status` — 把計畫/進度外部化到 PLAN.md · TODO.md 的開關\n\n" +
 	"**自我進化把關（提案 → 人工放行）**\n" +
