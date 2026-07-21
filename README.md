@@ -53,6 +53,7 @@
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 - 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
 - ⏰ **內建 cron**：到點自動派任務給 agent，標準 cron 運算式 + 時區設定；結果推播 Slack／Telegram（含執行來源）。排程住常駐行程，bot 與面板各跑一個、靠檔案鎖仲裁不重複執行。
+- 📊 **三層評測（有實測數字，含負面結果）**：SWE-bench 測的是「模型 × harness」的乘積、分不開兩者的貢獻，故另有兩層評自己的機制——檢索 `hit@k` **完全不呼叫 LLM**（keyword 0.50 → 加 KG **1.00**）；A/B 消融固定模型、只切換一個功能（記憶讓任務 **8→3 回合、省 66%**；技能讓通過率 **1/5→4/5**，但 **p=0.206 未達顯著**，照實標註）。[結果與判讀 →](docs/eval-results.md)
 
 **安全邊界**
 - 🛡️ **Deny > Ask > Allow 權限模型**：宣告式政策檔（`.claw/policy.json`）可讓某工具**永遠不准**；裁決與規則順序無關。**無人值守**（排程）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
@@ -468,7 +469,44 @@ go build ./...     # 建置
 > 曾有 `claw-demo`（session 隔離）、`claw-demo-trace`（OTel span）、`claw-demo-observability`（成本追蹤）
 > 三支，已移除——面板的執行樹回放、Langfuse 的甘特圖、面板 Metrics 頁分別把同一件事呈現得更好。
 
-### 評測（eval）與儀表板
+### 評測（eval）：分三層，因為它們測的不是同一件事
+
+一個常見的誤解是「評測就是測模型能力」。SWE-bench 這類基準測的是**模型 × harness 的乘積**，
+單一分數**分不開兩者的貢獻**。所以這裡分三層——前兩層評自己的機制，第三層只當外部座標。
+
+| 層 | 測什麼 | 模型的角色 | 成本 | 實測結果 |
+|---|---|---|---|---|
+| **① 檢索** `hit@k`/MRR | **純 harness** | **完全不參與** | $0 | keyword **0.50** → keyword+KG **1.00** |
+| **② A/B 消融** | harness 的**邊際貢獻** | 固定，當背景 | ~$0.05/次 | 見下 |
+| **③ SWE-bench** | 模型 × harness | 混在一起 | ~$0.24/題 | haiku：5 題 resolved 1、errors 0 |
+
+**② 的兩個消融，改善的維度剛好相反**（各 n=5，模型固定 haiku）：
+
+| | 通過率 | 回合中位數 | 成本中位數 | 證據強度 |
+|---|---|---|---|---|
+| **記憶** off→on | 5/5 → 5/5 | 8 → **3** | $0.0342 → **$0.0116**（−66%） | **高**：5/5 一致、on 側變異為 0 |
+| **技能** off→on | **1/5 → 4/5** | 4 → 5 | $0.0143 → $0.0194（+35%） | **低**：Fisher p=0.206、有一次反例 |
+
+> **記憶改善效率、技能改善正確性。** 但技能那條**只能當觀察不能當結論**——p 值未達顯著、
+> 且五次中有一次「有技能反而失敗」。要下結論得跑到 n ≥ 20。
+>
+> 逐次原始數據、判讀依據、以及本輪犯過的方法論錯誤，見 **[docs/eval-results.md](docs/eval-results.md)**。
+
+```bash
+# ① 檢索評測（$0、十幾秒、完全不呼叫 LLM）
+go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
+  -eval internal/eval/testdata/mem_multihop/labels.jsonl -k 3 -hops 1
+
+# ② A/B 消融：同一任務、同一模型，只切換一個 harness 功能
+go run ./cmd/bench -mem-ab      # 有／無相關記憶
+go run ./cmd/bench -skill-ab    # 有／無綁定技能
+```
+
+多跳語料是刻意設計的：**答案節點與查詢字面零重疊**，純關鍵字撈不到，只有沿 `[[link]]` 擴張的
+知識圖譜撈得到。並附**防作弊護欄**——若有人把語料改到 keyword 也能滿分，測試會失敗
+（`memeval_test.go`），讓 `0.50 vs 1.00` 不會因語料退化而變成假勝利。
+
+### 跑分與儀表板
 
 ```bash
 # 1) 跑分（真實 API、需 ANTHROPIC_API_KEY）並輸出 JSON 報告
@@ -503,6 +541,16 @@ go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 ```
 
 > 各 repo 的 Python 環境差異大，正式跑建議在官方 SWE-bench Docker 映像內執行（依賴已備）；`-swe-env-setup '<bash>'` 可覆蓋每個實例的環境安裝步驟。agent 只用 `read_file`/`write_file`/`edit_file`/`bash` 解題（無 SWE-bench 專用工具）。
+
+**實測（2026-07）**：`scripts/run_swebench_lite.sh` 一鍵跑通官方 Docker harness。
+haiku 在 5 個 astropy 實例上 **resolved 1、errors 0**——樣本太小，不宣稱任何 pass rate，
+它的用途是證明整條 pipeline 是真的（真 repo、真 issue、官方 harness、F2P/P2P 雙向驗收）。
+成本實測 **$0.24/題、117 秒/題**（約 67 秒是 clone），故擴大到 30 題約 $7.3 / 1 小時。
+
+> 🔎 **一個未驗證的觀察**：`MaxTurns=40`，但五題中四題在 **3~5 回合就自己收手**（不是被切斷）。
+> 推測是 `-swe-env-setup` 空著 → 沒裝依賴 → **跑不了測試 → 沒有回饋訊號可迭代**，agent 只能
+> 讀 issue、讀幾個檔、寫 patch 就無事可做（唯一花到 19 回合的那題正好是有東西可探索的）。
+> 若成立，**提分的最大槓桿是備妥測試環境，而不是換更強的模型**。尚未驗證。
 
 ### Plan Mode（長程任務斷點續傳）
 
