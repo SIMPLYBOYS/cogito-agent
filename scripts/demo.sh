@@ -23,6 +23,33 @@ stage)
   echo "  生效技能  $(ls "$CLAW/skills" 2>/dev/null | wc -l | tr -d ' ') 個"
   ;;
 
+pairing)
+  # 第一幕前置：把自己踢出白名單，才演得出「未授權 → 配對 → 放行」。
+  # 【備份 .env】那裡面是正式憑證，改壞了不是重跑一次就能救的。
+  [ -f .env ] || { echo "找不到 .env" >&2; exit 1; }
+  cp .env .env.demo-backup
+  # 待審與既有授權都清掉，否則 demo 一開始就看到上次的殘留。
+  rm -f "$CLAW/pairing-pending.json" "$CLAW/authorized-users.json"
+  if grep -q '^COGITO_ALLOWED_USERS=' .env; then
+    sed -i '' 's/^COGITO_ALLOWED_USERS=.*/COGITO_ALLOWED_USERS=nobody/' .env
+  else
+    printf 'COGITO_ALLOWED_USERS=nobody\n' >> .env
+  fi
+  echo "已就緒（原 .env 備份到 .env.demo-backup）："
+  echo "  ALLOWED_USERS  nobody —— 你在 Slack 會是【未授權者】"
+  echo "  待審／授權記錄  已清空"
+  echo
+  echo "演完務必還原：  ./scripts/demo.sh restore"
+  ;;
+
+restore)
+  # 還原 .env。demo 結束後【一定】要跑——忘了的話 bot 重啟後沒有任何 bootstrap admin，
+  # 也就沒有人能從 chat 批准任何人。
+  [ -f .env.demo-backup ] || { echo "找不到 .env.demo-backup" >&2; exit 1; }
+  mv .env.demo-backup .env
+  echo "已還原 .env。"
+  ;;
+
 policy)
   # 結局三：現場貼這段比手打快，但講解時仍要逐行念。
   cat > "$CLAW/policy.json" <<'JSON'
@@ -43,7 +70,12 @@ serve)
   ;;
 
 *)
-  echo "用法: $0 {stage|policy|serve}" >&2
+  echo "用法: $0 {stage|pairing|restore|policy|serve}" >&2
+  echo "  stage    第二幕前置：建刪除目標、清掉政策檔" >&2
+  echo "  pairing  第一幕前置：備份 .env、把自己踢出白名單、清待審" >&2
+  echo "  restore  還原 .env（demo 完【務必】跑）" >&2
+  echo "  policy   第二幕結局三：寫入 deny 政策" >&2
+  echo "  serve    起 dashboard" >&2
   exit 1
   ;;
 esac
