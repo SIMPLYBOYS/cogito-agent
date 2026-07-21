@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/authz"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -25,9 +26,13 @@ type governanceData struct {
 	// 粒度粗、又有 LLM 非確定性，硬擋會給出沒有意義的綠燈。把數字連同樣本數攤開，人來判斷。
 	Verify    evolve.Verification
 	HasVerify bool
-	Allowed   []string
+	Allowed   []string // env bootstrap：撤不掉（撤了重啟又活過來，狀態自相矛盾）
 	Admins    []string
-	Flash     string // 上次放行動作的結果（顯示一次）
+	Pending   []authz.PairRequest // 待審配對請求
+	Granted   []authz.Record      // 記錄檔授予、生效中的授權（可撤銷）
+	Revoked   []authz.Record      // 已撤銷者——稽核軌跡，保留才看得到「誰撤了誰」
+	AuthzErr  string              // 授權檔讀取失敗的原因（壞檔不該靜默）
+	Flash     string              // 上次放行動作的結果（顯示一次）
 }
 
 type proposedSkill struct{ Dir, Name, Desc string } // Dir＝資料夾名（晉升用）；Name＝顯示名（frontmatter）
@@ -44,6 +49,7 @@ func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 		Flash:          s.readFlash(),
 	}
 	d.Verify, d.HasVerify = evolve.ReadProposedVerification(claw)
+	d.fillAuthz(s.authzStore())
 
 	var b bytes.Buffer
 	_ = govTmpl.Execute(&b, d)
@@ -262,11 +268,66 @@ var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct":
 </div>
 {{else}}<p class="muted">無。</p>{{end}}
 
-<h2>授權名單 <span class="muted">env，只顯示 id</span></h2>
+<h2>授權</h2>
+{{if .AuthzErr}}<p class="banner">⚠️ 授權記錄檔讀取失敗：{{.AuthzErr}}<br>
+<span class="muted">此時 bot 僅套用下方的 env bootstrap——不會放行任何人，也不會把你自己鎖在門外。</span></p>{{end}}
+
+<h3>待審配對 <span class="muted">使用者在 chat 發 <code>/pair</code> 產碼；批准後立即生效、免重啟</span></h3>
+{{if .Pending}}
+<table class="runs">
+  <tr><th>碼</th><th>條目</th><th>平台</th><th>請求時間</th><th></th></tr>
+  {{range .Pending}}
+  <tr>
+    <td><code>{{.Code}}</code></td><td><code>{{.Entry}}</code></td><td>{{.Platform}}</td><td class="muted">{{.Created}}</td>
+    <td>
+      <form method="POST" action="/governance/authz-approve">
+        <input type="hidden" name="code" value="{{.Code}}">
+        <label class="tog"><input type="checkbox" name="role" value="admin"> 給審批權</label>
+        <button type="submit" class="gact">批准</button>
+      </form>
+      <form method="POST" action="/governance/authz-reject">
+        <input type="hidden" name="code" value="{{.Code}}"><button type="submit">否決</button>
+      </form>
+    </td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted">（無待審請求。）</p>{{end}}
+
+<h3>生效中的授權 <span class="muted">記錄檔授予，可撤銷；撤銷立即失效</span></h3>
+{{if .Granted}}
+<table class="runs">
+  <tr><th>條目</th><th>角色</th><th>批准者</th><th>時間</th><th></th></tr>
+  {{range .Granted}}
+  <tr>
+    <td><code>{{.Entry}}</code></td><td>{{.Role}}</td><td class="muted">{{.ApprovedBy}}</td><td class="muted">{{.ApprovedAt}}</td>
+    <td><details class="danger"><summary>撤銷</summary>
+      <div class="confirm">
+        <span>確定撤銷 <b>{{.Entry}}</b> 的權限？下次查詢即失效。</span>
+        <form method="POST" action="/governance/authz-revoke"><input type="hidden" name="entry" value="{{.Entry}}"><button type="submit" class="gact">確定撤銷</button></form>
+      </div>
+    </details></td>
+  </tr>
+  {{end}}
+</table>
+{{else}}<p class="muted">（尚無記錄檔授予的授權。）</p>{{end}}
+
+<h3>env bootstrap <span class="muted">撤不掉——撤了重啟又活過來，狀態會自相矛盾</span></h3>
 <dl class="kv">
   <dt>可驅動 agent（ALLOWED_USERS）</dt><dd>{{if .Allowed}}{{range .Allowed}}<code>{{.}}</code> {{end}}{{else}}<span class="muted">（未設＝fail-closed 拒絕所有）</span>{{end}}</dd>
   <dt>可審批（ADMIN_USERS）</dt><dd>{{if .Admins}}{{range .Admins}}<code>{{.}}</code> {{end}}{{else}}<span class="muted">（未設＝回退為 ALLOWED_USERS）</span>{{end}}</dd>
 </dl>
+
+{{if .Revoked}}
+<details><summary>已撤銷（稽核軌跡，{{len .Revoked}} 筆）</summary>
+  <table class="runs">
+    <tr><th>條目</th><th>批准者／時間</th><th>撤銷者／時間</th></tr>
+    {{range .Revoked}}
+    <tr><td><code>{{.Entry}}</code></td><td class="muted">{{.ApprovedBy}} · {{.ApprovedAt}}</td><td class="muted">{{.RevokedBy}} · {{.RevokedAt}}</td></tr>
+    {{end}}
+  </table>
+</details>
+{{end}}
 
 <h2>待審批</h2>
 <p class="muted">⚠️ 待審批的高危操作是 bot 行程內的即時狀態（in-memory），獨立的 dashboard 行程看不到。

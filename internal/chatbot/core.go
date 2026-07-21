@@ -250,8 +250,17 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	// 訊息」的回應，不該經 lastRoute 路由（送錯人，且未授權者若無路由會被靜默丟棄，而告知對方
 	// 自己的 user ID 正是這則訊息唯一的用途）。
 	if !c.isAllowed(userID) {
+		// 【授權閘之前的唯一例外】/pair 讓未授權者【自助發起】配對請求——否則新人連請求的入口
+		// 都沒有，管理員得先動（改 .env + 重啟），這正是 pairing 要解掉的事。
+		//
+		// 安全性靠「這條路徑不碰任何共享狀態」維持：只寫待審檔、只回覆 conv（訊息來源），
+		// 不寫 lastRoute、不算 stateID、不開 session、不建工作目錄——上面那段註解警告的副作用
+		// 一個都沒有。待審佇列另有上限與過期，見 authz.RequestPair。
+		if c.tryPairRequest(conv, userID, text) {
+			return
+		}
 		log.Printf("[%s] 🚫 拒絕未授權使用者 %s（頻道 %s）\n", c.platform, userID, channelID)
-		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。請管理員將它加入 COGITO_ALLOWED_USERS 後再試。", userID))
+		SendMessage(conv, fmt.Sprintf("🚫 未授權。你的使用者 ID：`%s`。\n輸入 `/pair` 產生配對碼請管理員放行（或請管理員把你加進 COGITO_ALLOWED_USERS）。", userID))
 		return
 	}
 
@@ -263,6 +272,12 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	}
 	// 審批口令即便會話忙碌也要處理——這正是解開忙碌的方式。
 	if c.tryResolveApproval(id, userID, text) {
+		return
+	}
+	// 配對管理（admin-only，見內部檢查）：list / approve / reject / revoke。
+	// 動詞刻意用 "pair ..." 前綴而非沿用裸 approve——後者已被高危操作審批佔用，
+	// 混用會讓 `approve 7F2K` 語意曖昧（是批准配對碼還是批准 taskID？）。
+	if c.tryPairAdminCommand(id, userID, text) {
 		return
 	}
 	// 指令 gate：stop/status/model 等即時控制 + help + 自我進化 apply/reject + Plan Mode

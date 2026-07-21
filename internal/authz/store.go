@@ -8,8 +8,9 @@
 // 【與 env 的關係】env 是 bootstrap 不是遺留：第一個 admin 必須從檔案外面來，否則雞生蛋
 // （沒人有權批准第一個人）。故最終集合 = env ∪ 檔案中 status=approved 者。
 //
-// 【刻意不快取】每次查詢重讀檔。檔案小（幾十筆）、查詢頻率是人打字的速度，而快取要處理失效，
-// 那才是 bug 來源。「免重啟生效」這個目標直接由不快取達成，零額外機制。
+// 【快取以 mtime 失效】每次查詢先 os.Stat（一次 syscall，不讀內容），mtime+size 沒變就重用
+// 已解析的結果；變了才重讀重解。這同時拿到兩件事——不重複解析，且【任何行程】改檔後下一次查詢
+// 立刻生效。撤銷若要等重啟或等 TTL，等於沒有撤銷，故不用時間型快取。
 package authz
 
 import (
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -49,10 +51,32 @@ type Record struct {
 }
 
 // Store 綁定一個 .claw 目錄與 bootstrap 用的 env 集合。零值不可用，請用 New。
+// 可被多個 goroutine 併用（bot 的多個對話同時進來）。
 type Store struct {
 	path       string
 	envAllowed map[string]bool
 	envAdmin   map[string]bool
+
+	mu     sync.Mutex
+	cached []Record  // 上次解析結果
+	stamp  fileStamp // 對應的檔案指紋；不符即重讀
+	valid  bool      // 是否有可用的快取（含「檔案不存在」這個合法狀態）
+
+	// pmu 保護待審配對檔（見 pair.go）。與 mu 分開：ApprovePair 會先改待審再改授權記錄，
+	// 共用一把鎖會在 mutate 內層重入而自我死鎖。持有順序一律 pmu → mu，不得反向。
+	pmu sync.Mutex
+}
+
+// fileStamp 是判斷「檔案有沒有變」的指紋。用 mtime+size 而非內容雜湊——後者要讀完整個檔，
+// 那就失去快取的意義了。
+//
+// ponytail: mtime 精度受檔案系統限制（APFS/ext4 到奈秒，但某些 FS 只到秒）。同一秒內兩次寫入
+// 且大小恰好相同才會漏判——授權是人手動作，撞上的機率可忽略。真要滴水不漏就改比 inode+ctime
+// 或加 fsnotify。
+type fileStamp struct {
+	exists  bool
+	modTime time.Time
+	size    int64
 }
 
 // New 建 Store。envAllowed／envAdmin 是 bootstrap 集合（呼叫端從環境變數解出），會被聯集進結果。
@@ -60,11 +84,41 @@ func New(clawDir string, envAllowed, envAdmin map[string]bool) *Store {
 	return &Store{path: filepath.Join(clawDir, FileName), envAllowed: envAllowed, envAdmin: envAdmin}
 }
 
+// stampOf 取檔案當下的指紋。os.Stat 不讀內容，是本快取便宜的關鍵。
+func (s *Store) stampOf() fileStamp {
+	fi, err := os.Stat(s.path)
+	if err != nil {
+		return fileStamp{} // 不存在（或讀不到）：exists=false，本身也是個合法的可快取狀態
+	}
+	return fileStamp{exists: true, modTime: fi.ModTime(), size: fi.Size()}
+}
+
 // Path 回傳記錄檔位置（供面板顯示／錯誤訊息）。
 func (s *Store) Path() string { return s.path }
 
 // Records 讀出全部記錄（含已撤銷的，供稽核檢視）。檔案不存在＝空清單，非錯誤。
+//
+// 快取：指紋未變即回上次解析結果。回傳的 slice 是複本——呼叫端改它不該污染快取。
 func (s *Store) Records() ([]Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.stampOf()
+	if s.valid && s.stamp == now {
+		return append([]Record(nil), s.cached...), nil
+	}
+
+	recs, err := s.readLocked()
+	if err != nil {
+		s.valid = false // 壞檔不進快取：修好後下一次查詢就該看到新結果
+		return nil, err
+	}
+	s.cached, s.stamp, s.valid = recs, now, true
+	return append([]Record(nil), recs...), nil
+}
+
+// readLocked 實際讀檔解析（不碰快取）。呼叫端須持有 s.mu。
+func (s *Store) readLocked() ([]Record, error) {
 	data, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -166,8 +220,14 @@ func (s *Store) Revoke(entry, by string) error {
 }
 
 // mutate 讀-改-寫記錄檔（原子：temp + rename，權限 0600——這是授權資料）。
+//
+// 全程持鎖：行程內的併發批准不會互相蓋掉。寫完清快取，下一次查詢重讀。
 func (s *Store) mutate(fn func([]Record) []Record) error {
-	recs, err := s.Records()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	defer func() { s.valid = false }()
+
+	recs, err := s.readLocked()
 	if err != nil {
 		return err // 壞檔時不覆寫，免得把既有記錄一起弄丟
 	}

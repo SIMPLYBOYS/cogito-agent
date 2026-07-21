@@ -161,3 +161,78 @@ func TestApprove_RejectsBadInput(t *testing.T) {
 		t.Error("未知角色應被拒")
 	}
 }
+
+// 快取要真的命中，不只是「結果一致」。驗法：建好快取後把檔案設為不可讀——os.Stat 仍成功
+// （指紋不變），但 os.ReadFile 會失敗。若仍回得出資料，就證明沒有重讀檔。
+func TestRecords_UsesCacheWhenUnchanged(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root 無視檔案權限，本驗法不成立")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	s := New(dir, nil, nil)
+	if err := s.Approve("b", RoleUser, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if recs, _ := s.Records(); len(recs) != 1 {
+		t.Fatalf("前置條件：應有 1 筆，得到 %d", len(recs))
+	}
+
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	recs, err := s.Records()
+	if err != nil || len(recs) != 1 || recs[0].Entry != "b" {
+		t.Fatalf("指紋未變時應命中快取、不重讀檔: err=%v recs=%v", err, recs)
+	}
+
+	// 回傳的是複本：改它不該污染快取。
+	recs[0].Entry = "tampered"
+	if again, _ := s.Records(); again[0].Entry != "b" {
+		t.Error("Records 應回複本，呼叫端的修改不可污染快取")
+	}
+}
+
+// 快取【不能】犧牲即時性：別的行程改了檔，下一次查詢就要看到——撤銷不能等 TTL。
+func TestRecords_CacheInvalidatesOnExternalWrite(t *testing.T) {
+	dir := t.TempDir()
+	reader := New(dir, nil, nil)
+	writer := New(dir, nil, nil) // 模擬另一個行程（面板）持有自己的 Store
+
+	if err := writer.Approve("b", RoleUser, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, _, _ := reader.Sets(); !allowed["b"] {
+		t.Fatal("前置條件：reader 應看得到 b")
+	}
+
+	// 外部撤銷後，reader 不重啟、不清快取，下一次查詢就該失效。
+	if err := writer.Revoke("b", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed, _, _ := reader.Sets(); allowed["b"] {
+		t.Error("外部行程撤銷後，讀取端應立刻失效——撤銷若要等 TTL，等於沒有撤銷")
+	}
+}
+
+// 壞檔不進快取：修好之後下一次查詢就該恢復，不必重啟。
+func TestRecords_BrokenFileNotCached(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, FileName)
+	if err := os.WriteFile(path, []byte("{ bad"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir, nil, nil)
+	if _, err := s.Records(); err == nil {
+		t.Fatal("前置條件：壞檔應報錯")
+	}
+	if err := os.WriteFile(path, []byte(`{"users":[{"entry":"b","role":"user","status":"approved"}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := s.Records()
+	if err != nil || len(recs) != 1 {
+		t.Errorf("檔案修好後應立刻恢復（壞檔不該被快取住）: %v %d", err, len(recs))
+	}
+}
