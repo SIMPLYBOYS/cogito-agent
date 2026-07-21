@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/authz"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
@@ -92,6 +93,7 @@ type Core struct {
 
 	allowedUsers map[string]bool   // COGITO_ALLOWED_USERS：可驅動 agent 的使用者 id；空＝fail-closed 拒絕所有
 	adminUsers   map[string]bool   // COGITO_ADMIN_USERS：可 approve/reject 高危操作者；空則回退為 allowedUsers
+	authz        *authz.Store      // 授權記錄檔（.claw/authorized-users.json）：env 之上的動態授權；nil＝只用 env
 	userLink     map[string]string // COGITO_USER_LINK：平台 user id → canonical 身分；DM 跨平台連續性用
 
 }
@@ -127,7 +129,10 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		autoResume:   os.Getenv("COGITO_AUTO_RESUME") == "1",
 		allowedUsers: allowed,
 		adminUsers:   admins,
-		userLink:     parseUserLink(os.Getenv("COGITO_USER_LINK")),
+		// env 是 bootstrap 不是遺留：第一個 admin 必須從檔案外面來，否則沒人有權批准第一個人。
+		// 記錄檔在 env 之上做加法，讓「加人／撤銷」免改 .env、免重啟。
+		authz:    authz.New(filepath.Join(workDir, ".claw"), allowed, admins),
+		userLink: parseUserLink(os.Getenv("COGITO_USER_LINK")),
 	}
 }
 
@@ -180,9 +185,26 @@ func (c *Core) inSet(set map[string]bool, userID string) bool {
 	return set[c.platform+":"+userID] || set[userID]
 }
 
+// sets 取【當下生效】的授權集合。有 authz store 就每次重讀記錄檔——這就是「加人／撤銷免重啟」：
+// 撤銷若要等重啟，等於沒有撤銷。檔案小、查詢頻率是人打字的速度，故不快取（快取要處理失效，那才是
+// bug 來源）。store 為 nil（單元測試直接建 Core）時退回 env 快照，行為與接線前完全一致。
+//
+// 壞檔時 Sets 已回退成 env-only 並回 err：既不放行任何人，也不把 bootstrap admin 一起鎖在門外
+// （否則沒人進得去修）。這裡把它記出來——授權檔壞掉是該吵的事。
+func (c *Core) sets() (allowed, admin map[string]bool) {
+	if c.authz == nil {
+		return c.allowedUsers, c.adminUsers
+	}
+	a, ad, err := c.authz.Sets()
+	if err != nil {
+		log.Printf("[%s] ⚠️ 授權記錄檔讀取失敗，本次僅套用 env bootstrap：%v", c.platform, err)
+	}
+	return a, ad
+}
+
 // isAllowed / isAdmin：入口授權與審批權的唯一判準（都吃平台限定，見 inSet）。
-func (c *Core) isAllowed(userID string) bool { return c.inSet(c.allowedUsers, userID) }
-func (c *Core) isAdmin(userID string) bool   { return c.inSet(c.adminUsers, userID) }
+func (c *Core) isAllowed(userID string) bool { allowed, _ := c.sets(); return c.inSet(allowed, userID) }
+func (c *Core) isAdmin(userID string) bool   { _, admin := c.sets(); return c.inSet(admin, userID) }
 
 func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
 func (c *Core) SetPostFailureHook(h PostFailureHook) { c.postFailure = h }

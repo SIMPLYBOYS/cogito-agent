@@ -2,9 +2,12 @@ package chatbot
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/authz"
 )
 
 // newCaptureCore 建一個測試用 Core 並註冊擷取式 sender，回傳 core 與「取回本頻道所收訊息」的函式。
@@ -116,5 +119,54 @@ func TestDispatch_UnauthorizedBlocked(t *testing.T) {
 	}
 	if !strings.Contains(last[len(last)-1], "stranger") {
 		t.Fatalf("拒絕訊息應含其 user id 以便加白名單，得到: %q", last[len(last)-1])
+	}
+}
+
+// 接線驗收：Core 的授權判定確實會走記錄檔，且【免重啟】——同一個 Core 實例，
+// 批准後立刻有權、撤銷後立刻失效。這是 authz 套件單測涵蓋不到的部分（那邊測的是 store 本身）。
+func TestCore_AuthzFileTakesEffectWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	envAllowed := map[string]bool{"tgwire:boss": true}
+	store := authz.New(filepath.Join(dir, ".claw"), envAllowed, nil)
+
+	c, _ := newCaptureCore(t, "tgwire", []string{"tgwire:boss"}, nil)
+	c.authz = store
+
+	if c.isAllowed("newbie") {
+		t.Fatal("前置條件：newbie 尚未被授權")
+	}
+	if err := store.Approve("tgwire:newbie", authz.RoleUser, "tgwire:boss"); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if !c.isAllowed("newbie") {
+		t.Error("批准後應【免重啟】立刻生效")
+	}
+	if c.isAdmin("newbie") {
+		t.Error("RoleUser 不該取得審批權——職責分離")
+	}
+
+	if err := store.Revoke("tgwire:newbie", "tgwire:boss"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if c.isAllowed("newbie") {
+		t.Error("撤銷後應立刻失效——撤銷若要等重啟，等於沒有撤銷")
+	}
+}
+
+// env bootstrap 不因記錄檔存在而失效：否則改壞檔就把所有人鎖在門外。
+func TestCore_EnvBootstrapSurvivesFileAuthz(t *testing.T) {
+	dir := t.TempDir()
+	envAllowed := map[string]bool{"tgboot:boss": true}
+	store := authz.New(filepath.Join(dir, ".claw"), envAllowed, nil)
+	_ = store.Approve("tgboot:other", authz.RoleUser, "tgboot:boss")
+
+	c, _ := newCaptureCore(t, "tgboot", []string{"tgboot:boss"}, nil)
+	c.authz = store
+
+	if !c.isAllowed("boss") {
+		t.Error("env bootstrap 應始終有效")
+	}
+	if !c.isAdmin("boss") {
+		t.Error("未單獨設 admin 時 boss 應可審批（沿用既有語意）")
 	}
 }
