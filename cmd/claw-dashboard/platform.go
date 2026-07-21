@@ -152,7 +152,7 @@ func firstNonEmpty(vals ...string) string {
 }
 
 var platformTmpl = template.Must(template.New("platform").Parse(`
-<p class="muted">設定就地可編輯（點「編輯」展開）。祕密遮罩，僅 loopback 可 👁 顯示／輪替。</p>
+<p class="muted">設定就地可編輯（點「編輯」展開）。祕密遮罩；未設 <code>COGITO_DASH_INSECURE</code> 時（即綁 loopback）可 👁 顯示／輪替。</p>
 {{with .Flash}}<div class="banner done">{{.}}</div>{{end}}
 
 <h2>Provider <span class="muted">寫 .env · 改完重啟</span></h2>
@@ -180,7 +180,7 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   {{range .Channels}}<dt>{{.Name}}</dt><dd>{{if eq .Status "已綁定"}}<span class="badge">已綁定</span>{{else}}<span class="muted">未綁定</span>{{end}}</dd>{{end}}
 </dl>
 
-{{if .SecretsAllowed}}<h2>金鑰／祕密 <span class="muted">👁 顯示 · 可輪替 · 僅 loopback</span></h2>
+{{if .SecretsAllowed}}<h2>金鑰／祕密 <span class="muted">👁 顯示 · 可輪替 · 僅未宣告 insecure 時</span></h2>
 <div class="secrets">
   {{range .Secrets}}<div class="secret">
     <span class="sk">{{.Key}}</span>
@@ -193,7 +193,8 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
       </form>
     </details>
   </div>{{end}}
-</div>{{end}}
+</div>{{else}}<h2>金鑰／祕密 <span class="muted">已停用</span></h2>
+<p class="muted">已設 <code>COGITO_DASH_INSECURE=1</code>——該旗標代表<b>操作者宣告接受無認證曝光</b>，故本面板一律不經手金鑰（不顯示、不輪替）。要在此管理祕密，請移除該旗標並改綁 loopback；遠端存取走 SSH tunnel。憑證仍可直接編輯 <code>.env</code>。</p>{{end}}
 
 <h2>存取控制 <span class="muted">寫 .env · 改完重啟</span></h2>
 {{template "envblock" .AccessEnv}}

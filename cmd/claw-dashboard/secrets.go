@@ -34,15 +34,24 @@ func loadSecrets() []secretRow {
 	return out
 }
 
-// secretsAllowed 是硬性護欄：只有【綁 loopback】的部署才允許顯示/輪替祕密。非 loopback 綁定必然設了
-// COGITO_DASH_INSECURE（guard 否則拒絕啟動），故此旗標為真時一律不碰祕密——金鑰永不經過對外網路。
+// secretsAllowed 是硬性護欄：設了 COGITO_DASH_INSECURE 就一律不碰祕密——金鑰永不經過對外網路。
+//
+// 【判準是旗標，不是實際綁定位址】非 loopback 綁定必然設了此旗標（否則 checkBindSafety 拒絕啟動），
+// 所以「旗標未設」蘊含「綁 loopback」，方向是保守的。反過來不成立：loopback + 旗標也會被擋——
+// 那是刻意的，旗標的語意是「操作者宣告自己接受無認證曝光的風險」，宣告過就不該再給祕密。
+// 錯誤訊息據此寫「已宣告 insecure」而非「非 loopback」，否則 loopback+旗標的人會被訊息誤導。
 func secretsAllowed() bool { return os.Getenv("COGITO_DASH_INSECURE") != "1" }
+
+// secretsDeniedMsg 是被護欄擋下時的統一說明（四個入口共用，免得訊息漂移）。
+func secretsDeniedMsg(action string) string {
+	return "已設 COGITO_DASH_INSECURE，本面板不提供祕密" + action + "（該旗標＝接受無認證曝光，故一律不經手金鑰）"
+}
 
 // secretReveal 即時回傳單一祕密現值（供眼睛圖示按需顯示，不預先嵌進頁面）。loopback-only + 同源 +
 // 白名單 + no-store。跨站雖因同源政策讀不到回應，仍多擋一層。
 func (s *server) secretReveal(w http.ResponseWriter, r *http.Request) {
 	if !secretsAllowed() {
-		http.Error(w, "非 loopback 部署不提供祕密顯示", http.StatusForbidden)
+		http.Error(w, secretsDeniedMsg("顯示"), http.StatusForbidden)
 		return
 	}
 	if !sameOrigin(r) {
@@ -62,7 +71,7 @@ func (s *server) secretReveal(w http.ResponseWriter, r *http.Request) {
 // secretSave 輪替一個祕密：寫回 .env（updateEnvFile 只碰這個 key、其餘逐字保留）。loopback-only + CSRF。
 func (s *server) secretSave(w http.ResponseWriter, r *http.Request) {
 	if !secretsAllowed() {
-		http.Error(w, "非 loopback 部署不提供祕密編輯", http.StatusForbidden)
+		http.Error(w, secretsDeniedMsg("編輯"), http.StatusForbidden)
 		return
 	}
 	if !sameOrigin(r) {
@@ -93,7 +102,7 @@ func (s *server) secretSave(w http.ResponseWriter, r *http.Request) {
 // （loopback-only + 同源 + no-store）。
 func (s *server) mcpSecretReveal(w http.ResponseWriter, r *http.Request) {
 	if !secretsAllowed() {
-		http.Error(w, "非 loopback 部署不提供祕密顯示", http.StatusForbidden)
+		http.Error(w, secretsDeniedMsg("顯示"), http.StatusForbidden)
 		return
 	}
 	if !sameOrigin(r) {
@@ -119,7 +128,7 @@ func (s *server) mcpSecretReveal(w http.ResponseWriter, r *http.Request) {
 // mcpSecretSave 輪替某 MCP server 的 env/headers 單一【既有】key。loopback-only + CSRF；只改既有 key。
 func (s *server) mcpSecretSave(w http.ResponseWriter, r *http.Request) {
 	if !secretsAllowed() {
-		http.Error(w, "非 loopback 部署不提供祕密編輯", http.StatusForbidden)
+		http.Error(w, secretsDeniedMsg("編輯"), http.StatusForbidden)
 		return
 	}
 	if !sameOrigin(r) {
