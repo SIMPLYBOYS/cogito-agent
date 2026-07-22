@@ -108,6 +108,7 @@ type Core struct {
 // user_ 前綴），故共用一張表對既有 per-platform 行為零影響。與 senders / lastRoute 同一理由。
 var (
 	running   = map[string]context.CancelFunc{}
+	stopping  = map[string]bool{} // 已請求 /stop 但尚未收尾的頻道（見 stop 的註解）
 	runningMu sync.Mutex
 )
 
@@ -298,7 +299,12 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	if !c.tryAcquire(workDir, cancel) {
 		cancel()
-		SendMessage(id, "⏳ 上一個任務仍在進行（或正在等待審批）。可用 `/stop` 中止，或稍候再發。")
+		if c.isStopping(workDir) {
+			// 已請求中止但還沒收尾——不講清楚的話，這則讀起來像 /stop 沒作用、系統當掉了。
+			SendMessage(id, "🛑 中止進行中：正在等目前這一步（模型呼叫或工具）結束，之後才會真的停下並回報。請稍候，不必重複 `/stop`。")
+		} else {
+			SendMessage(id, "⏳ 上一個任務仍在進行（或正在等待審批）。可用 `/stop` 中止，或稍候再發。")
+		}
 		return
 	}
 	log.Printf("[%s] 收到 %s: %s\n", c.platform, channelID, text)
@@ -505,7 +511,7 @@ func (c *Core) tryStopCommand(convID, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "stop", "/stop", "中止", "停":
 		if c.stop(c.channelWorkDir(convID)) {
-			SendMessage(convID, "🛑 正在中止本頻道的任務…")
+			SendMessage(convID, "🛑 已送出中止。目前這一步（模型呼叫或工具）跑完才會停——通常數秒、最長約一分鐘。停妥會再回報一次，在那之前請先別發新任務。")
 		} else {
 			SendMessage(convID, "ℹ️ 目前沒有正在執行的任務。")
 		}
@@ -876,19 +882,35 @@ func (c *Core) release(workDir string) {
 		cancel()
 		delete(running, workDir)
 	}
+	delete(stopping, workDir) // 收尾了，中止請求也隨之作廢
 	runningMu.Unlock()
 }
 
 // stop 取消某頻道正在執行的任務（`/stop` 用）。回傳是否真的有任務被取消。
 // 取消後 Run 收到 ctx 取消而中止，由 handleAgentRun 的 defer release 收尾。
+//
+// 【為何要記 stopping】ctx 取消只在【回合邊界】被檢查——若當下正在跑 LLM 呼叫或工具，
+// 那一步跑完才會停，可能數秒到一分鐘。這段空窗期使用者看不到任何動靜，若此時再發訊息
+// 只會收到「上一個任務仍在進行」，讀起來像 /stop 沒作用、系統當掉了（實際回報過）。
+// 記下來，讓忙碌訊息能誠實區分「還在跑」與「正在停，等這一步結束」。
 func (c *Core) stop(workDir string) bool {
 	runningMu.Lock()
 	cancel, ok := running[workDir]
+	if ok {
+		stopping[workDir] = true
+	}
 	runningMu.Unlock()
 	if ok {
 		cancel()
 	}
 	return ok
+}
+
+// isStopping 回報該頻道是否已請求中止但尚未收尾。
+func (c *Core) isStopping(workDir string) bool {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	return stopping[workDir]
 }
 
 // reporter 把引擎逐步進度回推到頻道（透過 SendMessage 路由）。與平台無關：訊息文本一致。
