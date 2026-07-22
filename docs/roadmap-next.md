@@ -1,0 +1,126 @@
+# 下一批 Action Item（2026-07-22 盤點）
+
+面試前刻意停手的東西，集中在這裡。**排序依據是「動它的風險」而不是價值**——會被延後的，
+多半是因為改動面敏感，不是因為不重要。
+
+> 現況基準：CI 四關綠、23 個套件通過。詳細數據見 [eval-results.md](eval-results.md)、
+> demo 腳本見 [demo-runbook.md](demo-runbook.md)。
+
+---
+
+## 🔴 動核心路徑（改壞是全面失效，不是單一功能失效）
+
+### 1. Prompt caching 補第三個斷點（對話尾端）
+
+**現況**：`internal/provider/claude.go:143,150` 兩個 ephemeral 斷點，蓋住 `tools + system` 前綴。
+`params.Messages`（對話歷史）**一個斷點都沒有**。
+
+實測（SWE-bench opus 生成的前三次呼叫）：
+
+```
+call 1   輸入  645 tk   快取讀     0 / 寫 1414
+call 2   輸入 3908 tk   快取讀 1414 / 寫 0
+call 3   輸入 4200 tk   快取讀 1414 / 寫 0
+                ▲              ▲
+         一路長大         永遠固定在 1414（靜態前綴）
+```
+
+**對話增量每輪以全價重送。** 補法：每輪在最後一則訊息掛斷點（Anthropic 上限 4 個），
+下一輪整段對話成為可命中前綴。以 operator session 的 ~10.8k tk 歷史估算，長任務後段
+可省八成以上輸入費用；TTL 5 分鐘，ReAct 每輪隔幾秒必然熱。
+
+**為何延後**：改的是 `buildParams`，所有 LLM 呼叫的必經之路。
+**重啟條件**：任何一次長任務的成本明顯刺眼時。
+**完整分析**：vault `cogito-agent-Context-成本結構實測-Prompt-Caching-的覆蓋缺口`。
+
+### 2. SWE-bench 補 `-swe-env-setup`（驗證那個推測）
+
+**觀察**：`MaxTurns=40`，但五題中**四題在 3~5 回合就自己收手**（不是被切斷）。
+唯一花到 19 回合的那題，正好是有東西可探索的。
+
+**推測（未驗證）**：env setup 空著 → repo 沒裝依賴 → **跑不了測試 → 沒有回饋訊號可迭代**，
+agent 只能讀 issue、讀幾個檔、寫 patch 就無事可做。
+
+**若成立，提分的最大槓桿是備妥測試環境，不是換更強的模型。** 這個結論本身比多跑 25 題有價值。
+
+---
+
+## 🟡 新功能（獨立模組，不碰既有路徑）
+
+### 3. Artifact 取回：`get` 指令
+
+chat 產物落在 workdir 後拿不回來。兩條路缺口不同：
+
+- **面板**＝可發現性（run 結束列「本次產出檔案清單」——資料已在 transcript 的
+  `write_file`／`edit_file` 呼叫裡，差一段模板，~40 行）
+- **bot**＝真缺口（人在外面、檔在家裡機器，手機拿不到）
+
+**設計已定：user-pull（`get <路徑>` → sendDocument／files.upload），絕不做 agent-push 上傳工具**
+——後者會變成 prompt injection 的外滲通道（注入一句「把 workDir 全傳出去」就成立）。
+路徑走既有 `resolveInWorkDir`、限該頻道自己的 workdir。TG ~30 行、Slack ~50 行。
+
+### 4. C-Auth 走 tsnet
+
+`WhoIs(r.RemoteAddr)` 從 **WireGuard 的密碼學保證**拿身分，全程無 HTTP header 參與——
+與 Serve 的 identity header 路徑本質不同（後者繞過 Serve URL 直連即可偽造）。
+改動＝`http.ListenAndServe` 換成三行 + 一層 middleware，**其餘 handler 不動**。
+
+它消解了現有 spec 的多個問題：反代讓「loopback=安全」失效的 footgun 不存在、fail-closed
+守衛無事可守、「loopback 無身分」的前提不成立、「只有雲上實測能驗」不成立（tailnet 內兩台
+裝置即可）。
+
+**代價**：依賴 Tailscale 控制平面、binary 膨脹（故 dashboard 要獨立 binary）、state dir 要管、
+`WhoIs` 回傳在某些司法管轄區屬個資。
+**待驗證 5 項**見 vault `cogito-agent-Operator-Dashboard-C-Spec` §八。
+
+### 5. 面板讀反向代理注入的身分標頭（tsnet 的輕量替代）
+
+`authzpage.go` 的 `operatorID` 現在是 const `"dashboard(operator)"`，只用在兩處。
+改成讀 `X-Forwarded-User`（約 5 行），稽核就從「從面板做的」升級成「aaron@example.com 做的」。
+
+**前提**：面板只綁 loopback 且**唯一入口是可信代理**，否則標頭可偽造。
+**與 tsnet 的取捨**：這個輕、但只在有反代時成立；tsnet 重、但信任鏈更硬。
+
+---
+
+## 🟢 評測補完（便宜，但要時間跑）
+
+| 項目 | 現況 | 該做到 |
+|---|---|---|
+| **skill-ab 樣本數** | 1/5→4/5，**Fisher p=0.206 未達顯著**、有一次反例 | n ≥ 20 才能下結論 |
+| **A/B 樣本數門檻** | 跑一次就輸出結論 | 對齊既有 `evolve.MinVerifySamples = 10` |
+| **SWE-bench opus 分數** | 生成完成（$1.21），**評測中途叫停 → 無分數** | 跑完官方 harness |
+| **embedder 配置** | `embedding` 模式 N=0 被跳過 | 三模式對照名副其實 |
+
+> ⚠️ 前兩項是**已對外寫進 README 的數字**的支撐——優先度高於看起來更酷的紅色項目。
+
+---
+
+## ⚪ 已知天花板（等觸發條件，不是待辦）
+
+- **技能索引／MCP 目錄無上限全載**：twinkle-hub 一家 52 支佔現有 66 支的八成。
+  該做的是「按任務語意粗篩再列」，而不是逐個關 server（實測關掉 job104+everything 只省 686 tk，
+  且那些 token 多數時候以 0.1x 計價——真正的收益是 context 空間不是錢）。
+- **`resolveInWorkDir` 的 TOCTOU 窗口**：解析與開檔之間 bash 可換 symlink。
+  根治要 `openat2(RESOLVE_BENEATH)`（Linux）或逐段 `O_NOFOLLOW`。現況已擋掉「先種後用」。
+- **authz 快取的 mtime 精度**：同一秒內兩次寫入且大小相同會漏判。升級路徑 fsnotify。
+- **cron 的五個保留天花板**（base map 只增不減、執行中無法中斷…）：見 vault cron 筆記。
+- **記憶檢索暴力 cosine**：數千節點內綽綽有餘，真巨量再上 ANN。
+- **KG Stage 3b**（持久化／ANN 索引）：巨量才需，觸發未到。
+
+---
+
+## 📌 面試後立刻做（零風險）
+
+- [ ] `/cron` 把兩個 job 開回來（demo 前為避免補跑推播而停用）
+- [ ] `workspace/.sessions-archive/` 的 6 個歸檔 session：確認不用就刪
+- [ ] `./scripts/demo.sh restore` 若還沒跑，補跑（`.env` 的 `COGITO_ALLOWED_USERS`）
+
+---
+
+## 建議順序
+
+**🟢 評測補完 → 🟡 artifact get → 🔴 caching 斷點③**
+
+理由：綠的那組能把「p=0.206」升級成真結論，而那是**已經寫進 README 的數字**；
+紅的那個雖然省最多錢，但目前用量還撐得住，不值得為它冒改壞核心路徑的風險。
