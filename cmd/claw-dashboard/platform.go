@@ -180,7 +180,7 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
   {{range .Channels}}<dt>{{.Name}}</dt><dd>{{if eq .Status "已綁定"}}<span class="badge">已綁定</span>{{else}}<span class="muted">未綁定</span>{{end}}</dd>{{end}}
 </dl>
 
-{{if .SecretsAllowed}}<h2>金鑰／祕密 <span class="muted">👁 顯示 · 可輪替 · 僅未宣告 insecure 時</span></h2>
+{{if .SecretsAllowed}}<h2 id="secrets">金鑰／祕密 <span class="muted">👁 顯示 · 可輪替 · 僅未宣告 insecure 時</span></h2>
 <div class="secrets">
   {{range .Secrets}}<div class="secret">
     <span class="sk">{{.Key}}</span>
@@ -193,7 +193,7 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
       </form>
     </details>
   </div>{{end}}
-</div>{{else}}<h2>金鑰／祕密 <span class="muted">已停用</span></h2>
+</div>{{else}}<h2 id="secrets">金鑰／祕密 <span class="muted">已停用</span></h2>
 <p class="muted">已設 <code>COGITO_DASH_INSECURE=1</code>——該旗標代表<b>操作者宣告接受無認證曝光</b>，故本面板一律不經手金鑰（不顯示、不輪替）。要在此管理祕密，請移除該旗標並改綁 loopback；遠端存取走 SSH tunnel。憑證仍可直接編輯 <code>.env</code>。</p>{{end}}
 
 <h2>存取控制 <span class="muted">寫 .env · 改完重啟</span></h2>
@@ -212,8 +212,8 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 <h2>自我進化 <span class="muted">寫 .env · 改完重啟</span></h2>
 {{template "envblock" .EvolveEnv}}
 
-<h2>MCP 伺服器 <span class="muted">改完重啟</span></h2>
-{{if .MCPServers}}<div class="mcplist">{{range .MCPServers}}<div class="mcpitem">
+<h2 id="mcp-list">MCP 伺服器 <span class="muted">改完重啟</span></h2>
+{{if .MCPServers}}<div class="mcplist">{{range .MCPServers}}<div class="mcpitem" id="mcp-{{.Name}}">
   <div class="mcprow">
     <span class="mcpinfo"><b>{{.Name}}</b> <span class="badge">{{.Type}}</span>{{if .Disabled}} <span class="muted">停用</span>{{end}}{{if .HasSecrets}} <span class="muted">🔒 有祕密</span>{{end}}<br><span class="muted">{{.Target}}</span></span>
     <span class="acts">
@@ -277,7 +277,7 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 {{end}}
 <p class="muted">唯讀檢視——政策是安全設定，刻意不開放面板編輯；改檔後需<b>重啟</b>才載入。</p>
 
-<h2>護欄 <span class="muted">熱載 · 免重啟</span></h2>
+<h2 id="knobs">護欄 <span class="muted">熱載 · 免重啟</span></h2>
 <dl class="kv">
   <dt>回合上限</dt><dd>{{if .Knobs.MaxTurns}}{{.Knobs.MaxTurns}} 輪{{else}}<span class="muted">預設</span>{{end}}</dd>
   <dt>工具併發</dt><dd>{{if .Knobs.MaxConcurrentTools}}{{.Knobs.MaxConcurrentTools}}{{else}}<span class="muted">預設</span>{{end}}</dd>

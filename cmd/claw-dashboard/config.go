@@ -23,7 +23,7 @@ func (s *server) configSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "寫入護欄失敗："+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#knobs", http.StatusSeeOther)
 }
 
 func atoiOr0(s string) int {

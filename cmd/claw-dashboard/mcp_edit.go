@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ func (s *server) mcpAdd(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.setFlash("✓ 已新增 MCP server：" + name + "——bot／chat 需【重啟】才連上。")
 	}
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#mcp-"+url.PathEscape(name), http.StatusSeeOther)
 }
 
 func (s *server) mcpEdit(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +36,7 @@ func (s *server) mcpEdit(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.setFlash("✓ 已更新 MCP server：" + name + "（env/headers 保留不動）——重啟後生效。")
 	}
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#mcp-"+url.PathEscape(name), http.StatusSeeOther)
 }
 
 func (s *server) mcpRemove(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +50,7 @@ func (s *server) mcpRemove(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.setFlash("✓ 已移除 MCP server：" + name)
 	}
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#mcp-list", http.StatusSeeOther)
 }
 
 func (s *server) mcpToggle(w http.ResponseWriter, r *http.Request) {
@@ -63,5 +64,7 @@ func (s *server) mcpToggle(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.setFlash("✓ 已切換 MCP server：" + name + "——重啟後生效。")
 	}
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	// 帶錨點回到剛才那一列：POST→303 會讓瀏覽器重新載入頁面並停在最上方，在長列表裡等於
+	// 「按一下就迷路」。錨點讓瀏覽器捲回原處，而該列的 啟用/停用 徽章本身就是操作結果的回饋。
+	http.Redirect(w, r, "/platform#mcp-"+url.PathEscape(name), http.StatusSeeOther)
 }

@@ -86,7 +86,7 @@ func (s *server) secretSave(w http.ResponseWriter, r *http.Request) {
 	val := strings.TrimSpace(r.FormValue("value")) // 去掉貼上時的換行/空白
 	if val == "" {
 		s.setFlash("⚠️ 新值為空，未更動 " + key + "。")
-		http.Redirect(w, r, "/platform", http.StatusSeeOther)
+		http.Redirect(w, r, "/platform#secrets", http.StatusSeeOther)
 		return
 	}
 	if err := updateEnvFile(".env", map[string]string{key: val}); err != nil {
@@ -95,7 +95,7 @@ func (s *server) secretSave(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = os.Setenv(key, val)
 	s.setFlash("✓ 已輪替 " + key + "——bot 需【重啟】才套用。")
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#secrets", http.StatusSeeOther)
 }
 
 // mcpSecretReveal 即時回傳某 MCP server 的 env/headers 單一 key 現值。同 /secret/reveal 的護欄
@@ -147,7 +147,7 @@ func (s *server) mcpSecretSave(w http.ResponseWriter, r *http.Request) {
 	val := strings.TrimSpace(r.FormValue("value"))
 	if val == "" {
 		s.setFlash("⚠️ 新值為空，未更動。")
-		http.Redirect(w, r, "/platform", http.StatusSeeOther)
+		http.Redirect(w, r, "/platform#secrets", http.StatusSeeOther)
 		return
 	}
 	if err := setMCPSecretValue(mcpConfigPath(), server, kind, key, val); err != nil {
@@ -155,7 +155,7 @@ func (s *server) mcpSecretSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setFlash("✓ 已輪替 " + server + " 的 " + kind + ":" + key + "——bot 需【重啟】才套用。")
-	http.Redirect(w, r, "/platform", http.StatusSeeOther)
+	http.Redirect(w, r, "/platform#secrets", http.StatusSeeOther)
 }
 
 // platformJS：眼睛圖示的最小客戶端。點眼睛→fetch /secret/reveal 顯示現值；再點→遮回。textContent
