@@ -160,7 +160,7 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	if total <= limit || limit <= 0 {
 		res := make([]schema.Message, total)
 		copy(res, s.history)
-		return res
+		return sanitizeDanglingToolUse(res) // 短歷史也可能懸空——別漏了這條路徑
 	}
 
 	res := make([]schema.Message, limit)
@@ -174,7 +174,49 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 		}
 	}
 
-	return res
+	return sanitizeDanglingToolUse(res)
+}
+
+// sanitizeDanglingToolUse 剝掉【沒有對應 tool_result】的 tool_use。
+//
+// 【為何需要】引擎先 Append(assistant+tool_calls) 再執行工具、最後 Append(tool_results)。
+// 行程在這兩者之間被砍（/stop、崩潰、SIGKILL），history 就留下一個懸空的 tool_use；
+// 下一則使用者訊息接上去後，Anthropic 直接回 400：
+//
+//	messages.N: tool_use ids were found without tool_result blocks immediately after
+//
+// 而且【每一次】後續請求都會撞同一個錯——該 session 等於永久磚化，使用者只能砍掉重練。
+// 既有的孤兒 tool_result 剝除（上面那段）方向相反，擋不到這個。實際發生過（2026-07-22 排練）。
+//
+// 策略：只在該 tool_use 之後【找不到】任何對應 tool_result 時才處理，且【只清掉 ToolCalls
+// 欄位、保留文字內容】——那段 thinking 是有價值的上下文，沒有理由連坐丟棄。
+func sanitizeDanglingToolUse(msgs []schema.Message) []schema.Message {
+	answered := make(map[string]bool)
+	for _, m := range msgs {
+		if m.ToolCallID != "" {
+			answered[m.ToolCallID] = true
+		}
+	}
+	out := make([]schema.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if len(m.ToolCalls) > 0 {
+			dangling := false
+			for _, tc := range m.ToolCalls {
+				if !answered[tc.ID] {
+					dangling = true
+					break
+				}
+			}
+			if dangling {
+				m.ToolCalls = nil // 保留 thinking 文字，只拿掉無結果的呼叫
+				if strings.TrimSpace(m.Content) == "" {
+					continue // 內容也空＝這則沒有任何殘值，整則丟掉
+				}
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // Summary 回傳目前的滾動摘要（已逐出 history 的早期訊息之 salience 壓縮）。
