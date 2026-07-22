@@ -152,37 +152,81 @@ const chatJSSrc = `(function () {
   if (!live) return;
   var ICON = { turn:'⟳', think:'◌', tool:'▸', result:'✓', error:'✗', msg:'◆' };
   var cur = null;    // 正在逐字串流的 msg 泡（delta 累進、msg/其他事件收尾）
-  var active = null; // 最新一列（脈動，表示「這一步正在發生」）；下一事件到來即移交
+  var active = null; // 主流最新一列（脈動）；下一事件到來即移交
+  // 子 agent 委派卡：spawn_subagent 上工開卡、result 收工關卡。並行委派時多張卡同時脈動＝多 agent 同時工作。
+  // 卡以 agent_type 為鍵；子 agent 內部事件（[Subagent:<type>] …）依此歸屬到各自的卡（並行時才不會混流）。
+  var cards = {};    // agent_type -> { box, st, body }
+  var order = [];    // 開啟中的卡（agent_type），收卡用
+  function lastCard() { return order.length ? cards[order[order.length - 1]] : null; }
   function markActive(r) {
     if (active && active !== r) active.classList.remove('active');
     active = r; if (r) r.classList.add('active');
   }
   function stopActive() { if (active) { active.classList.remove('active'); active = null; } }
-  function row(kind, text) {
+  function scroll() { window.scrollTo(0, document.body.scrollHeight); }
+  function agentType(label) { var m = /"agent_type"\s*:\s*"([^"]+)"/.exec(label); return m ? m[1] : '子 agent'; }
+  function subRole(label) { var m = /^\[Subagent:([^\]]+)\]/.exec(label); return m ? m[1] : null; }
+  function stripSub(label) { return label.replace(/^\[Subagent(:[^\]]+)?\]\s*/, ''); }
+  function openCard(type) {                           // 委派上工：開一張兄弟並列的脈動卡（不巢狀）
+    stopActive();
+    if (cards[type]) return;                          // 同型別已有開啟卡（罕見）→ 沿用，事件併入
+    var box = document.createElement('div'); box.className = 'subagent active';
+    var head = document.createElement('div'); head.className = 'subhead';
+    var badge = document.createElement('span'); badge.className = 'sbadge'; badge.textContent = '🤖 ' + type + ' 專員';
+    var st = document.createElement('span'); st.className = 'sstate';
+    var sp = document.createElement('span'); sp.className = 'spin';
+    var stx = document.createElement('span'); stx.textContent = '審查中';
+    st.appendChild(sp); st.appendChild(stx); head.appendChild(badge); head.appendChild(st);
+    var body = document.createElement('div'); body.className = 'subbody';
+    box.appendChild(head); box.appendChild(body);
+    live.appendChild(box); cards[type] = { box:box, st:st, body:body }; order.push(type); scroll();
+  }
+  function closeCard(ok, report) {                    // 委派收工：翻牌＋附報告摘要。並行時結果不帶型別，
+    var type = order.shift(); if (type == null) return; // 故用 FIFO 收（並行子 agent 幾乎同時結束，順序差異視覺無感）
+    var c = cards[type]; delete cards[type]; if (!c) return;
+    c.box.classList.remove('active');
+    c.st.className = 'sstate ' + (ok ? 'done' : 'fail');
+    c.st.textContent = ok ? '✓ 報告完成' : '✗ 失敗';
+    if (report) { var d = document.createElement('div'); d.className = 'subreport'; d.textContent = '報告：' + report; c.body.appendChild(d); }
+    scroll();
+  }
+  function row(kind, text, into, act) {               // into 省略＝主流 live；act＝是否標記脈動（主流才要）
     var r = document.createElement('div'); r.className = 'ev ' + kind;
     var ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ICON[kind] || '·';
     var tx = document.createElement('span'); tx.className = 'tx'; tx.textContent = text;
-    r.appendChild(ic); r.appendChild(tx); live.appendChild(r); markActive(r); return r;
+    r.appendChild(ic); r.appendChild(tx); (into || live).appendChild(r); if (act) markActive(r); return r;
   }
   function endStream() { if (cur) { cur.classList.remove('streaming'); cur = null; } }
-  function scroll() { window.scrollTo(0, document.body.scrollHeight); }
   var es = new EventSource('/chat/stream');
   es.onmessage = function (e) {
     var ev; try { ev = JSON.parse(e.data); } catch (x) { return; }
-    if (ev.kind === 'delta') {                       // 逐字：累進當前 msg 泡
-      if (!cur) { cur = row('msg', ''); cur.className = 'ev msg streaming active'; markActive(cur); }
-      cur.querySelector('.tx').textContent += ev.label;
+    var lbl = ev.label || '';
+    // 子 agent 內部事件：縮排進對應角色的卡（找不到卡→落到最後開的卡→再退主流）；顯示時剝掉前綴
+    if (lbl.indexOf('[Subagent') === 0) {
+      endStream(); var c = cards[subRole(lbl)] || lastCard();
+      if (c) row(ev.kind, stripSub(lbl), c.body, false); else row(ev.kind, stripSub(lbl), null, true);
       scroll(); return;
     }
-    if (ev.kind === 'msg') {                          // 訊息定稿：收尾串流泡（不重複）
-      if (cur) { cur.querySelector('.tx').textContent = ev.label; endStream(); }
-      else { row('msg', ev.label); }
+    // 委派：tool＝上工開卡、result/error＝收工關卡
+    if (ev.kind === 'tool' && lbl.indexOf('spawn_subagent') === 0) { endStream(); openCard(agentType(lbl)); return; }
+    if ((ev.kind === 'result' || ev.kind === 'error') && lbl.indexOf('spawn_subagent') === 0 && order.length) {
+      endStream(); var i = lbl.indexOf(' → '); closeCard(ev.kind === 'result', i >= 0 ? lbl.slice(i + 3) : ''); return;
+    }
+    if (ev.kind === 'delta') {                         // 逐字：累進當前 msg 泡
+      if (!cur) { cur = row('msg', '', null, true); cur.className = 'ev msg streaming active'; markActive(cur); }
+      cur.querySelector('.tx').textContent += lbl;
       scroll(); return;
     }
-    endStream(); row(ev.kind, ev.label); scroll();    // 其他事件：先收尾串流泡再插入
+    if (ev.kind === 'msg') {                            // 訊息定稿：收尾串流泡（不重複）
+      if (cur) { cur.querySelector('.tx').textContent = lbl; endStream(); }
+      else { row('msg', lbl, null, true); }
+      scroll(); return;
+    }
+    endStream(); row(ev.kind, lbl, null, true); scroll(); // 其他主流事件：先收尾串流泡再插入
   };
   es.addEventListener('done', function () {
     es.close(); endStream(); stopActive();
+    while (order.length) closeCard(true, '');          // 收尾任何未關的子 agent 卡
     var b = document.getElementById('runbanner');
     if (b) { b.className = 'banner done'; b.textContent = '✓ 完成'; }
     var f = document.getElementById('composer');

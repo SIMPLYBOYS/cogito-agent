@@ -280,14 +280,39 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat .ev.msg .ic { color:var(--a); }
   .chat .ev.msg.streaming .tx::after { content:'▋'; color:var(--a); animation:blink 1s step-end infinite; }
   @keyframes blink { 50% { opacity:0; } }
-  /* 進行中特效（不需 reload，靠 SSE 更新的 DOM）：執行中 banner 發光呼吸、最新事件脈動 */
-  @keyframes cg-glow { 0%,100%{box-shadow:0 0 0 0 transparent} 50%{box-shadow:0 0 11px -2px var(--a)} }
-  @keyframes cg-throb { 0%,100%{opacity:1} 50%{opacity:.35} }
-  .chat #runbanner:not(.done) { animation: cg-glow 1.5s ease-in-out infinite; }
+  /* 進行中特效（不需 reload，SSE 更新 DOM）：banner 掃光＋旋轉環、事件列滑入、子 agent 卡脈動邊框。
+     目的＝一眼看出「正在跑」而非靜止畫面；子 agent 卡讓「哪個專員此刻在工作」明確可見。 */
+  @keyframes cg-glow { 0%,100%{box-shadow:0 0 0 0 transparent} 50%{box-shadow:0 0 14px -3px var(--a)} }
+  @keyframes cg-throb { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @keyframes cg-sweep { 0%{background-position:-60% 0} 100%{background-position:160% 0} }
+  @keyframes cg-in { from{opacity:0; transform:translateY(5px)} to{opacity:1; transform:none} }
+  @keyframes cg-spin { to{transform:rotate(360deg)} }
+  @keyframes cg-pulse { 0%,100%{border-color:var(--a2); box-shadow:0 0 0 0 transparent} 50%{border-color:var(--a); box-shadow:0 0 13px -3px var(--a)} }
+  .chat .spin { display:inline-block; width:11px; height:11px; border:2px solid color-mix(in srgb, var(--a) 28%, transparent);
+    border-top-color:var(--a); border-radius:50%; vertical-align:-1px; margin-right:6px; animation:cg-spin .7s linear infinite; }
+  .chat #runbanner:not(.done) { position:relative; overflow:hidden;
+    background-image:linear-gradient(100deg, transparent 32%, color-mix(in srgb, var(--a) 15%, transparent) 50%, transparent 68%);
+    background-size:220% 100%; background-repeat:no-repeat;
+    animation:cg-sweep 1.2s linear infinite, cg-glow 1.7s ease-in-out infinite; }
+  .chat .banner.done .spin { display:none; }
+  .chat .ev, .chat .subagent { animation:cg-in .22s ease-out; }
   .chat .ev.active { border-left-color:var(--a2); }
-  .chat .ev.active .ic { animation: cg-throb 1s ease-in-out infinite; }
+  .chat .ev.active .ic { animation:cg-throb 1s ease-in-out infinite; }
+  /* 子 agent 委派卡：專員的內部工作縮排其中，執行時整張卡脈動邊框——多 agent demo 的視覺主角。 */
+  .chat .subagent { border:1px solid var(--a2); border-radius:9px; margin:9px 0 9px 4px; padding:7px 11px 9px;
+    background:color-mix(in srgb, var(--a2) 6%, transparent); }
+  .chat .subagent.active { animation:cg-in .22s ease-out, cg-pulse 1.3s ease-in-out infinite; }
+  .chat .subhead { display:flex; align-items:center; gap:9px; font-size:12.5px; margin-bottom:4px; }
+  .chat .sbadge { font-weight:700; color:var(--a2); letter-spacing:.02em; }
+  .chat .sstate { display:inline-flex; align-items:center; font-size:11px; color:var(--m); }
+  .chat .subagent.active .sstate { color:var(--a); }
+  .chat .sstate.done { color:var(--ok,#86b06e); }
+  .chat .sstate.fail { color:var(--a); }
+  .chat .subbody { display:flex; flex-direction:column; gap:3px; border-left:2px solid color-mix(in srgb, var(--a2) 38%, transparent); padding-left:11px; }
+  .chat .subreport { font-size:11.5px; color:var(--m); font-style:italic; margin-top:5px; }
   @media (prefers-reduced-motion: reduce) {
-    .chat .ev.msg.streaming .tx::after, .chat #runbanner:not(.done), .chat .ev.active .ic { animation:none; }
+    .chat .ev.msg.streaming .tx::after, .chat #runbanner:not(.done), .chat .ev.active .ic,
+    .chat .spin, .chat .subagent.active, .chat .ev, .chat .subagent { animation:none; }
   }
   .chat form.composer { display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--ln); padding-top:16px; }
   .chat textarea { width:100%; resize:vertical; font:inherit; font-size:14px; color:var(--fg); background:var(--p);
@@ -309,7 +334,7 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   {{if .Msgs}}<div class="thread">
     {{range .Msgs}}<div class="msg {{if .You}}you{{else}}bot{{end}}"><span class="tag">{{if .You}}你{{else}}operator agent{{end}}</span>{{.Text}}{{if .UsedTool}}<span class="used">⚙ 本回合動過工具／子 agent，詳見執行樹</span>{{end}}</div>{{end}}
   </div>{{else}}{{if not .Running}}<p class="empty">尚無對話。在下方交辦第一個任務。</p>{{end}}{{end}}
-  {{if .Running}}<div id="runbanner" class="banner">⏳ agent 執行中…（即時串流；完成後可繼續交辦）</div>
+  {{if .Running}}<div id="runbanner" class="banner"><span class="spin"></span>agent 執行中…（即時串流；完成後可繼續交辦）</div>
   <div id="live"></div>{{end}}
   <form method="POST" action="/chat" class="composer" id="composer">
     <textarea name="msg" rows="3" placeholder="交辦任務給 operator agent…（會真的執行 bash／寫檔）"{{if .Running}} disabled{{else}} autofocus{{end}}></textarea>

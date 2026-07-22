@@ -363,6 +363,12 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 	readOnlyRegistry := task.Registry
 	reporter := task.Reporter
 
+	// 進度事件前綴帶上 agent_type：並行子 agent 的事件共用同一 reporter/hub，帶角色才能在 UI 歸屬到各自的卡。
+	subPrefix := "[Subagent]"
+	if task.Name != "" {
+		subPrefix = "[Subagent:" + task.Name + "]"
+	}
+
 	// 子 agent 選模型 / effort：provider 支援 Configurable 且有指定時，用換了 model/輸出上限的變體
 	// （成本仍記進同一 session）；不支援則沿用主引擎 provider（靜默忽略）。
 	prov := e.provider
@@ -450,7 +456,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 					r, _ = reporter.(Reporter)
 				}
 				if r != nil {
-					r.OnToolCall(ctx, fmt.Sprintf("[Subagent] %s", call.Name), string(call.Arguments))
+					r.OnToolCall(ctx, fmt.Sprintf("%s %s", subPrefix, call.Name), string(call.Arguments))
 				}
 
 				result := readOnlyRegistry.Execute(ctx, call)
@@ -461,7 +467,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 				}
 
 				if r != nil {
-					r.OnToolResult(ctx, fmt.Sprintf("[Subagent] %s", call.Name), capRunes(finalOutput, 200), result.IsError)
+					r.OnToolResult(ctx, fmt.Sprintf("%s %s", subPrefix, call.Name), capRunes(finalOutput, 200), result.IsError)
 				}
 
 				observationMsgs[idx] = schema.Message{

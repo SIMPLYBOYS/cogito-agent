@@ -19,6 +19,7 @@ type SubTask struct {
 	Prompt       string
 	SkillBody    string
 	SystemPrompt string
+	Name         string   // agent_type（具名 agent）；用於進度事件前綴 [Subagent:<Name>]，讓並行子 agent 的事件可歸屬到各自的卡
 	Model        string   // 空＝沿用主引擎模型
 	MaxTokens    int      // <=0＝用預設；供 effort 調整輸出上限
 	Registry     Registry // 子 agent 可用的工具（已 Subset / 已 rooted 在隔離目錄）
@@ -231,6 +232,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		Prompt:       input.TaskPrompt,
 		SkillBody:    skillBody,
 		SystemPrompt: def.Prompt, // 空＝RunSub 回退預設探路者 prompt
+		Name:         input.AgentType,
 		Model:        def.Model,
 		MaxTokens:    effortToMaxTokens(def.Effort),
 		Registry:     reg,
