@@ -39,9 +39,14 @@ func (c *Core) tryPairRequest(conv, userID, text string) bool {
 		return true
 	}
 	log.Printf("[%s] 🔑 %s 發起配對，碼 %s\n", c.platform, userID, req.Code)
+	// 【措辭要準】這則多半發在【私聊】裡，管理員根本不在這個對話——寫「請管理員在此輸入」
+	// 等於要他走到你電腦前打字。批准只認碼、不綁對話（見 ApprovePair），所以管理員在他自己
+	// 跟 bot 的任何對話下指令都算數。這則的任務是：給碼、說明要把碼轉給誰、承諾會回來通知。
 	SendMessage(conv, fmt.Sprintf(
-		"🔑 配對碼：`%s`（%d 分鐘內有效）\n請管理員在此輸入 `pair approve %s` 放行；"+
-			"或到面板的 governance 頁批准。",
+		"🔑 配對碼：`%s`（%d 分鐘內有效）\n"+
+			"把這組碼交給管理員，請他對我說 `pair approve %s`（他在自己的對話裡說就行），"+
+			"或由他到面板的 governance 頁批准。\n"+
+			"通過後我會在這裡通知你。",
 		req.Code, int(authz.PairTTL.Minutes()), req.Code))
 	return true
 }

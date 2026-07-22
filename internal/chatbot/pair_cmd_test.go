@@ -206,3 +206,39 @@ func TestUnauthorizedHint_DoesNotTellSlackUsersToTypeSlash(t *testing.T) {
 		t.Errorf("提示不可帶斜線（Slack 會攔下），實得: %q", msg)
 	}
 }
+
+// 配對碼那則多半發在【私聊】裡——管理員不在那個對話。原本寫「請管理員在此輸入」，
+// 等於要他走到你電腦前打字（2026-07-22 排練回報）。批准只認碼、不綁對話，措辭必須反映這件事。
+func TestPairRequest_MessageDoesNotAssumeAdminIsPresent(t *testing.T) {
+	c, _, got := newPairCore(t, "pairWord", []string{"pairWord:boss"})
+
+	c.dispatch("chan", "newbie", "pair", false)
+	m := lastMsg(got)
+
+	if strings.Contains(m, "在此輸入") {
+		t.Errorf("不可假設管理員在同一個對話裡: %q", m)
+	}
+	for _, want := range []string{"交給管理員", "自己的對話", "通知你"} {
+		if !strings.Contains(m, want) {
+			t.Errorf("訊息應包含 %q（把碼轉交／管理員在別處下指令／會回來通知），實得: %q", want, m)
+		}
+	}
+}
+
+// 「通過後我會在這裡通知你」是對使用者的承諾——批准時必須真的送出，否則他只能靠猜的重試。
+func TestPairApprove_NotifiesRequester(t *testing.T) {
+	c, store, got := newPairCore(t, "pairNotify", []string{"pairNotify:boss"})
+	req, _ := store.RequestPair("pairNotify", "newbie", "")
+
+	c.dispatch("chan", "boss", "pair approve "+req.Code, false)
+
+	var notified bool
+	for _, m := range got() {
+		if strings.Contains(m, "你的配對已通過") {
+			notified = true
+		}
+	}
+	if !notified {
+		t.Error("批准後應通知發起者——訊息裡承諾過會通知")
+	}
+}
