@@ -152,3 +152,117 @@ func TestFragment_RendersSubDepth(t *testing.T) {
 		t.Error("子 agent 內部應渲染它的 read_file")
 	}
 }
+
+// ─── 任務分組（同一 session 累積多個任務，各自摺疊）───
+
+// multiTaskHistory：任務1（工具→最終回答）→ 任務2（直接最終回答）。
+func multiTaskHistory() []schema.Message {
+	return []schema.Message{
+		{Role: schema.RoleUser, Content: "任務一：查資料"},
+		{Role: schema.RoleAssistant, Content: "查", ToolCalls: []schema.ToolCall{
+			{ID: "t1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+		}, Usage: &schema.Usage{PromptTokens: 1_000_000, CompletionTokens: 1_000_000}},
+		{Role: schema.RoleUser, ToolCallID: "t1", Content: "結果"},
+		{Role: schema.RoleAssistant, Content: "任務一完成"},
+		{Role: schema.RoleUser, Content: "任務二：寫報告"},
+		{Role: schema.RoleAssistant, Content: "任務二完成"},
+	}
+}
+
+// 邊界判準：前一個實質 turn 已出最終回答 → 之後的 user 訊息是【新任務】，不是系統提醒。
+func TestBuild_GroupsTasksByCompletion(t *testing.T) {
+	run := Build("s", multiTaskHistory(), Meta{Model: "claude-haiku-4-5"}, "")
+
+	if len(run.Tasks) != 2 {
+		t.Fatalf("應切成 2 個任務，got %d", len(run.Tasks))
+	}
+	t1, t2 := run.Tasks[0], run.Tasks[1]
+	if t1.Query != "任務一：查資料" || t2.Query != "任務二：寫報告" {
+		t.Errorf("任務標題不對: %q / %q", t1.Query, t2.Query)
+	}
+	if t1.Steps != 2 || t2.Steps != 1 {
+		t.Errorf("步數應 2/1，got %d/%d", t1.Steps, t2.Steps)
+	}
+	if t1.Open || !t2.Open {
+		t.Errorf("只有最後一個任務預設展開，got open=%v/%v", t1.Open, t2.Open)
+	}
+	// 任務內重新編號：任務二的第一步應是 01，不是全域的 03。
+	if got := t2.Turns[0].Index; got != 1 {
+		t.Errorf("任務內應重新編號，got %d", got)
+	}
+}
+
+// run 中途注入的 user 訊息（成本軟著陸/迴圈提醒）出現在最終回答【之前】→ 留在原任務內。
+func TestBuild_MidRunReminderStaysInTask(t *testing.T) {
+	h := []schema.Message{
+		{Role: schema.RoleUser, Content: "任務"},
+		{Role: schema.RoleAssistant, Content: "跑", ToolCalls: []schema.ToolCall{
+			{ID: "t1", Name: "bash", Arguments: json.RawMessage(`{}`)},
+		}},
+		{Role: schema.RoleUser, ToolCallID: "t1", Content: "結果"},
+		{Role: schema.RoleUser, Content: "⚠️ 成本已達八成"}, // 注入：前一輪【沒有】最終回答
+		{Role: schema.RoleAssistant, Content: "收到，收尾"},
+	}
+	run := Build("s", h, Meta{}, "")
+	if len(run.Tasks) != 1 {
+		t.Fatalf("提醒不該切出新任務，got %d 個任務", len(run.Tasks))
+	}
+	found := false
+	for _, tn := range run.Tasks[0].Turns {
+		if tn.Note == "⚠️ 成本已達八成" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("提醒應以系統提醒身分留在原任務內")
+	}
+}
+
+// ─── 逐步成本 ───
+
+// 每步成本 = CostOf(model, usage)，與 tracker 記帳同一份公式；任務合計 = 各步加總。
+func TestBuild_PerTurnCost(t *testing.T) {
+	run := Build("s", multiTaskHistory(), Meta{Model: "claude-haiku-4-5"}, "")
+
+	// haiku 定價 in $1 / out $5 每百萬 → 1M in + 1M out = $6
+	if got := run.Tasks[0].Turns[0].CostUSD; got != 6.0 {
+		t.Errorf("每步成本應 $6，got %v", got)
+	}
+	if !run.Tasks[0].HasUsage || run.Tasks[0].CostUSD != 6.0 {
+		t.Errorf("任務合計應 $6，got HasUsage=%v cost=%v", run.Tasks[0].HasUsage, run.Tasks[0].CostUSD)
+	}
+	// 舊 transcript（無 usage）的任務：不顯示成本，也不出現誤導的 $0
+	if run.Tasks[1].HasUsage {
+		t.Error("無 usage 的任務不該標記 HasUsage")
+	}
+}
+
+// 不知道模型（舊 session 無 ModelUsed）就不算成本——寧可不顯示，不顯示錯的。
+func TestBuild_NoModelNoCost(t *testing.T) {
+	run := Build("s", multiTaskHistory(), Meta{}, "")
+	if got := run.Tasks[0].Turns[0].CostUSD; got != 0 {
+		t.Errorf("模型未知不該算成本，got %v", got)
+	}
+}
+
+// ─── 渲染 ───
+
+func TestFragment_TaskGroupsAndCost(t *testing.T) {
+	out := string(Fragment(Build("s", multiTaskHistory(), Meta{Model: "claude-haiku-4-5"}, "")))
+
+	if !strings.Contains(out, `class="taskgrp"`) {
+		t.Error("應渲染任務卡")
+	}
+	if strings.Count(out, "taskgrp") < 2 {
+		t.Error("兩個任務應各自成卡")
+	}
+	if !strings.Contains(out, `<details class="taskgrp" open>`) {
+		t.Error("最後一個任務應預設展開")
+	}
+	if !strings.Contains(out, "$6.0000") {
+		t.Error("應顯示逐步成本")
+	}
+	if !strings.Contains(out, "快取讀") {
+		t.Error("應顯示快取 token 明細")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -24,23 +25,36 @@ type Meta struct {
 	Running          bool
 }
 
-// Run 是一次 query 的完整執行流。
+// Run 是一個 session 的完整執行流。同一個 session（如 operator chat）會累積多個任務，
+// Tasks 把扁平的 turns 依任務切段——沒有這層，任務一多頁面就是一條不可摺疊的長流水。
 type Run struct {
 	ID          string
-	Query       string // 第一則 user 訊息（觸發這次 run 的任務）
-	Turns       []*Turn
+	Query       string  // 第一則 user 訊息（觸發這次 run 的任務）
+	Turns       []*Turn // 扁平全量（列表頁計步數用）；渲染走 Tasks
+	Tasks       []*Task
 	HasSubagent bool
 	Meta        Meta
 }
 
+// Task 是 session 裡的一段任務：一則 user 指令與它引出的所有 turns。渲染成獨立的可摺疊卡片。
+type Task struct {
+	Query    string
+	Turns    []*Turn
+	Steps    int     // 實質步數（不含系統提醒）
+	CostUSD  float64 // 本任務逐步成本合計（僅新 transcript 有 usage 時）
+	HasUsage bool
+	Open     bool // 只有最後一個任務預設展開——舊任務摺疊，頁面才不會隨任務數無限長
+}
+
 // Turn 是主 agent 的一步：thinking + 若干 action（工具呼叫）；或最終回答；或一條系統提醒。
 type Turn struct {
-	Index       int // 只有 action/answer turn 有編號（從 1 起）；Note turn 為 0
+	Index       int // 只有 action/answer turn 有編號（每個任務內從 1 起）；Note turn 為 0
 	Thinking    string
 	Actions     []*Action
 	FinalAnswer string // 該輪無 tool call ＝ 最終回答
 	Note        string // 系統提醒（成本軟著陸 / 續跑等，夾在流程中的 user 訊息）
 	Usage       *schema.Usage
+	CostUSD     float64 // 本步成本（有 Usage 且知道模型才非 0）
 }
 
 // Action 是一次工具呼叫。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）；
@@ -60,7 +74,16 @@ type Action struct {
 // <sessWorkDir>/subagents/<CallID>.json 把子 agent 的【內部】執行掛回（M2 深度）；空則只到委派層。
 func Build(id string, history []schema.Message, meta Meta, sessWorkDir string) Run {
 	turns, query, hasSub := reconstruct(history)
-	run := Run{ID: id, Query: query, Turns: turns, HasSubagent: hasSub, Meta: meta}
+	// 逐步成本：有 usage 且知道模型才算得出來（舊 transcript 無 usage → 0 → 模板不顯示，
+	// 不會出現誤導的 $0.0000）。公式與 tracker 記帳同源（observability.CostOf）。
+	if meta.Model != "" {
+		for _, t := range turns {
+			if t.Usage != nil {
+				t.CostUSD = observability.CostOf(meta.Model, *t.Usage)
+			}
+		}
+	}
+	run := Run{ID: id, Query: query, Turns: turns, Tasks: groupTasks(query, turns), HasSubagent: hasSub, Meta: meta}
 	if sessWorkDir != "" {
 		for _, t := range turns {
 			for _, a := range t.Actions {
@@ -73,6 +96,50 @@ func Build(id string, history []schema.Message, meta Meta, sessWorkDir string) R
 		}
 	}
 	return run
+}
+
+// groupTasks 把扁平 turns 依任務切段。邊界判準【不猜文字內容】：一則 user 訊息（Note）只有在
+// 「前一個實質 turn 已出最終回答」時才是新任務——因為 chat 以鎖序列化，新任務只可能在上一個
+// run 結束後送進來；而 run 中途注入的 user 訊息（成本軟著陸、迴圈提醒）必然出現在最終回答之前，
+// 留在原任務內當系統提醒。
+//
+// ponytail: run 沒有最終回答就結束（崩潰/取消/熔斷）時，下一個任務會被併進上一段——顯示層的
+// 小瑕疵，不影響資料。要根治得在 history 標記任務邊界，等真的困擾再說。
+func groupTasks(query string, turns []*Turn) []*Task {
+	cur := &Task{Query: query}
+	tasks := []*Task{cur}
+	prevCompleted := false
+	for _, t := range turns {
+		if t.Note != "" {
+			if prevCompleted {
+				cur = &Task{Query: t.Note} // Note 升格為新任務的標題
+				tasks = append(tasks, cur)
+				prevCompleted = false
+				continue
+			}
+			cur.Turns = append(cur.Turns, t) // run 中途的注入：留在原任務
+			continue
+		}
+		cur.Turns = append(cur.Turns, t)
+		prevCompleted = t.FinalAnswer != ""
+	}
+	for _, tk := range tasks {
+		n := 0
+		for _, t := range tk.Turns {
+			if t.Note != "" {
+				continue
+			}
+			n++
+			t.Index = n // 任務內重新編號（原全域編號在摺疊分段後沒有意義）
+			if t.Usage != nil {
+				tk.HasUsage = true
+				tk.CostUSD += t.CostUSD
+			}
+		}
+		tk.Steps = n
+	}
+	tasks[len(tasks)-1].Open = true
+	return tasks
 }
 
 // reconstruct 把一段扁平 history 重建成 turns（+ query + 是否有 subagent）。主 run 與 subagent 內部共用它。

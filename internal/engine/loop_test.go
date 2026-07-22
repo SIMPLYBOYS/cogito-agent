@@ -319,3 +319,52 @@ func TestRun_ComposerFallsBackToWorkDir(t *testing.T) {
 		t.Error("AssetsDir 未設時應回退到 session.WorkDir 讀 AGENTS.md")
 	}
 }
+
+// usageProvider 回一輪工具呼叫、一輪最終回答，兩輪都帶 Usage——模擬真實 provider 的回應。
+type usageProvider struct{ calls int }
+
+func (u *usageProvider) Generate(_ context.Context, _ []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
+	u.calls++
+	if u.calls == 1 {
+		return &schema.Message{
+			Role:      schema.RoleAssistant,
+			Content:   "查一下",
+			ToolCalls: []schema.ToolCall{{ID: "1", Name: "noop", Arguments: []byte("{}")}},
+			Usage:     &schema.Usage{PromptTokens: 100, CompletionTokens: 10, CacheReadTokens: 50},
+		}, nil
+	}
+	return &schema.Message{
+		Role:    schema.RoleAssistant,
+		Content: "完成",
+		Usage:   &schema.Usage{PromptTokens: 200, CompletionTokens: 20},
+	}, nil
+}
+func (u *usageProvider) MaxContextTokens() int { return 200000 }
+func (u *usageProvider) ModelName() string     { return "fake-model" }
+
+// Usage 必須隨 assistant 訊息【落地 history】——沒有它，dashboard 的執行樹只能顯示 run 總成本，
+// 看不出哪一步燒掉了錢。曾經的實況：engine 組 finalAssistantMsg 時把 actionResp.Usage 丟了，
+// transcript 裡 0 則帶 usage。本測試釘住這件事不再回歸。
+func TestRun_PersistsUsagePerAssistantMessage(t *testing.T) {
+	eng := NewAgentEngine(&usageProvider{}, newTestRegistry(), false, false)
+	eng.MaxTurns = 5
+
+	sess := ctxpkg.NewSession("usage-persist", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "go"})
+	if err := eng.Run(context.Background(), sess, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var withUsage int
+	for _, m := range sess.GetWorkingMemory(100) { // 短會話：working memory 即全量 history
+		if m.Role == schema.RoleAssistant && m.Usage != nil {
+			withUsage++
+			if m.Usage.PromptTokens == 0 {
+				t.Error("落地的 Usage 不該是空殼")
+			}
+		}
+	}
+	if withUsage != 2 {
+		t.Errorf("兩輪 assistant 訊息都應帶 Usage，got %d", withUsage)
+	}
+}

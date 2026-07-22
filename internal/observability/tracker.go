@@ -44,6 +44,22 @@ func envFloatOr(key string, def float64) float64 {
 	return def
 }
 
+// CostOf 依 PricingModel 計算單次回應的成本（USD）；未登記模型走 fallback 估價。
+// Anthropic 快取計費：命中讀取約 0.1x、寫入約 1.25x 基礎輸入價（PromptTokens 已不含快取讀取）。
+//
+// 抽成函式是因為有兩個消費者——tracker 記帳與 dashboard 的逐步成本顯示。公式只能有一份，
+// 否則兩處遲早算出不同的錢。
+func CostOf(model string, u schema.Usage) float64 {
+	price, ok := PricingModel[model]
+	if !ok {
+		price.InputPrice, price.OutputPrice = fallbackInputPrice, fallbackOutputPrice
+	}
+	return (float64(u.PromptTokens)*price.InputPrice +
+		float64(u.CacheReadTokens)*price.InputPrice*0.1 +
+		float64(u.CacheCreationTokens)*price.InputPrice*1.25 +
+		float64(u.CompletionTokens)*price.OutputPrice) / 1e6
+}
+
 // CostTracker 用 decorator 模式包裹一個 LLMProvider：它本身也實現 LLMProvider 介面，
 // 在轉調真實 provider 前後計時、抽取 Token 消耗、計算費用並累加進 Session。引擎對此毫不知情。
 type CostTracker struct {
@@ -120,19 +136,13 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 		cacheRead := respMsg.Usage.CacheReadTokens
 		cacheCreation := respMsg.Usage.CacheCreationTokens
 
-		price, exists := PricingModel[t.modelName]
-		if !exists {
-			// 未登記模型：改用 fallback 估價，讓成本熔斷仍生效（而非靜默 0）。每個 model 只警告一次。
-			price.InputPrice, price.OutputPrice = fallbackInputPrice, fallbackOutputPrice
+		if _, exists := PricingModel[t.modelName]; !exists {
+			// 未登記模型：CostOf 會走 fallback 估價，讓成本熔斷仍生效（而非靜默 0）。每個 model 只警告一次。
 			if _, dup := warnedModels.LoadOrStore(t.modelName, true); !dup {
 				log.Printf("[Tracker] ⚠️ 模型 %q 未登記定價，改用 fallback 估價（in $%.1f / out $%.1f 每百萬 tk）；如需精確請在 PricingModel 登記或設 COGITO_PRICE_INPUT_USD/COGITO_PRICE_OUTPUT_USD。\n", t.modelName, fallbackInputPrice, fallbackOutputPrice)
 			}
 		}
-		// Anthropic 快取計費：命中讀取約 0.1x、寫入約 1.25x 基礎輸入價（promptTokens 已不含快取讀取）。
-		cost := (float64(promptTokens)*price.InputPrice +
-			float64(cacheRead)*price.InputPrice*0.1 +
-			float64(cacheCreation)*price.InputPrice*1.25 +
-			float64(completionTokens)*price.OutputPrice) / 1000000.0
+		cost := CostOf(t.modelName, *respMsg.Usage)
 
 		log.Printf("[Tracker] 📊 API 呼叫完成 | 耗時: %v | 輸入: %d tk (快取讀 %d / 寫 %d) | 輸出: %d tk | 花費: $%.6f\n",
 			latency, promptTokens, cacheRead, cacheCreation, completionTokens, cost)

@@ -271,6 +271,9 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 			Role:      schema.RoleAssistant,
 			Content:   strings.TrimSpace(currentTurnThinkingContent + "\n" + actionResp.Content),
 			ToolCalls: actionResp.ToolCalls,
+			// Usage 一併落地：沒有它，dashboard 的執行樹只能顯示 run 總成本，看不出【哪一步】
+			// 燒掉了錢（transcript 裡每則 assistant 訊息本來就該帶自己的帳）。
+			Usage: actionResp.Usage,
 		}
 		session.Append(finalAssistantMsg)
 
