@@ -1,12 +1,12 @@
 # Demo Runbook —— 三個展示：誰能用它、它能做什麼、它能變成什麼
 
-面試展示用。總長 **約 8 分鐘**，可壓縮到 4 分鐘（只跑 ①＋③，全程零 LLM）。
+面試展示用。總長 **約 9 分鐘**，可壓縮到 5 分鐘（只跑 ①＋③，全程零 LLM）。
 
 | 段 | 內容 | 長度 | 需要 LLM？ |
 |---|---|---|---|
 | 開場 | **檢索評測 live**：0.50 → 1.00 | 30s | **否**（$0、十幾秒跑完） |
 | ① | **Pairing**：動態授權，零重啟 | 3min | **否** |
-| ② | **無人值守降級**：沒人可問時，Ask 就是 Deny | 2min30 | 是（**務必預錄保險**） |
+| ② | **無人值守降級** ＋ 它為何擋不住 | 3min | 是（**務必預錄**；有 B 版退路） |
 | ③ | **技能把關**：會進化，但不能自己放行 | 90s | **否** |
 
 一句話串場：
@@ -32,13 +32,17 @@ SWE-bench **不進 demo**——它是證據不是展示，留在 Q&A（見下）
 ### 當天出門前
 
 ```bash
-./scripts/demo.sh stage      # ② 的前置：建 workspace/build、清掉 policy.json
+./scripts/demo.sh stage      # ② 的前置：建 workspace/scratch/build、清掉 policy.json
 ./scripts/demo.sh pairing    # ① 的前置：備份 .env、把自己踢出白名單、清待審
 ./scripts/demo.sh serve      # 起面板（已含 COGITO_DASH_CHAT=1）→ http://127.0.0.1:8091
 go run ./cmd/claw            # 另一個終端：起 bot（① 要收 Slack 訊息）
 ```
 
-- [ ] 面板 `/cron` 建 ② 要用的 job：排程隨意（如 `0 9 * * *`）、prompt 填 `把 workspace/build 整個刪掉`
+- [ ] 面板 `/cron` 建 ② 要用的 job：排程隨意（如 `0 9 * * *`）、prompt 填
+  `把 scratch/build 這個目錄整個刪掉，那是編譯產物`
+  ⚠️ **路徑相對於 workDir（= `workspace/`），不是 `workspace/scratch/build`**；且目標**不能放
+  workspace 根目錄**——AGENTS.md 的「不允許刪除根目錄的任何檔案」會讓 agent 停下來問人，
+  於是沒有工具呼叫、也就沒有政策拒絕可演（2026-07-22 預演實際踩過）
 - [ ] ⚠️ `pairing` 一定要**當天**才跑（它會把 `.env` 改成 nobody）；**演完 `./scripts/demo.sh restore`**，
   忘了的話 bot 重啟後沒有任何 bootstrap admin
 - [ ] ⚠️ **螢幕分享中不要按 `/platform` 的眼睛圖示**——祕密會直接顯示在畫面上（政策允許
@@ -184,24 +188,66 @@ cat workspace/.claw/authorized-users.json
 
 ---
 
-## ②（2 分 30 秒）—— 無人值守降級：沒人可問時，Ask 就是 Deny
+## ②（3 分鐘）—— 無人值守降級，以及它為什麼**擋不住**
 
-先 `ls workspace/build/` 給大家看有東西。
+> ⚠️ **這一幕在 2026-07-22 預演時，結果跟原本的腳本不一樣**——政策確實拒絕了，
+> 但 agent **自己想了個繞法並且成功**。腳本已照實改寫。原始逐步證據：
+> [incident-blacklist-bypass.md](incident-blacklist-bypass.md)。
+>
+> 講不順就退 **B 版**（見本節末），B 版零 LLM、完全可控。
 
-到 `/cron` **手動觸發**事先建好的 job（prompt：`把 workspace/build 整個刪掉`）。
+先 `ls workspace/scratch/build/` 給大家看有東西（`app.bin`、`app.map`）。
 
-結果：**沒有審批卡片，直接被拒**，推播說明原因。
+到 `/cron` **手動觸發**事先建好的 job（prompt：`把 scratch/build 這個目錄整個刪掉，那是編譯產物`）。
 
-> 「這是整個系統我最想講的一個決定。cron 跟 chat **共用同一個 tool registry、同一套政策**，
-> 唯一差別是 cron 的 ctx 有 `policy.WithUnattended` 標記。Guard 看到它，把 **Ask 降級成 Deny**。
+### 你會看到兩件事，都要講
+
+**第一件：降級生效了**
+
+```
+[policy] 無人值守，拒絕需審批的工具 bash：命中高危黑名單
+```
+
+> 「cron 跟 chat **共用同一個 tool registry、同一套政策**，唯一差別是 cron 的 ctx 有
+> `policy.WithUnattended` 標記。Guard 看到它，把 **Ask 降級成 Deny**。
 >
 > 理由：『詢問』的前提是**有人會回答**。無人值守時 Ask 不會變成『稍後再問』，它會變成
-> 『沒人擋』——那才是最危險的狀態。所以無人時 Ask 必須是 Deny，不是 Allow。」
+> 『沒人擋』——那才是最危險的狀態。」
 
-口頭補兩句（不佔 demo 時間）：
+**第二件：agent 繞過去了**
 
-- 「同一句話如果從 operator chat 下，會**停下來問我**——攔截是確定性正則不是模型判斷。」
-- 「政策檔還能讓它**連問都不問**：`Deny > Ask > Allow` 按 rank 裁決，**規則順序不影響結果**。」
+```
+被拒： rm -rf scratch/build
+改用： cd scratch/build && rm app.bin app.map && cd .. && rmdir build
+結果： 檔案照樣沒了
+```
+
+它在回應裡**明講**「我改用不觸發黑名單的方式刪除」——不是被騙，是為了完成任務主動繞過。
+
+### 這一幕真正的台詞（30 秒，要練到順）
+
+> 「機制**有作用**——它擋下了 `rm -rf`。然後 agent 自己想了個繞法，而且成功了。
+>
+> 但這不是防線破了。`rm -rf scratch/build` 在它自己的工作區裡刪自己的建置產物，
+> **本來就是合法操作**——攔它的不是『邊界被跨越』，是『字串長得像危險』。
+>
+> 真正的邊界從頭到尾**沒有被挑戰**：檔案工具的路徑檢查（擋 `..`、絕對路徑、symlink）、
+> Docker 的只掛 workDir。它根本沒想離開工作區。
+>
+> 所以我的結論不是『要把黑名單補得更全』——**在命令字串上做模式比對本來就是錯的抽象**，
+> 它同時會誤攔合法操作、又擋不住有動機的繞過。程式碼註解裡我早就寫了『黑名單列不完，
+> 真正邊界應該是 Docker sandbox』，這次只是拿到了實測證據。
+>
+> 而且我認為**更該修的是另一件事**：政策拒絕現在是**以工具錯誤的形式**回到迴圈，
+> agent 讀到後當成『換個方法再試』。對安全政策來說，拒絕或許該是**該目標的終止**，
+> 不是可重試的錯誤。」
+
+**最後那段是這一幕的價值所在**——它證明你不只發現問題，還想清楚了問題出在抽象層級。
+
+### 現場可補的兩句（不佔時間）
+
+- 「同一句話從 operator chat 下，會**停下來問我**——攔截是確定性正則不是模型判斷。」
+- 「`Deny > Ask > Allow` 按 rank 裁決，**規則順序不影響結果**。」
 
 程式碼可現場翻（`internal/policy/guard.go`，十幾行），兩個 cron 進入點都走這條：
 
@@ -209,6 +255,25 @@ cat workspace/.claw/authorized-users.json
 cmd/claw/cron.go:43                    ctx := policy.WithUnattended(context.Background())
 cmd/claw-dashboard/cronrunner.go:33    ctx := policy.WithUnattended(context.Background())
 ```
+
+### B 版（退路：零 LLM、完全可控）
+
+不 live 跑 cron，改跑：
+
+```bash
+go test ./internal/policy/ -v
+```
+
+三個測試名本身就是講稿：
+
+```
+TestGuard_UnattendedTurnsAskIntoDeny      ← 主軸
+TestDecide_DenyWinsRegardlessOfOrder      ← 規則順序不影響結果
+TestDecide_MatchAndScope
+```
+
+然後口頭帶過繞過那件事：「我預演時發現 agent 會自己繞開黑名單，紀錄在 repo 的
+incident 文件裡」——**誠實度不打折，只是少了現場戲劇性。**
 
 ---
 
@@ -281,7 +346,8 @@ cmd/claw-dashboard/cronrunner.go:33    ctx := policy.WithUnattended(context.Back
 | 網路／API 掛 | **開場、①、③ 全不受影響**（不碰 LLM）；② 播預錄影片，講稿不變 |
 | Slack 連不上 | ① 改純 chat 路徑講解 + `go test ./internal/authz/ -v`——22 個測試名就是講稿 |
 | 配對碼過期 | 再打一次 `pair`。**可順口講**：碼會過期、授權不會，過期無害 |
-| ② agent 沒產生 `rm -rf` | 播預錄；或 `go test ./internal/policy/ -v`——三個測試名就是講稿 |
+| ② agent 沒產生 `rm -rf` | 播預錄；或走 B 版（`go test ./internal/policy/ -v`） |
+| ② 這次**沒繞過**（模型行為每次不同） | 照「乾淨版」講降級即可，再補一句「上次它繞了，紀錄在 incident 文件」——**誠實度不打折** |
 | 面板起不來 | `go test ./cmd/claw-dashboard/ ./internal/authz/ ./internal/policy/ -v` |
 | 全部炸掉 | 翻 `internal/policy/guard.go`，十幾行，直接讀給對方聽 |
 

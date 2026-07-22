@@ -7,17 +7,21 @@ CLAW=workspace/.claw
 
 case "${1:-stage}" in
 stage)
-  # 結局一/二的刪除目標：可見、可驗收、丟了也不心疼。
-  rm -rf workspace/build
-  mkdir -p workspace/build
-  printf 'demo artifact\n' > workspace/build/app.bin
-  printf 'demo artifact\n' > workspace/build/app.map
+  # ②的刪除目標：可見、可驗收、丟了也不心疼。
+  #
+  # 【為何放 scratch/ 而不是 workspace 根目錄】cron 的 workDir 就是 workspace/，而 AGENTS.md
+  # 有一條「不允許刪除根目錄的任何檔案」——目標放根目錄時 agent 會【停下來問人】而不是呼叫
+  # rm -rf，於是沒有工具呼叫、也就沒有政策拒絕可演。實測踩過（2026-07-22 預演）。
+  rm -rf workspace/scratch
+  mkdir -p workspace/scratch/build
+  printf 'demo artifact\n' > workspace/scratch/build/app.bin
+  printf 'demo artifact\n' > workspace/scratch/build/app.map
 
   # 政策檔不能預先存在——②要演的是【內建正則 Ask → 無人值守降 Deny】，policy 會搶先 Deny。
   rm -f "$CLAW/policy.json"
 
   echo "已就緒："
-  echo "  刪除目標  workspace/build/  ($(ls workspace/build | wc -l | tr -d ' ') 個檔)"
+  echo "  刪除目標  workspace/scratch/build/  ($(ls workspace/scratch/build | wc -l | tr -d ' ') 個檔)"
   echo "  政策檔    未建立（②的 Ask→Deny 靠內建正則；有 policy 會搶先 Deny、演不出降級）"
   echo "  提案技能  $(ls "$CLAW/skills-proposed" 2>/dev/null | wc -l | tr -d ' ') 個"
   echo "  生效技能  $(ls "$CLAW/skills" 2>/dev/null | wc -l | tr -d ' ') 個"
