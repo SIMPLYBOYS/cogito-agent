@@ -62,11 +62,28 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   .run .taskgrp[open]>summary { border-bottom:1px solid var(--ln); padding-bottom:8px; margin-bottom:10px; }
   .run .taskgrp .q { margin:2px 0 12px; }
   /* fan-out：一輪派出多個子 agent → 扇形卡片（一節點 → 多分支） */
-  .run .fan { margin:6px 0 4px 2px; }
-  .run .fanroot { color:var(--a2); font-size:12px; letter-spacing:.02em; margin-bottom:8px; }
-  .run .fancards { display:flex; flex-wrap:wrap; gap:10px; }
-  .run .fcard { flex:1 1 200px; min-width:180px; background:var(--p); border:1px solid var(--ln); border-top:2px solid var(--a); border-radius:8px; padding:0; }
-  .run .fcard>summary { cursor:pointer; list-style:none; display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:9px 12px; }
+  /* 由左向右的樹：根節點在左，虛線扇出到右邊的專員卡片 */
+  .run .fan { display:flex; align-items:center; gap:0; margin:10px 0 8px 2px; }
+  .run .fanroot { flex:none; align-self:center; background:var(--p); border:1px solid var(--ln);
+    border-left:3px solid var(--a); border-radius:8px; padding:10px 14px; font-size:12.5px;
+    color:var(--fg,#ece0d4); white-space:nowrap; }
+  .run .fanroot b { color:var(--a2); font-variant-numeric:tabular-nums; }
+  /* 分支區：左側留白畫連接線 */
+  .run .fanbranch { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;
+    position:relative; padding-left:36px; }
+  /* 垂直脊：把所有分支串起來 */
+  .run .fanbranch::before { content:""; position:absolute; left:17px; top:18px; bottom:18px;
+    border-left:1px dotted var(--m); }
+  /* 根 → 脊 的水平接線（對齊整組的垂直中心） */
+  .run .fanbranch::after { content:""; position:absolute; left:0; top:50%; width:17px;
+    border-top:1px dotted var(--m); }
+  /* 每張卡：脊 → 卡片摘要列的水平接線 */
+  .run .fcard { position:relative; background:var(--p); border:1px solid var(--ln);
+    border-left:2px solid var(--a); border-radius:8px; }
+  .run .fcard::after { content:""; position:absolute; left:-19px; top:19px; width:19px;
+    border-top:1px dotted var(--m); }
+  .run .fcard>summary { cursor:pointer; list-style:none; display:flex; align-items:baseline;
+    justify-content:space-between; gap:8px; padding:9px 12px; }
   .run .fcard>summary::-webkit-details-marker { display:none; }
   .run .fcard>summary::before { content:"▸ "; color:var(--a2); }
   .run .fcard[open]>summary { border-bottom:1px solid var(--ln); }
@@ -76,6 +93,13 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   .run .fcard>.args-d, .run .fcard>.turn, .run .fcard>.content, .run .fcard>.note { margin-left:12px; margin-right:10px; }
   .run .fcard>.content { padding-bottom:8px; }
   .run .fcard>.turn:first-of-type { padding-top:8px; }
+  /* 窄螢幕：改回上下堆疊，連接線收起 */
+  @media (max-width:640px) {
+    .run .fan { flex-direction:column; align-items:stretch; }
+    .run .fanroot { align-self:flex-start; margin-bottom:8px; }
+    .run .fanbranch { padding-left:0; }
+    .run .fanbranch::before, .run .fanbranch::after, .run .fcard::after { display:none; }
+  }
 </style>
 <div class="run">
   <div class="rmeta">
@@ -112,8 +136,8 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
         {{end}}
         {{if .Fan}}
         <div class="fan">
-          <div class="fanroot">⤷ 委派 {{len .Fan}} 個子 agent{{if gt (len .Fan) 1}} · 並行{{end}}</div>
-          <div class="fancards">
+          <div class="fanroot">⤷ orchestrator<br><b>委派 {{len .Fan}} 個{{if gt (len .Fan) 1}} · 並行{{end}}</b></div>
+          <div class="fanbranch">
           {{range .Fan}}
             <details class="fcard">
               <summary><span class="fname">{{.AgentType}}</span><span class="fmeta">{{if .SubTurns}}{{.SubSteps}} 步{{if .SubCostUSD}} · <span class="cost">${{printf "%.4f" .SubCostUSD}}</span>{{end}}{{else}}報告{{end}}</span></summary>

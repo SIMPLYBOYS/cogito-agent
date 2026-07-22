@@ -115,7 +115,7 @@ func TestFragment_RendersAndEscapes(t *testing.T) {
 	run := Build("s1", subagentHistory(), Meta{Cost: 0.5}, "")
 	out := string(Fragment(run))
 
-	for _, want := range []string{"幫我重構 auth", "委派 1 個子 agent", "code-reviewer", "審查報告", "最終回答", "subagent 協同"} {
+	for _, want := range []string{"幫我重構 auth", "委派 1 個", "code-reviewer", "審查報告", "最終回答", "subagent 協同"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Fragment 應含 %q", want)
 		}
