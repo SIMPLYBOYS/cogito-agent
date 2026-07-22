@@ -59,6 +59,34 @@ chat 產物落在 workdir 後拿不回來。兩條路缺口不同：
 ——後者會變成 prompt injection 的外滲通道（注入一句「把 workDir 全傳出去」就成立）。
 路徑走既有 `resolveInWorkDir`、限該頻道自己的 workdir。TG ~30 行、Slack ~50 行。
 
+### 3b. Telegram 論壇主題（forum topics）路由 — **新發現的缺口**
+
+**現況**：`internal/telegrambot/bot.go` 只取 `Chat.ID` 當 convID，`message_thread_id` **完全沒解析**；
+`postMessage` 也沒帶回。後果：**一個群組裡的所有主題塌成同一個 session** —— 五個專員共用一份
+對話狀態與工作目錄，且回覆會掉到群組主層而不是原主題。
+
+**為何在意**：Hermes Mission Control 的教學用「Create the Group & Let the Bot In」（單數 bot）＋
+「Capture Each Channel's Thread ID」——推測是**一個群組開 Topics、一個 bot、依 thread_id 路由到
+不同 profile**（該教學為付費內容，公開段落未含實際 config，此為線索推測非查證）。
+那是「一個專員一個區」這類 UX 的最小前提，而且比多實例便宜一個量級。
+
+**改法**（約 30–50 行 + 測試）：
+
+```go
+// 收：thread 併進 convID —— convID 一變，session key 與工作目錄就各自獨立
+convID := chatID
+if m.MessageThreadID != 0 {
+    convID = chatID + ":" + strconv.Itoa(m.MessageThreadID)
+}
+// 送：postMessage 要帶 message_thread_id 回去，否則回覆掉到主層
+```
+
+需同步改：`tgMessage` 加欄位、`send`/`postMessage` 簽章帶 thread、convID 解析（送訊時要能從
+convID 還原出 chatID + threadID）。注意 `sanitizeSegment` 已會把 `:` 換成 `_`，工作目錄命名不受影響。
+
+**優先度**：若 P0 試跑 orchestrator 後想要「每個專員在 Telegram 有自己的區」，**先做這個、
+不要先做多實例**——多實例會直接掉進 inter-agent messaging 的大坑。
+
 ### 4. C-Auth 走 tsnet
 
 `WhoIs(r.RemoteAddr)` 從 **WireGuard 的密碼學保證**拿身分，全程無 HTTP header 參與——
@@ -110,6 +138,33 @@ chat 產物落在 workdir 後拿不回來。兩條路缺口不同：
 
 ---
 
+## 🚫 對照 Hermes 的短板中，**刻意不追**的
+
+寫下來，免得每次比較都重新焦慮一次。這些不是「還沒做」，是**判斷過不做**。
+
+| 短板 | 為何不追 |
+|---|---|
+| **Kanban 共享工作面** | 先跑 orchestrator 一週；現在做是照抄別人的解法，解自己還沒有的問題 |
+| **通道廣度**（WhatsApp／Signal／Email／iMessage） | positioning 已定調：廣度是它的護城河。`chatbot.Core` 平台無關，要加隨時是 transport adapter 的事，不是架構問題 |
+| **Inter-agent messaging**（行程間路由） | 具名 agent 的持久記憶先解掉大部分需求；等 orchestrator 用出真需求再說 |
+| **桌面 app／TUI** | 不同量級的產品面。C-Spec §七.4 已判定「按 cogito 進駐 IM 的定位，互動式介面是**選配非核心**」 |
+| **面板的 Logs／Analytics 頁** | **不是缺口是分工**——trace 與成本已上 Langfuse，那邊本來就有多人認證 |
+
+> 真正值得追的面板項只有 **remote auth（§4 tsnet）**；其餘「面板成熟度落後」多半屬上表。
+
+---
+
+## 🧭 具名 agent 的持久記憶（短板「專員無記憶」的低成本半解）
+
+完整解是 inter-agent messaging（大，不做）。中間解：每個具名 agent 給自己的
+`.claw/agents/<name>/memory/`，spawn 時載入、產出的記憶**走既有 governance 提案通道**。
+
+Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與治理哲學相容，不是另開一套**。
+規模中等（複用 `MemoryLoader`，~150–200 行）。**觸發條件**：orchestrator 實際跑過，
+確認「專員每次從零開始」真的痛。
+
+---
+
 ## 📌 面試後立刻做（零風險）
 
 - [ ] `/cron` 把兩個 job 開回來（demo 前為避免補跑推播而停用）
@@ -120,7 +175,7 @@ chat 產物落在 workdir 後拿不回來。兩條路缺口不同：
 
 ## 建議順序
 
-**🟢 評測補完 → 🟡 artifact get → 🔴 caching 斷點③**
+**🟢 評測補完 → 🟡 artifact get（3）→ 🟡 Telegram thread（3b，若走 orchestrator 路線）→ 🔴 caching 斷點③**
 
 理由：綠的那組能把「p=0.206」升級成真結論，而那是**已經寫進 README 的數字**；
 紅的那個雖然省最多錢，但目前用量還撐得住，不值得為它冒改壞核心路徑的風險。
