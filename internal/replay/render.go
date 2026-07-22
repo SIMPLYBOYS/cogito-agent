@@ -31,6 +31,13 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   .run .rmeta { font-size:12px; margin-bottom:22px; display:flex; flex-wrap:wrap; gap:7px; align-items:center; }
   .run .rmeta .chip { color:var(--m); background:var(--p); border:1px solid var(--ln); border-radius:5px; padding:1px 8px; font-variant-numeric:tabular-nums; }
   .run .rmeta .badge { color:var(--a); border:1px solid var(--a); border-radius:5px; padding:1px 8px; letter-spacing:.02em; }
+  /* 進行中：執行中徽章呼吸、尚未回報的專員卡片脈動——run 結束（Running=false）即全部靜止 */
+  @keyframes cg-breathe { 0%,100%{opacity:1} 50%{opacity:.4} }
+  @keyframes cg-glow { 0%,100%{box-shadow:0 0 0 0 var(--g)} 50%{box-shadow:0 0 9px 1px var(--g)} }
+  .run.running .rmeta .badge { animation: cg-breathe 1.3s ease-in-out infinite; }
+  .run.running .fcard.pending { animation: cg-glow 1.4s ease-in-out infinite; border-left-color:var(--a2); }
+  .run.running .fcard.pending .fmeta { color:var(--a2); }
+  @media (prefers-reduced-motion: reduce) { .run.running .rmeta .badge, .run.running .fcard.pending { animation:none; } }
   .run .rmeta .solo { color:var(--m); }
   /* 軌道時間線 */
   .run .turn { border-left:2px solid var(--ln); padding:0 0 15px 18px; margin-left:6px; position:relative; }
@@ -106,7 +113,7 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
     .run .fanbranch::before, .run .fanbranch::after, .run .fcard::after { display:none; }
   }
 </style>
-<div class="run">
+<div class="run{{if .Meta.Running}} running{{end}}">
   <div class="rmeta">
     <span class="chip">{{len .Tasks}} 個任務 · {{len .Turns}} 步</span>
     <span class="chip">${{printf "%.4f" .Meta.Cost}}</span>
@@ -144,8 +151,8 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
           <div class="fanroot">⤷ orchestrator<br><b>委派 {{len .Fan}} 個{{if gt (len .Fan) 1}} · 並行{{end}}</b></div>
           <div class="fanbranch">
           {{range .Fan}}
-            <details class="fcard">
-              <summary><span class="fname">{{.AgentType}}</span><span class="fmeta">{{if .SubTurns}}{{.SubSteps}} 步{{if .SubCostUSD}} · <span class="cost">${{printf "%.4f" .SubCostUSD}}</span>{{end}}{{else}}報告{{end}}</span></summary>
+            <details class="fcard{{if and (not .SubTurns) (not .Report)}} pending{{end}}">
+              <summary><span class="fname">{{.AgentType}}</span><span class="fmeta">{{if .SubTurns}}{{.SubSteps}} 步{{if .SubCostUSD}} · <span class="cost">${{printf "%.4f" .SubCostUSD}}</span>{{end}}{{else if .Report}}報告{{else}}審查中…{{end}}</span></summary>
               <details class="args-d"><summary>交辦</summary><pre class="args">{{.Args}}</pre></details>
               {{if .SubTurns}}{{template "turns" .SubTurns}}
               {{else if .Report}}<div class="content">{{.Report}}</div>{{end}}

@@ -267,3 +267,26 @@ func TestFragment_TaskGroupsAndCost(t *testing.T) {
 		t.Error("應顯示快取 token 明細")
 	}
 }
+
+// 進行中狀態的視覺訊號：Running=true 時容器掛 .running（讓 CSS 脈動生效）、尚未回報的委派
+// 卡片掛 .pending 並標「審查中…」。run 結束（Running=false）就不該再有 running class——
+// 動畫只在真的進行中出現。
+func TestFragment_RunningStateAnimatesPending(t *testing.T) {
+	h := []schema.Message{
+		{Role: schema.RoleUser, Content: "審一下"},
+		{Role: schema.RoleAssistant, Content: "派專員", ToolCalls: []schema.ToolCall{
+			{ID: "c1", Name: "spawn_subagent", Arguments: json.RawMessage(`{"agent_type":"correctness"}`)},
+			{ID: "c2", Name: "spawn_subagent", Arguments: json.RawMessage(`{"agent_type":"security-auditor"}`)},
+		}}, // spawn 了但還沒有 tool_result → 進行中
+	}
+	running := string(Fragment(Build("s", h, Meta{Running: true}, "")))
+	for _, want := range []string{`class="run running"`, "pending", "審查中…", "@keyframes cg-", "prefers-reduced-motion"} {
+		if !strings.Contains(running, want) {
+			t.Errorf("進行中的樹應含 %q", want)
+		}
+	}
+	// 已結束就不該有 running class（動畫只在進行中）
+	if strings.Contains(string(Fragment(Build("s", h, Meta{Running: false}, ""))), `class="run running"`) {
+		t.Error("Running=false 不該掛 running class——動畫應靜止")
+	}
+}
