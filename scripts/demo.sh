@@ -137,6 +137,13 @@ magents)
 
 serve)
   go build -o bin/claw-dashboard ./cmd/claw-dashboard
+  # 保險：operator chat 的 workDir＝workspace 根；標的不在就自動補一份（忘了先跑 magents、
+  # 或 workspace 被清時，面板 demo 照樣找得到 review-target/payment.go）。
+  if [ ! -f workspace/review-target/payment.go ]; then
+    mkdir -p workspace/review-target
+    cp demo/mission-control/target/payment.go demo/mission-control/target/go.mod workspace/review-target/
+    echo "（已自動補上 review-target/payment.go 到 workspace 根）"
+  fi
   echo "http://127.0.0.1:8091  （Ctrl-C 結束）"
   # demo 的第二幕要在面板【手動觸發】cron——排程器沿用 operator chat 的寫入閘，
   # 沒設 COGITO_DASH_CHAT=1 只能編輯不能執行。
