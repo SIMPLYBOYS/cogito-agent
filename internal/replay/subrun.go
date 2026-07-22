@@ -15,6 +15,7 @@ type SubRun struct {
 	Prompt    string           `json:"prompt"`
 	History   []schema.Message `json:"history"`
 	UpdatedAt string           `json:"updated_at"`
+	Model     string           `json:"model,omitempty"` // 子 agent 實際用的模型——算逐步成本要（子 agent 常用與主 agent 不同的模型）
 }
 
 func subDir(sessWorkDir string) string { return filepath.Join(sessWorkDir, "subagents") }

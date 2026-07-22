@@ -53,7 +53,8 @@ type Turn struct {
 	FinalAnswer string // 該輪無 tool call ＝ 最終回答
 	Note        string // 系統提醒（成本軟著陸 / 續跑等，夾在流程中的 user 訊息）
 	Usage       *schema.Usage
-	CostUSD     float64 // 本步成本（有 Usage 且知道模型才非 0）
+	CostUSD     float64   // 本步成本（有 Usage 且知道模型才非 0）
+	Fan         []*Action // 本輪的【委派動作】，單獨拉出來渲染成 fan-out 卡片（一節點→多分支）
 }
 
 // Action 是一次工具呼叫。IsSubagent 時 AgentType/Report 有值（Report 即該子 agent 的回報）；
@@ -67,6 +68,9 @@ type Action struct {
 	Report      string
 	CallID      string  // ToolCall.ID——用來找 subagents/<CallID>.json
 	SubTurns    []*Turn // 子 agent 內部逐輪（有落地 sub-history 時才有）
+	SubModel    string  // 子 agent 實際用的模型（可能與主 agent 不同）
+	SubCostUSD  float64 // 子 agent 內部逐步成本合計（fan-out 卡片的標頭數字）
+	SubSteps    int     // 子 agent 實質步數
 }
 
 // Build 把 history 重建成 Run。sessWorkDir 非空時，會用 spawn_subagent 節點的 CallID 去
@@ -89,11 +93,37 @@ func Build(id string, history []schema.Message, meta Meta, sessWorkDir string) R
 				if a.IsSubagent && a.CallID != "" {
 					if sr, ok := LoadSubRun(sessWorkDir, a.CallID); ok {
 						a.SubTurns, _, _ = reconstruct(sr.History)
+						a.SubModel = sr.Model
+						// 用【子 agent 自己的】模型算逐步成本——它常與主 agent 不同（如子 agent 走 opus）。
+						// 模型未知就不算（寧可不顯示，不顯示錯的），與主樹同一守則。
+						for _, st := range a.SubTurns {
+							if sr.Model != "" && st.Usage != nil {
+								st.CostUSD = observability.CostOf(sr.Model, *st.Usage)
+							}
+							if st.Note == "" {
+								a.SubSteps++
+							}
+							a.SubCostUSD += st.CostUSD
+						}
 					}
 				}
 			}
 		}
 	}
+	// fan-out：把委派動作從時間線 Actions 拉到 Fan，讓「一輪派出多個子 agent」渲染成扇形卡片。
+	// 在 sub-run 掛回【之後】做，卡片標頭才有步數與成本。指標不變，byCall 對應仍有效。
+	for _, t := range turns {
+		var rest []*Action
+		for _, a := range t.Actions {
+			if a.IsSubagent {
+				t.Fan = append(t.Fan, a)
+			} else {
+				rest = append(rest, a)
+			}
+		}
+		t.Actions = rest
+	}
+
 	return run
 }
 

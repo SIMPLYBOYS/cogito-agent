@@ -61,10 +61,21 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   .run .taskgrp>summary .tchips { margin-left:auto; color:var(--m); font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .run .taskgrp[open]>summary { border-bottom:1px solid var(--ln); padding-bottom:8px; margin-bottom:10px; }
   .run .taskgrp .q { margin:2px 0 12px; }
-  /* 巢狀鍛爐：子 agent 內部 */
-  .run .action.sub .badge { color:var(--a); border:1px solid var(--a); border-radius:5px; padding:0 7px; font-size:11px; margin-left:4px; }
-  .run .subinner { margin:8px 0 2px 2px; background:color-mix(in srgb,var(--a2) 5%,transparent); border:1px solid var(--ln); border-left:2px solid var(--a2); border-radius:0 7px 7px 0; padding:2px 12px 8px; }
-  .run .subinner>summary { color:var(--a2); font-size:12.5px; padding:6px 0 2px; }
+  /* fan-out：一輪派出多個子 agent → 扇形卡片（一節點 → 多分支） */
+  .run .fan { margin:6px 0 4px 2px; }
+  .run .fanroot { color:var(--a2); font-size:12px; letter-spacing:.02em; margin-bottom:8px; }
+  .run .fancards { display:flex; flex-wrap:wrap; gap:10px; }
+  .run .fcard { flex:1 1 200px; min-width:180px; background:var(--p); border:1px solid var(--ln); border-top:2px solid var(--a); border-radius:8px; padding:0; }
+  .run .fcard>summary { cursor:pointer; list-style:none; display:flex; align-items:baseline; justify-content:space-between; gap:8px; padding:9px 12px; }
+  .run .fcard>summary::-webkit-details-marker { display:none; }
+  .run .fcard>summary::before { content:"▸ "; color:var(--a2); }
+  .run .fcard[open]>summary { border-bottom:1px solid var(--ln); }
+  .run .fcard[open]>summary::before { content:"▾ "; }
+  .run .fcard .fname { color:var(--fg,#ece0d4); font-weight:700; letter-spacing:.01em; }
+  .run .fcard .fmeta { color:var(--m); font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .run .fcard>.args-d, .run .fcard>.turn, .run .fcard>.content, .run .fcard>.note { margin-left:12px; margin-right:10px; }
+  .run .fcard>.content { padding-bottom:8px; }
+  .run .fcard>.turn:first-of-type { padding-top:8px; }
 </style>
 <div class="run">
   <div class="rmeta">
@@ -94,18 +105,25 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
       <div class="turn"><span class="tn">{{printf "%02d" .Index}}</span>
         {{if .Thinking}}<details open class="think"><summary>思考</summary><div class="content">{{.Thinking}}</div></details>{{end}}
         {{range .Actions}}
-          {{if .IsSubagent}}
-            <div class="action sub"><span class="am">⤷</span><b>委派子 agent</b><span class="badge">{{.AgentType}}</span>
-              <details><summary>參數</summary><pre class="args">{{.Args}}</pre></details>
-              {{if .SubTurns}}<details class="subinner"><summary>子 agent 內部（{{len .SubTurns}} 步）</summary>{{template "turns" .SubTurns}}</details>
-              {{else if .Report}}<details class="report"><summary>子 agent 報告</summary><div class="content">{{.Report}}</div></details>{{end}}
-            </div>
-          {{else}}
             <div class="action"><span class="am">▸</span><b>{{.Tool}}</b>
               <pre class="args">{{.Args}}</pre>
               {{if .Observation}}<details><summary>觀察</summary><div class="content">{{.Observation}}</div></details>{{end}}
             </div>
+        {{end}}
+        {{if .Fan}}
+        <div class="fan">
+          <div class="fanroot">⤷ 委派 {{len .Fan}} 個子 agent{{if gt (len .Fan) 1}} · 並行{{end}}</div>
+          <div class="fancards">
+          {{range .Fan}}
+            <details class="fcard">
+              <summary><span class="fname">{{.AgentType}}</span><span class="fmeta">{{if .SubTurns}}{{.SubSteps}} 步{{if .SubCostUSD}} · <span class="cost">${{printf "%.4f" .SubCostUSD}}</span>{{end}}{{else}}報告{{end}}</span></summary>
+              <details class="args-d"><summary>交辦</summary><pre class="args">{{.Args}}</pre></details>
+              {{if .SubTurns}}{{template "turns" .SubTurns}}
+              {{else if .Report}}<div class="content">{{.Report}}</div>{{end}}
+            </details>
           {{end}}
+          </div>
+        </div>
         {{end}}
         {{if .Usage}}<div class="usage">{{if .CostUSD}}<span class="cost">${{printf "%.4f" .CostUSD}}</span> · {{end}}in {{.Usage.PromptTokens}} tk（快取讀 {{.Usage.CacheReadTokens}}／寫 {{.Usage.CacheCreationTokens}}）· out {{.Usage.CompletionTokens}} tk</div>{{end}}
       </div>

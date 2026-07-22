@@ -426,7 +426,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 			// （detached ctx）兩者取不到 → WriteSubRun 內部略過，無行為改變。best-effort，寫失敗不影響回報。
 			if sess := SessionFromContext(ctx); sess != nil {
 				_ = replay.WriteSubRun(sess.WorkDir, tools.CallIDFromContext(ctx),
-					replay.SubRun{Prompt: task.Prompt, History: contextHistory})
+					replay.SubRun{Prompt: task.Prompt, History: contextHistory, Model: e.provider.ModelName()})
 			}
 			return actionResp.Content, nil
 		}

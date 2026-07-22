@@ -32,9 +32,10 @@ func TestBuild_ReconstructsTurnsAndSubagent(t *testing.T) {
 	if len(run.Turns) != 2 {
 		t.Fatalf("應 2 個 turn，got %d", len(run.Turns))
 	}
-	a := run.Turns[0].Actions
+	// 委派動作分流到 Fan（渲染成 fan-out 卡片），不再留在時間線 Actions
+	a := run.Turns[0].Fan
 	if len(a) != 1 || !a[0].IsSubagent || a[0].AgentType != "code-reviewer" {
-		t.Fatalf("turn1 應是 code-reviewer 子 agent 委派，got %+v", a)
+		t.Fatalf("turn1 的 Fan 應是 code-reviewer 子 agent 委派，got %+v", a)
 	}
 	if a[0].CallID != "c1" {
 		t.Errorf("委派節點應記 ToolCall.ID（供掛回子深度），got %q", a[0].CallID)
@@ -86,7 +87,7 @@ func TestBuild_SubagentDepth(t *testing.T) {
 
 	// 給 workDir → 應掛回子深度
 	run := Build("sess-1", subagentHistory(), Meta{}, ws)
-	sub := run.Turns[0].Actions[0]
+	sub := run.Turns[0].Fan[0]
 	if len(sub.SubTurns) == 0 {
 		t.Fatal("有落地 sub-history 時，委派節點應掛回子 agent 內部 turns")
 	}
@@ -105,7 +106,7 @@ func TestBuild_SubagentDepth(t *testing.T) {
 
 	// 不給 workDir → 只到委派層（不掛子深度），保持 M1 行為
 	shallow := Build("sess-1", subagentHistory(), Meta{}, "")
-	if len(shallow.Turns[0].Actions[0].SubTurns) != 0 {
+	if len(shallow.Turns[0].Fan[0].SubTurns) != 0 {
 		t.Error("未給 workDir 不該載入子深度")
 	}
 }
@@ -114,7 +115,7 @@ func TestFragment_RendersAndEscapes(t *testing.T) {
 	run := Build("s1", subagentHistory(), Meta{Cost: 0.5}, "")
 	out := string(Fragment(run))
 
-	for _, want := range []string{"幫我重構 auth", "委派子 agent", "code-reviewer", "審查報告", "最終回答", "subagent 協同"} {
+	for _, want := range []string{"幫我重構 auth", "委派 1 個子 agent", "code-reviewer", "審查報告", "最終回答", "subagent 協同"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("Fragment 應含 %q", want)
 		}
@@ -145,7 +146,7 @@ func TestFragment_RendersSubDepth(t *testing.T) {
 	}
 	_ = WriteSubRun(ws, "c1", SubRun{History: subHistory})
 	out := string(Fragment(Build("s", subagentHistory(), Meta{}, ws)))
-	if !strings.Contains(out, "子 agent 內部") {
+	if !strings.Contains(out, "fcard") { // fan-out 卡片：子 agent 委派渲染成可展開卡片
 		t.Error("Fragment 應含可展開的子 agent 內部")
 	}
 	if !strings.Contains(out, "read_file") {
