@@ -104,14 +104,31 @@ magents)
   # multi-agent demo 前置：把版控正本（demo/mission-control/）複製回 workspace/。
   # workspace/ 被 gitignore，故資產正本存在 demo/ 下，用這個指令佈署。
   D=demo/mission-control
-  mkdir -p workspace/review-target "$CLAW/agents" "$CLAW/skills/orchestrate"
-  cp "$D/target/payment.go" "$D/target/go.mod" workspace/review-target/
+  mkdir -p "$CLAW/agents" "$CLAW/skills/orchestrate"
+  # agent 與技能是【共享資產】（從 workspace 根讀，跨頻道生效）——放一次即可。
   cp "$D/agents/correctness.md" "$D/agents/performance.md" "$CLAW/agents/"
   cp "$D/orchestrate-SKILL.md" "$CLAW/skills/orchestrate/SKILL.md"
+
+  # 標的檔是【工作產物】，per-channel 隔離——面板 chat 在 workspace 根跑、Slack/TG 在
+  # channels/<id>/ 子目錄跑。故同時佈到根（面板用）與每個既有頻道工作區（bot 用），
+  # 這樣不管從哪個入口 demo 都找得到。
+  deploy_target() {
+    mkdir -p "$1/review-target"
+    cp "$D/target/payment.go" "$D/target/go.mod" "$1/review-target/"
+  }
+  deploy_target workspace                          # 面板 operator chat
+  chans=0
+  for ch in workspace/channels/*/; do
+    [ -d "$ch" ] || continue
+    deploy_target "$ch"; chans=$((chans+1))
+  done
+
   echo "已佈署 multi-agent demo 資產："
-  echo "  標的      workspace/review-target/payment.go（種了 3 個問題）"
-  echo "  窄專員    correctness · performance（＋既有 security-auditor）"
-  echo "  編排技能  orchestrate"
+  echo "  標的      review-target/payment.go → workspace 根 + $chans 個頻道工作區"
+  echo "  窄專員    correctness · performance（＋既有 security-auditor，共享）"
+  echo "  編排技能  orchestrate（共享）"
+  echo
+  echo "  ⚠️ 若在【新頻道】demo：先在該頻道發一則訊息（建工作區），再重跑 magents。"
   echo
   echo "跑法（面板 chat 或 claw-cli）："
   echo '  用 orchestrate 技能審查 review-target/payment.go 能不能上線：'
