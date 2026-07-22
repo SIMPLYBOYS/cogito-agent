@@ -306,7 +306,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				defer toolSem.release() // 跑完歸還
 
 				if reporter != nil {
-					reporter.OnToolCall(ctx, call.Name, string(call.Arguments))
+					reporter.OnToolCall(ctx, spawnReportName(call), string(call.Arguments))
 				}
 
 				// 傳 turnCtx，使併發工具的 Tool.Execute span 平行掛在當前 Turn 節點下
@@ -323,7 +323,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 				}
 
 				if reporter != nil {
-					reporter.OnToolResult(ctx, call.Name, capRunes(finalOutput, 200), result.IsError)
+					reporter.OnToolResult(ctx, spawnReportName(call), capRunes(finalOutput, 200), result.IsError)
 				}
 
 				observationMsgs[idx] = schema.Message{
@@ -514,6 +514,22 @@ func (s toolSemaphore) release() {
 // 這個 bug 曾同時存在於 5 個地方，就是因為每個包各寫一份截斷邏輯。
 func capRunes(s string, max int) string {
 	return schema.TruncRunes(s, max, "... (已截斷)")
+}
+
+// spawnReportName 讓 spawn_subagent 的進度事件在 name 後綴帶 agent_type（spawn_subagent:<type>），
+// 使 UI 能把同一委派的「上工」與「收工」對到同一張卡——收工事件的酬載是報告字串、本身不含型別，
+// 沒有這個後綴就只能靠委派順序猜（並行子 agent 完成順序≠委派順序時會貼錯卡）。其他工具原名不動。
+func spawnReportName(call schema.ToolCall) string {
+	if call.Name != "spawn_subagent" {
+		return call.Name
+	}
+	var a struct {
+		AgentType string `json:"agent_type"`
+	}
+	if json.Unmarshal(call.Arguments, &a) == nil && a.AgentType != "" {
+		return call.Name + ":" + a.AgentType
+	}
+	return call.Name
 }
 
 func jsonStr(v any) string {

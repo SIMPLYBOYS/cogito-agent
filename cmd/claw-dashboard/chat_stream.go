@@ -164,7 +164,10 @@ const chatJSSrc = `(function () {
   }
   function stopActive() { if (active) { active.classList.remove('active'); active = null; } }
   function scroll() { window.scrollTo(0, document.body.scrollHeight); }
-  function agentType(label) { var m = /"agent_type"\s*:\s*"([^"]+)"/.exec(label); return m ? m[1] : '子 agent'; }
+  function agentType(label) {                         // 開/收事件都帶 spawn_subagent:<type> 後綴；退回從 args 取
+    var m = /^spawn_subagent:(\S+)/.exec(label); if (m) return m[1];
+    m = /"agent_type"\s*:\s*"([^"]+)"/.exec(label); return m ? m[1] : '子 agent';
+  }
   function subRole(label) { var m = /^\[Subagent:([^\]]+)\]/.exec(label); return m ? m[1] : null; }
   function stripSub(label) { return label.replace(/^\[Subagent(:[^\]]+)?\]\s*/, ''); }
   function openCard(type) {                           // 委派上工：開一張兄弟並列的脈動卡（不巢狀）
@@ -181,9 +184,11 @@ const chatJSSrc = `(function () {
     box.appendChild(head); box.appendChild(body);
     live.appendChild(box); cards[type] = { box:box, st:st, body:body }; order.push(type); scroll();
   }
-  function closeCard(ok, report) {                    // 委派收工：翻牌＋附報告摘要。並行時結果不帶型別，
-    var type = order.shift(); if (type == null) return; // 故用 FIFO 收（並行子 agent 幾乎同時結束，順序差異視覺無感）
-    var c = cards[type]; delete cards[type]; if (!c) return;
+  function closeCard(type, ok, report) {              // 委派收工：依型別收對卡（收工事件帶 spawn_subagent:<type>），
+    var key = (type && cards[type]) ? type : (order.length ? order[0] : null); // 取不到型別才退最舊卡
+    if (key == null) return;
+    var idx = order.indexOf(key); if (idx >= 0) order.splice(idx, 1);
+    var c = cards[key]; delete cards[key]; if (!c) return;
     c.box.classList.remove('active');
     c.st.className = 'sstate ' + (ok ? 'done' : 'fail');
     c.st.textContent = ok ? '✓ 報告完成' : '✗ 失敗';
@@ -210,7 +215,7 @@ const chatJSSrc = `(function () {
     // 委派：tool＝上工開卡、result/error＝收工關卡
     if (ev.kind === 'tool' && lbl.indexOf('spawn_subagent') === 0) { endStream(); openCard(agentType(lbl)); return; }
     if ((ev.kind === 'result' || ev.kind === 'error') && lbl.indexOf('spawn_subagent') === 0 && order.length) {
-      endStream(); var i = lbl.indexOf(' → '); closeCard(ev.kind === 'result', i >= 0 ? lbl.slice(i + 3) : ''); return;
+      endStream(); var i = lbl.indexOf(' → '); closeCard(agentType(lbl), ev.kind === 'result', i >= 0 ? lbl.slice(i + 3) : ''); return;
     }
     if (ev.kind === 'delta') {                         // 逐字：累進當前 msg 泡
       if (!cur) { cur = row('msg', '', null, true); cur.className = 'ev msg streaming active'; markActive(cur); }
@@ -226,7 +231,7 @@ const chatJSSrc = `(function () {
   };
   es.addEventListener('done', function () {
     es.close(); endStream(); stopActive();
-    while (order.length) closeCard(true, '');          // 收尾任何未關的子 agent 卡
+    while (order.length) closeCard(null, true, '');    // 收尾任何未關的子 agent 卡（退最舊）
     var b = document.getElementById('runbanner');
     if (b) { b.className = 'banner done'; b.textContent = '✓ 完成'; }
     var f = document.getElementById('composer');
