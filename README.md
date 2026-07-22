@@ -349,6 +349,17 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 > # 自家工具鏈變數不夠用時補上：COGITO_SANDBOX_ENV_PASS=NODE_ENV,CARGO_HOME
 > ```
 >
+> **換技術棧＝換映像，不必改程式**：`docker/sandbox.Dockerfile` 只是**預設值**。預設映像以 Go 為基底、
+> 附 `python3`（無 `python` 別名、無 pip）；其他 runtime 不存在。要跑別的語言就指別的映像：
+>
+> ```bash
+> COGITO_SANDBOX_IMAGE=node:22-bookworm    # 或 rust:1.83 / ruby:3.3 / python:3.12
+> COGITO_SANDBOX_NETWORK=bridge            # 需要 npm/pip/cargo 抓套件時才開（預設 none 斷網）
+> ```
+>
+> 粒度是**一個行程一個映像**。要讓不同角色用不同技術棧，今天的做法是「一個員工一個目錄」
+> （見〈跑多個員工〉），各自設自己的 `COGITO_SANDBOX_IMAGE`。
+
 > 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景行程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
 >
 > 持久的是**檔案系統層**的狀態（套件/檔案/行程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新行程（與 host 模式「每次新 shell」一致）。要持久環境變數請寫進 `~/.bashrc` 等檔案。
