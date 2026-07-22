@@ -180,12 +180,18 @@ func (s *server) runDetail(w http.ResponseWriter, r *http.Request) {
 
 // metaOf 把 SessionSnapshot 映射成 replay.Meta（replay 不依賴 session store，故由這裡橋接）。
 func metaOf(snap *ctxpkg.SessionSnapshot) replay.Meta {
+	// 計價要用【實際跑過的模型】（ModelUsed，tracker 記帳時寫入），不是 per-session 覆蓋
+	// （Model，多數 session 為空）。橋錯欄位的實況：usage 有落地、頁面卻算不出每步成本。
+	model := snap.ModelUsed
+	if model == "" {
+		model = snap.Model
+	}
 	return replay.Meta{
 		UpdatedAt:        snap.UpdatedAt,
 		Cost:             snap.TotalCostUSD,
 		PromptTokens:     snap.TotalPromptTokens,
 		CompletionTokens: snap.TotalCompletionTokens,
-		Model:            snap.Model,
+		Model:            model,
 		Goal:             snap.Goal,
 		Running:          snap.Running,
 	}

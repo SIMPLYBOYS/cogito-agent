@@ -228,12 +228,12 @@ func TestBuild_PerTurnCost(t *testing.T) {
 	if got := run.Tasks[0].Turns[0].CostUSD; got != 6.0 {
 		t.Errorf("每步成本應 $6，got %v", got)
 	}
-	if !run.Tasks[0].HasUsage || run.Tasks[0].CostUSD != 6.0 {
-		t.Errorf("任務合計應 $6，got HasUsage=%v cost=%v", run.Tasks[0].HasUsage, run.Tasks[0].CostUSD)
+	if run.Tasks[0].CostUSD != 6.0 {
+		t.Errorf("任務合計應 $6，got %v", run.Tasks[0].CostUSD)
 	}
-	// 舊 transcript（無 usage）的任務：不顯示成本，也不出現誤導的 $0
-	if run.Tasks[1].HasUsage {
-		t.Error("無 usage 的任務不該標記 HasUsage")
+	// 舊 transcript（無 usage）的任務：CostUSD=0 → 模板不顯示，不出現誤導的 $0.0000
+	if run.Tasks[1].CostUSD != 0 {
+		t.Errorf("無 usage 的任務成本應為 0，got %v", run.Tasks[1].CostUSD)
 	}
 }
 

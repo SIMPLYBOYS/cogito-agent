@@ -78,7 +78,7 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   </div>
   {{range .Tasks}}
   <details class="taskgrp"{{if .Open}} open{{end}}>
-    <summary>{{trunc .Query}}<span class="tchips">{{.Steps}} 步{{if .HasUsage}} · ${{printf "%.4f" .CostUSD}}{{end}}</span></summary>
+    <summary>{{trunc .Query}}<span class="tchips">{{.Steps}} 步{{if .CostUSD}} · ${{printf "%.4f" .CostUSD}}{{end}}</span></summary>
     <div class="q"><span class="lbl">收到任務</span>{{.Query}}</div>
     {{template "turns" .Turns}}
   </details>

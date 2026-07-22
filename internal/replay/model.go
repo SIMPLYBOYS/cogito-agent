@@ -38,12 +38,11 @@ type Run struct {
 
 // Task 是 session 裡的一段任務：一則 user 指令與它引出的所有 turns。渲染成獨立的可摺疊卡片。
 type Task struct {
-	Query    string
-	Turns    []*Turn
-	Steps    int     // 實質步數（不含系統提醒）
-	CostUSD  float64 // 本任務逐步成本合計（僅新 transcript 有 usage 時）
-	HasUsage bool
-	Open     bool // 只有最後一個任務預設展開——舊任務摺疊，頁面才不會隨任務數無限長
+	Query   string
+	Turns   []*Turn
+	Steps   int     // 實質步數（不含系統提醒）
+	CostUSD float64 // 本任務逐步成本合計（0＝舊 transcript 無 usage 或模型未知，模板據此不顯示）
+	Open    bool    // 只有最後一個任務預設展開——舊任務摺疊，頁面才不會隨任務數無限長
 }
 
 // Turn 是主 agent 的一步：thinking + 若干 action（工具呼叫）；或最終回答；或一條系統提醒。
@@ -131,10 +130,7 @@ func groupTasks(query string, turns []*Turn) []*Task {
 			}
 			n++
 			t.Index = n // 任務內重新編號（原全域編號在摺疊分段後沒有意義）
-			if t.Usage != nil {
-				tk.HasUsage = true
-				tk.CostUSD += t.CostUSD
-			}
+			tk.CostUSD += t.CostUSD
 		}
 		tk.Steps = n
 	}
