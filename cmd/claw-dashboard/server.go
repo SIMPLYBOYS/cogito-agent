@@ -42,7 +42,9 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /runs", s.runsList)
+	mux.HandleFunc("GET /runs.js", s.runsJS)
 	mux.HandleFunc("GET /runs/{id}", s.runDetail)
+	mux.HandleFunc("GET /runs/{id}/fragment", s.runFragment)
 	mux.HandleFunc("GET /governance", s.governance)
 	mux.HandleFunc("POST /governance/apply-config", s.govApplyConfig)
 	mux.HandleFunc("POST /governance/apply-memory", s.govApplyMemory)
@@ -173,9 +175,49 @@ func (s *server) runDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run := replay.Build(id, snap.History, metaOf(snap), snap.WorkDir) // 詳情：載入 subagent 內部深度
-	body := template.HTML(`<p class="muted"><a href="/runs">← 回列表</a> · session `+
-		template.HTMLEscapeString(id)+`</p>`) + replay.Fragment(run)
-	s.render(w, "Run", body)
+	back := template.HTML(`<p class="muted"><a href="/runs">← 回列表</a> · session ` +
+		template.HTMLEscapeString(id) + `</p>`)
+	if snap.Running {
+		// 執行中：放寬 CSP + 輪詢換樹。關鍵用途——Telegram/Slack 的 query 跑在【另一個行程】(bot)，
+		// 面板拿不到它的即時事件流，但 bot 每則訊息都落盤、每次 Load 重讀磁碟，故輪詢 session 檔就能
+		// 看到逐工具進度（lag≈輪詢間隔）。沿用 replay 既有的 .fcard.pending 脈動。
+		body := back + runLiveBanner + template.HTML(`<div id="runtree">`) + replay.Fragment(run) +
+			template.HTML(`</div><script src="/runs.js"></script>`)
+		s.renderChat(w, "Run", body) // renderChat＝放寬 CSP（script-src/connect-src 'self'）
+		return
+	}
+	s.render(w, "Run", back+replay.Fragment(run))
+}
+
+// runFragment 只回 run-tree 片段（無版面），供詳情頁輪詢換樹；X-Run-Running 標頭讓客戶端知道何時收手。
+func (s *server) runFragment(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	id := r.PathValue("id")
+	snap, ok, err := s.store.Load(id)
+	if err != nil || !ok {
+		http.NotFound(w, r)
+		return
+	}
+	run := replay.Build(id, snap.History, metaOf(snap), snap.WorkDir)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	running := "0"
+	if snap.Running {
+		running = "1"
+	}
+	w.Header().Set("X-Run-Running", running)
+	_, _ = w.Write([]byte(replay.Fragment(run)))
+}
+
+// runsJS 提供詳情頁的輪詢客戶端（獨立檔以走 script-src 'self'，不放 inline script）。
+func (s *server) runsJS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	_, _ = w.Write([]byte(runsJSSrc))
 }
 
 // metaOf 把 SessionSnapshot 映射成 replay.Meta（replay 不依賴 session store，故由這裡橋接）。
@@ -213,6 +255,44 @@ const (
 	cspStrict = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'"
 	cspChat   = "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'"
 )
+
+// runLiveBanner 是執行中詳情頁頂部的「LIVE · 自動更新」橫幅（含自帶樣式、脈動）。
+const runLiveBanner template.HTML = `<style>
+  #livebanner { border:1px solid var(--acc,#e8734a); border-radius:7px; padding:8px 12px; margin:0 0 14px; color:var(--acc,#e8734a); font-size:13px; }
+  #livebanner .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--acc,#e8734a); margin-right:7px; vertical-align:1px; }
+  #livebanner.done { color:var(--mut,#8a7362); border-color:var(--line,#2c2420); }
+  #livebanner.done .dot { background:var(--mut,#8a7362); }
+  @keyframes runlive { 0%,100%{box-shadow:0 0 0 0 transparent} 50%{box-shadow:0 0 12px -3px var(--acc,#e8734a)} }
+  @keyframes runblink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  #livebanner:not(.done) { animation: runlive 1.6s ease-in-out infinite; }
+  #livebanner:not(.done) .dot { animation: runblink 1s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce){ #livebanner:not(.done), #livebanner:not(.done) .dot { animation:none } }
+</style>
+<div id="livebanner"><span class="dot"></span>LIVE · 自動更新中（本行程外的 Telegram／Slack 任務也看得到）…</div>`
+
+// runsJSSrc：詳情頁執行中時輪詢 /runs/{id}/fragment 換樹（無 reload）。X-Run-Running 標頭轉 0 即收手。
+// 內容沒變就不換（避免脈動被打斷／閃爍）。用 location.pathname 推 fragment URL——不必回填 session id。
+const runsJSSrc = `(function () {
+  var tree = document.getElementById('runtree');
+  if (!tree) return;
+  var url = location.pathname.replace(/\/+$/, '') + '/fragment';
+  var banner = document.getElementById('livebanner');
+  var last = '', timer = null;
+  function stop() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (banner) { banner.className = 'done'; banner.textContent = '✓ 任務已結束'; }
+  }
+  function poll() {
+    fetch(url, { cache: 'no-store' }).then(function (res) {
+      var running = res.headers.get('X-Run-Running') === '1';
+      return res.text().then(function (t) {
+        if (t && t !== last) { tree.innerHTML = t; last = t; }   // 只有變了才換：不打斷脈動、不閃爍
+        if (running) timer = setTimeout(poll, 1500); else stop();
+      });
+    }).catch(function () { timer = setTimeout(poll, 3000); });    // 暫時失敗：退避重試
+  }
+  timer = setTimeout(poll, 1200);
+})();`
 
 // render 用單一 base layout 包正文（嚴 CSP）。深淺色自適應。body 以 template.HTML 傳入，呼叫端須確保已跳脫。
 func (s *server) render(w http.ResponseWriter, title string, body template.HTML) {

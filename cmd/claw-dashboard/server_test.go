@@ -92,3 +92,72 @@ func TestServer_RunsWithRealStore(t *testing.T) {
 		}
 	}
 }
+
+// TestServer_RunsLive 驗證執行中 session 的即時視圖：詳情頁放寬 CSP＋掛輪詢腳本，
+// fragment 端點回 run-tree 片段＋X-Run-Running 標頭；非執行中則退回靜態（無腳本）。
+func TestServer_RunsLive(t *testing.T) {
+	dir := t.TempDir()
+	store, err := ctxpkg.NewFileSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := &ctxpkg.SessionSnapshot{
+		ID: "telegram_42", Running: true,
+		History: []schema.Message{
+			{Role: schema.RoleUser, Content: "查一下狀態"},
+			{Role: schema.RoleAssistant, Content: "查詢中", ToolCalls: []schema.ToolCall{
+				{ID: "c1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}}},
+		},
+	}
+	if err := store.Save(snap); err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(store, dir, dir, nil)
+	id := url.PathEscape("telegram_42")
+
+	// 執行中詳情頁：放寬 CSP（script-src 'self'）＋輪詢腳本＋LIVE 橫幅
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/runs/"+id, nil))
+	body := rec.Body.String()
+	if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") {
+		t.Errorf("執行中詳情頁應放寬 CSP，得到 %q", csp)
+	}
+	for _, w := range []string{"/runs.js", "livebanner", `id="runtree"`} {
+		if !strings.Contains(body, w) {
+			t.Errorf("執行中詳情頁應含 %q", w)
+		}
+	}
+
+	// fragment 端點：X-Run-Running: 1 ＋回 run-tree 片段（不含版面 nav）
+	recF := httptest.NewRecorder()
+	srv.ServeHTTP(recF, httptest.NewRequest("GET", "/runs/"+id+"/fragment", nil))
+	if got := recF.Header().Get("X-Run-Running"); got != "1" {
+		t.Errorf("執行中 fragment 應回 X-Run-Running: 1，得到 %q", got)
+	}
+	frag := recF.Body.String()
+	if !strings.Contains(frag, "查一下狀態") {
+		t.Error("fragment 應含 run-tree 內容")
+	}
+	if strings.Contains(frag, "<nav") || strings.Contains(frag, "/metrics") {
+		t.Error("fragment 應只回片段、不含版面 nav")
+	}
+
+	// 非執行中：退回靜態（嚴 CSP、無輪詢腳本），fragment 回 X-Run-Running: 0
+	snap.Running = false
+	if err := store.Save(snap); err != nil {
+		t.Fatal(err)
+	}
+	recS := httptest.NewRecorder()
+	srv.ServeHTTP(recS, httptest.NewRequest("GET", "/runs/"+id, nil))
+	if strings.Contains(recS.Body.String(), "/runs.js") {
+		t.Error("非執行中詳情頁不應掛輪詢腳本")
+	}
+	if csp := recS.Header().Get("Content-Security-Policy"); strings.Contains(csp, "script-src") {
+		t.Errorf("非執行中詳情頁應為嚴 CSP，得到 %q", csp)
+	}
+	recF0 := httptest.NewRecorder()
+	srv.ServeHTTP(recF0, httptest.NewRequest("GET", "/runs/"+id+"/fragment", nil))
+	if got := recF0.Header().Get("X-Run-Running"); got != "0" {
+		t.Errorf("非執行中 fragment 應回 X-Run-Running: 0，得到 %q", got)
+	}
+}
