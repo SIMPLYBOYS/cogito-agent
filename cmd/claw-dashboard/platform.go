@@ -216,17 +216,22 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
 {{if .MCPServers}}<div class="mcplist">{{range .MCPServers}}<div class="mcpitem" id="mcp-{{.Name}}">
   <div class="mcprow">
     <span class="mcpinfo"><b>{{.Name}}</b> <span class="badge">{{.Type}}</span>{{if .Disabled}} <span class="muted">停用</span>{{end}}{{if .HasSecrets}} <span class="muted">🔒 有祕密</span>{{end}}<br><span class="muted">{{.Target}}</span></span>
-    <span class="acts">
-      <form method="POST" action="/mcp/toggle"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact ghost">{{if .Disabled}}啟用{{else}}停用{{end}}</button></form>
-    </span>
   </div>
-  <details class="danger"><summary>移除</summary>
+  <div class="mcpacts">
+    <details class="soft"><summary>{{if .Disabled}}啟用{{else}}停用{{end}}</summary>
+      <div class="confirm">
+        {{if .Disabled}}<span>啟用 <b>{{.Name}}</b>？它的工具會加回 agent 的目錄——<b>bot／chat 重啟後才生效</b>。</span>
+        {{else}}<span>停用 <b>{{.Name}}</b>？agent 將失去它的全部工具——<b>bot／chat 重啟後才生效</b>。設定與憑證原地保留，隨時可再啟用。</span>{{end}}
+        <form method="POST" action="/mcp/toggle"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact">確定{{if .Disabled}}啟用{{else}}停用{{end}}</button></form>
+      </div>
+    </details>
+    <details class="danger"><summary>移除</summary>
     <div class="confirm">
       <span>確定從 <code>.mcp.json</code> 移除 server「<b>{{.Name}}</b>」？{{if .HasSecrets}}<b>連同它的 env／headers 祕密一併刪除</b>，{{end}}無法復原。只是暫時不用請改按「停用」。</span>
       <form method="POST" action="/mcp/remove"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" class="gact">確定移除</button></form>
     </div>
   </details>
-  <details class="mcpedit"><summary>編輯</summary>
+    <details class="mcpedit"><summary>編輯</summary>
     <form method="POST" action="/mcp/edit" class="knobs">
       <input type="hidden" name="name" value="{{.Name}}">
       <label>類型<select name="type"><option value="stdio"{{if ne .Type "http"}} selected{{end}}>stdio</option><option value="http"{{if eq .Type "http"}} selected{{end}}>http</option></select></label>
@@ -245,7 +250,8 @@ var platformTmpl = template.Must(template.New("platform").Parse(`
         <details class="mcpedit"><summary>輪替</summary><form method="POST" action="/mcp/secret" class="knobs"><input type="hidden" name="server" value="{{$srv}}"><input type="hidden" name="kind" value="headers"><input type="hidden" name="key" value="{{.}}"><label>新值<input type="password" name="value" placeholder="新的 {{.}}" autocomplete="off"></label><button type="submit">儲存</button></form></details>
       </div>{{end}}
     </div>{{end}}
-  </details>
+    </details>
+  </div>
 </div>{{end}}</div>{{else}}<p class="muted">尚無 server。</p>{{end}}
 <details class="mcpedit"><summary>＋ 新增 server</summary>
   <form method="POST" action="/mcp/add" class="knobs">

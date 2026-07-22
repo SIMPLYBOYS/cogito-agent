@@ -365,6 +365,9 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   .mcpitem { border-bottom:1px solid var(--line); padding:9px 0; }
   .mcprow { display:flex; justify-content:space-between; align-items:center; gap:12px; }
   .mcprow .acts { display:flex; gap:8px; flex:none; }
+  /* 一個 MCP 項目的動作列：啟用/停用、移除、編輯三個 <details> 並排。放在 .mcprow【之外】——
+     展開式確認若塞在 align-items:center 的 flex 列裡，一展開就把該列撐爛。 */
+  .mcpacts { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; margin-top:8px; }
   .mcpedit { margin-top:7px; }
   .mcpedit > summary { cursor:pointer; color:var(--acc2); font-size:12px; list-style:none; }
   .mcpedit > summary::-webkit-details-marker { display:none; }
@@ -404,6 +407,17 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   details.danger .confirm { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
     margin-top:9px; padding:10px 13px; font-size:13px; border:1px solid var(--acc); border-radius:7px;
     background:color-mix(in srgb,var(--acc) 8%,transparent); }
+  /* 可逆動作的確認（MCP 啟用/停用）：沿用同一個兩段式機制，但【視覺上刻意比 .danger 輕】——
+     中性色而非強調色。兩者若長得一樣，「danger」就不再代表「這個不可逆」，訊號會被稀釋。
+     它存在的價值不只是「再問一次」，而是把【延遲生效】這個看不見的後果講出來。 */
+  details.soft > summary { display:inline-block; cursor:pointer; list-style:none;
+    font:inherit; font-size:12.5px; font-weight:600; letter-spacing:.02em; color:var(--mut);
+    border:1px solid var(--line); border-radius:6px; padding:4px 14px; }
+  details.soft > summary::-webkit-details-marker { display:none; }
+  details.soft > summary:hover, details.soft[open] > summary { color:var(--fg); border-color:var(--mut); }
+  details.soft .confirm { display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-top:9px; padding:10px 13px; font-size:13px; border:1px solid var(--line); border-radius:7px;
+    background:var(--bg2); }
   .badge, .pill { display:inline-block; font-size:10.5px; letter-spacing:.03em; border-radius:5px; padding:1px 7px; margin-left:4px; }
   .pill.ok { color:var(--ok); border:1px solid var(--ok); }
   .pill.err { color:var(--acc); border:1px solid var(--acc); }
