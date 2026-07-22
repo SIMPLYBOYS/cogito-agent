@@ -71,9 +71,14 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   /* 分支區：左側留白畫連接線 */
   .run .fanbranch { flex:1; min-width:0; display:flex; flex-direction:column; gap:10px;
     position:relative; padding-left:36px; }
-  /* 垂直脊：把所有分支串起來 */
-  .run .fanbranch::before { content:""; position:absolute; left:17px; top:18px; bottom:18px;
+  /* 垂直脊：把所有分支串起來，並往下延伸到「收斂」列 */
+  .run .fanbranch::before { content:""; position:absolute; left:17px; top:18px; bottom:9px;
     border-left:1px dotted var(--m); }
+  /* 收斂列：三條分支匯回主線、指向下一步的整合 */
+  .run .fanjoin { position:relative; margin-top:2px; padding-left:34px; color:var(--m);
+    font-size:11px; letter-spacing:.03em; }
+  .run .fanjoin::before { content:""; position:absolute; left:17px; top:-2px; width:12px; height:9px;
+    border-left:1px dotted var(--m); border-bottom:1px dotted var(--m); border-radius:0 0 0 6px; }
   /* 根 → 脊 的水平接線（對齊整組的垂直中心） */
   .run .fanbranch::after { content:""; position:absolute; left:0; top:50%; width:17px;
     border-top:1px dotted var(--m); }
@@ -146,6 +151,7 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
               {{else if .Report}}<div class="content">{{.Report}}</div>{{end}}
             </details>
           {{end}}
+          {{if gt (len .Fan) 1}}<div class="fanjoin">回報收齊 · 續下一步整合 ↓</div>{{end}}
           </div>
         </div>
         {{end}}
