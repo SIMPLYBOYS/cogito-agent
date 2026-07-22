@@ -13,12 +13,12 @@ stage)
   printf 'demo artifact\n' > workspace/build/app.bin
   printf 'demo artifact\n' > workspace/build/app.map
 
-  # 政策檔要「現場才寫」——結局三的戲劇性全靠它一開始不存在。
+  # 政策檔不能預先存在——②要演的是【內建正則 Ask → 無人值守降 Deny】，policy 會搶先 Deny。
   rm -f "$CLAW/policy.json"
 
   echo "已就緒："
   echo "  刪除目標  workspace/build/  ($(ls workspace/build | wc -l | tr -d ' ') 個檔)"
-  echo "  政策檔    未建立（結局三現場寫）"
+  echo "  政策檔    未建立（②的 Ask→Deny 靠內建正則；有 policy 會搶先 Deny、演不出降級）"
   echo "  提案技能  $(ls "$CLAW/skills-proposed" 2>/dev/null | wc -l | tr -d ' ') 個"
   echo "  生效技能  $(ls "$CLAW/skills" 2>/dev/null | wc -l | tr -d ' ') 個"
   ;;
@@ -66,7 +66,9 @@ JSON
 serve)
   go build -o bin/claw-dashboard ./cmd/claw-dashboard
   echo "http://127.0.0.1:8091  （Ctrl-C 結束）"
-  ./bin/claw-dashboard
+  # demo 的第二幕要在面板【手動觸發】cron——排程器沿用 operator chat 的寫入閘，
+  # 沒設 COGITO_DASH_CHAT=1 只能編輯不能執行。
+  COGITO_DASH_CHAT=1 ./bin/claw-dashboard
   ;;
 
 *)
