@@ -151,12 +151,18 @@ const chatJSSrc = `(function () {
   var live = document.getElementById('live');
   if (!live) return;
   var ICON = { turn:'⟳', think:'◌', tool:'▸', result:'✓', error:'✗', msg:'◆' };
-  var cur = null; // 正在逐字串流的 msg 泡（delta 累進、msg/其他事件收尾）
+  var cur = null;    // 正在逐字串流的 msg 泡（delta 累進、msg/其他事件收尾）
+  var active = null; // 最新一列（脈動，表示「這一步正在發生」）；下一事件到來即移交
+  function markActive(r) {
+    if (active && active !== r) active.classList.remove('active');
+    active = r; if (r) r.classList.add('active');
+  }
+  function stopActive() { if (active) { active.classList.remove('active'); active = null; } }
   function row(kind, text) {
     var r = document.createElement('div'); r.className = 'ev ' + kind;
     var ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = ICON[kind] || '·';
     var tx = document.createElement('span'); tx.className = 'tx'; tx.textContent = text;
-    r.appendChild(ic); r.appendChild(tx); live.appendChild(r); return r;
+    r.appendChild(ic); r.appendChild(tx); live.appendChild(r); markActive(r); return r;
   }
   function endStream() { if (cur) { cur.classList.remove('streaming'); cur = null; } }
   function scroll() { window.scrollTo(0, document.body.scrollHeight); }
@@ -164,7 +170,7 @@ const chatJSSrc = `(function () {
   es.onmessage = function (e) {
     var ev; try { ev = JSON.parse(e.data); } catch (x) { return; }
     if (ev.kind === 'delta') {                       // 逐字：累進當前 msg 泡
-      if (!cur) { cur = row('msg', ''); cur.className = 'ev msg streaming'; }
+      if (!cur) { cur = row('msg', ''); cur.className = 'ev msg streaming active'; markActive(cur); }
       cur.querySelector('.tx').textContent += ev.label;
       scroll(); return;
     }
@@ -176,7 +182,7 @@ const chatJSSrc = `(function () {
     endStream(); row(ev.kind, ev.label); scroll();    // 其他事件：先收尾串流泡再插入
   };
   es.addEventListener('done', function () {
-    es.close(); endStream();
+    es.close(); endStream(); stopActive();
     var b = document.getElementById('runbanner');
     if (b) { b.className = 'banner done'; b.textContent = '✓ 完成'; }
     var f = document.getElementById('composer');

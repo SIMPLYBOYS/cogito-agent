@@ -280,7 +280,15 @@ var chatTmpl = template.Must(template.New("chat").Parse(`<style>
   .chat .ev.msg .ic { color:var(--a); }
   .chat .ev.msg.streaming .tx::after { content:'▋'; color:var(--a); animation:blink 1s step-end infinite; }
   @keyframes blink { 50% { opacity:0; } }
-  @media (prefers-reduced-motion: reduce) { .chat .ev.msg.streaming .tx::after { animation:none; } }
+  /* 進行中特效（不需 reload，靠 SSE 更新的 DOM）：執行中 banner 發光呼吸、最新事件脈動 */
+  @keyframes cg-glow { 0%,100%{box-shadow:0 0 0 0 transparent} 50%{box-shadow:0 0 11px -2px var(--a)} }
+  @keyframes cg-throb { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .chat #runbanner:not(.done) { animation: cg-glow 1.5s ease-in-out infinite; }
+  .chat .ev.active { border-left-color:var(--a2); }
+  .chat .ev.active .ic { animation: cg-throb 1s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    .chat .ev.msg.streaming .tx::after, .chat #runbanner:not(.done), .chat .ev.active .ic { animation:none; }
+  }
   .chat form.composer { display:flex; flex-direction:column; gap:8px; border-top:1px solid var(--ln); padding-top:16px; }
   .chat textarea { width:100%; resize:vertical; font:inherit; font-size:14px; color:var(--fg); background:var(--p);
     border:1px solid var(--ln); border-radius:8px; padding:10px 12px; }

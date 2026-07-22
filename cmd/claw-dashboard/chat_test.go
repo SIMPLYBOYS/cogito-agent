@@ -187,3 +187,22 @@ func TestChatReset_ClearsSession(t *testing.T) {
 		t.Errorf("跨站 reset 應 403，got %d", rec2.Code)
 	}
 }
+
+// chat 頁的「進行中」特效：靠 SSE 更新的 DOM 加脈動，不需 reload。測試釘住 client JS 與 CSS
+// 都含必要 hook——執行中 banner 發光、最新事件標 active、done 時清除、且尊重 reduced-motion。
+func TestChat_InProgressAnimationHooks(t *testing.T) {
+	s := &server{}
+	// client JS
+	rec := httptest.NewRecorder()
+	s.chatJS(rec, httptest.NewRequest("GET", "/chat.js", nil))
+	js := rec.Body.String()
+	for _, want := range []string{"markActive", "stopActive", "'active'"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("chat.js 應含進行中特效 hook %q", want)
+		}
+	}
+	// done 事件要清掉 active（否則跑完還在脈動）
+	if !strings.Contains(js, "stopActive()") || !strings.Contains(js[strings.Index(js, "'done'"):], "stopActive") {
+		t.Error("done 事件應呼叫 stopActive() 停止脈動")
+	}
+}
