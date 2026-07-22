@@ -39,6 +39,7 @@ go.work.sum
 
 # MCP 設定可能含敏感 server 參數（如金鑰）；只追蹤範例
 .mcp.json
+.mcp.json.*
 !.mcp.json.example
 
 # Agent 沙箱：workspace 是独立 git repo（含 AGENTS.md / .claw/skills 及 agent 运行产物），
