@@ -100,6 +100,24 @@ JSON
   echo "已寫入 $CLAW/policy.json —— 重跑同一句話，這次連問都不會問。"
   ;;
 
+magents)
+  # multi-agent demo 前置：把版控正本（demo/mission-control/）複製回 workspace/。
+  # workspace/ 被 gitignore，故資產正本存在 demo/ 下，用這個指令佈署。
+  D=demo/mission-control
+  mkdir -p workspace/review-target "$CLAW/agents" "$CLAW/skills/orchestrate"
+  cp "$D/target/payment.go" "$D/target/go.mod" workspace/review-target/
+  cp "$D/agents/correctness.md" "$D/agents/performance.md" "$CLAW/agents/"
+  cp "$D/orchestrate-SKILL.md" "$CLAW/skills/orchestrate/SKILL.md"
+  echo "已佈署 multi-agent demo 資產："
+  echo "  標的      workspace/review-target/payment.go（種了 3 個問題）"
+  echo "  窄專員    correctness · performance（＋既有 security-auditor）"
+  echo "  編排技能  orchestrate"
+  echo
+  echo "跑法（面板 chat 或 claw-cli）："
+  echo '  用 orchestrate 技能審查 review-target/payment.go 能不能上線：'
+  echo '  派 correctness、security-auditor、performance 三個專員並行各審一個面向，整合成上線判斷。'
+  ;;
+
 serve)
   go build -o bin/claw-dashboard ./cmd/claw-dashboard
   echo "http://127.0.0.1:8091  （Ctrl-C 結束）"
@@ -115,6 +133,7 @@ serve)
   echo "  pairing  第一幕前置：備份 .env、把自己踢出白名單、清待審" >&2
   echo "  restore  還原 .env（demo 完【務必】跑）" >&2
   echo "  policy   第二幕結局三：寫入 deny 政策" >&2
+  echo "  magents  multi-agent demo 前置：佈署審查專員與標的檔" >&2
   echo "  serve    起 dashboard" >&2
   exit 1
   ;;
