@@ -54,6 +54,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 		return nil, err
 	}
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, workDir)
+	sess.SetRunning(false) // 清除上次硬砍/關閉遺留的 running 旗標——剛啟動的面板不可能有進行中的 operator run
 	tracked := observability.NewCostTracker(realProvider, modelName, sess)
 	executor := sandbox.FromEnv()
 
@@ -114,6 +115,7 @@ func (c *chatRunner) start(userMsg string) bool {
 	c.hub.begin()
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, c.workDir)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: userMsg}) // 立刻落地→GET 馬上看得到提問
+	sess.SetRunning(true)                                                // 讓 /runs/operator 也能即時自動更新（UX 與 bot 驅動的 session 一致）
 	// delta sink：主迴圈的 LLM 文字 token 增量 → hub「delta」事件 → 瀏覽器逐字顯示。
 	ctx := engine.WithStreamSink(context.Background(), func(delta string) {
 		c.hub.push(evJSON("delta", delta))
@@ -121,6 +123,7 @@ func (c *chatRunner) start(userMsg string) bool {
 	go func() {
 		defer c.mu.Unlock()
 		defer c.hub.end()
+		defer sess.SetRunning(false) // 收尾清旗標；正常結束都清，唯硬砍留 true → 由啟動時的清除補上
 		if err := c.eng.Run(ctx, sess, c.reporter); err != nil {
 			c.lastErr.Store(err.Error())
 			c.hub.push(evJSON("error", "執行出錯："+err.Error()))
