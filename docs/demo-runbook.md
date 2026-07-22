@@ -58,8 +58,12 @@ go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
 ```
 模式                  N    hit@k      MRR
 keyword            12     0.50     0.50
+embedding           0      n/a      n/a
 keyword+kg         12     1.00     0.69
 ```
+
+（畫面上會有 `embedding n/a` 這列——被問就答：「embedding 模式沒配置就誠實跳過，
+**評測不把沒跑的模式藏起來**」。這句反而加分。）
 
 > 「先給一個數字。12 題檢索，一半是**多跳題**——答案節點跟查詢**字面零重疊**，關鍵字在設計上
 > 就撈不到，只有沿 `[[link]]` 擴張的知識圖譜撈得到：0.50 對 1.00。
