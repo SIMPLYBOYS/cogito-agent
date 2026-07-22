@@ -23,6 +23,25 @@ stage)
   echo "已就緒："
   echo "  刪除目標  workspace/scratch/build/  ($(ls workspace/scratch/build | wc -l | tr -d ' ') 個檔)"
   echo "  政策檔    未建立（②的 Ask→Deny 靠內建正則；有 policy 會搶先 Deny、演不出降級）"
+  # ②要手動觸發的 job：冪等確保存在。沒有它，現場只能臨時到 /cron 建，很容易打錯路徑。
+  python3 - <<'PYJOB'
+import json, os
+p = "workspace/.claw/cron.json"
+jobs = json.load(open(p)) if os.path.exists(p) else []
+PROMPT = "把 scratch/build 這個目錄整個刪掉，那是編譯產物"
+job = next((j for j in jobs if j.get("prompt") == PROMPT), None)
+if job is None:
+    jobs.append({"id": "demo0000cron", "name": "清理建置產物", "schedule": "0 9 * * *",
+                 "prompt": PROMPT, "enabled": True})
+    print("  cron job  已建立（demo0000cron）")
+else:
+    # 清掉上次演練的執行紀錄，面板才不會顯示「上次 ok」誤導
+    for k in ("last_run", "last_status", "last_error", "last_result"):
+        job.pop(k, None)
+    job["enabled"] = True
+    print(f"  cron job  已就緒（{job['id'][:12]}，紀錄已清）")
+json.dump(jobs, open(p, "w"), ensure_ascii=False, indent=2)
+PYJOB
   echo "  提案技能  $(ls "$CLAW/skills-proposed" 2>/dev/null | wc -l | tr -d ' ') 個"
   echo "  生效技能  $(ls "$CLAW/skills" 2>/dev/null | wc -l | tr -d ' ') 個"
   ;;
@@ -54,6 +73,20 @@ restore)
   echo "已還原 .env。"
   ;;
 
+all)
+  # 面試當天出門前的一鍵前置。順序有意義：stage 先復位靶機與 job，pairing 最後才動 .env
+  # （它會把你踢出白名單，跑了就要記得 restore）。
+  "$0" stage
+  echo
+  "$0" pairing
+  echo
+  echo "── 接著手動起兩個行程（各開一個終端）──"
+  echo "  ./scripts/demo.sh serve      # 面板 → http://127.0.0.1:8091"
+  echo "  go run ./cmd/claw            # bot（① 要收 Slack 訊息）"
+  echo
+  echo "⚠️  演完務必： ./scripts/demo.sh restore"
+  ;;
+
 policy)
   # 結局三：現場貼這段比手打快，但講解時仍要逐行念。
   cat > "$CLAW/policy.json" <<'JSON'
@@ -77,7 +110,8 @@ serve)
 
 *)
   echo "用法: $0 {stage|pairing|restore|policy|serve}" >&2
-  echo "  stage    第二幕前置：建刪除目標、清掉政策檔" >&2
+  echo "  all      【一鍵】stage + pairing，並提示要起哪些行程" >&2
+  echo "  stage    ②前置：建刪除目標、清政策檔、確保 cron job 存在" >&2
   echo "  pairing  第一幕前置：備份 .env、把自己踢出白名單、清待審" >&2
   echo "  restore  還原 .env（demo 完【務必】跑）" >&2
   echo "  policy   第二幕結局三：寫入 deny 政策" >&2

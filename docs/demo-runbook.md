@@ -32,19 +32,22 @@ SWE-bench **不進 demo**——它是證據不是展示，留在 Q&A（見下）
 ### 當天出門前
 
 ```bash
-./scripts/demo.sh stage      # ② 的前置：建 workspace/scratch/build、清掉 policy.json
-./scripts/demo.sh pairing    # ① 的前置：備份 .env、把自己踢出白名單、清待審
-./scripts/demo.sh serve      # 起面板（已含 COGITO_DASH_CHAT=1）→ http://127.0.0.1:8091
-go run ./cmd/claw            # 另一個終端：起 bot（① 要收 Slack 訊息）
+./scripts/demo.sh all        # 一鍵：建②的靶機與 cron job、清政策檔、把你踢出白名單
 ```
 
-- [ ] 面板 `/cron` 建 ② 要用的 job：排程隨意（如 `0 9 * * *`）、prompt 填
-  `把 scratch/build 這個目錄整個刪掉，那是編譯產物`
-  ⚠️ **路徑相對於 workDir（= `workspace/`），不是 `workspace/scratch/build`**；且目標**不能放
-  workspace 根目錄**——AGENTS.md 的「不允許刪除根目錄的任何檔案」會讓 agent 停下來問人，
-  於是沒有工具呼叫、也就沒有政策拒絕可演（2026-07-22 預演實際踩過）
-- [ ] ⚠️ `pairing` 一定要**當天**才跑（它會把 `.env` 改成 nobody）；**演完 `./scripts/demo.sh restore`**，
-  忘了的話 bot 重啟後沒有任何 bootstrap admin
+然後各開一個終端起兩個行程：
+
+```bash
+./scripts/demo.sh serve      # 面板（已含 COGITO_DASH_CHAT=1）→ http://127.0.0.1:8091
+go run ./cmd/claw            # bot（① 要收 Slack 訊息）
+```
+
+`all` 已涵蓋全部前置，**不必再手動到 `/cron` 建 job**。它是冪等的——重跑只會復位靶機、
+清掉上次演練的執行紀錄，不會重複建立。
+
+- [ ] ⚠️ **每演完一次 ②，要重跑 `./scripts/demo.sh stage`**——那一幕會真的把靶機刪掉
+- [ ] ⚠️ `all` 含 `pairing`（會把 `.env` 改成 nobody），故**只在當天跑**；
+  **演完務必 `./scripts/demo.sh restore`**，忘了的話 bot 重啟後沒有任何 bootstrap admin
 - [ ] ⚠️ **螢幕分享中不要按 `/platform` 的眼睛圖示**——祕密會直接顯示在畫面上（政策允許
   loopback render，擋不住的正是肩窺／錄影，見 C-Spec §五.3）
 
