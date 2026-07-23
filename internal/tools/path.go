@@ -79,6 +79,12 @@ func resolveForWrite(workDir, path string) (string, error) {
 	return full, nil
 }
 
+// ResolveInWorkDir 是 resolveInWorkDir 的導出版：把（可能含 ../ 或符號連結的）相對路徑
+// 錨定在 workDir 內解析，逃出即拒絕。供工具層以外的唯讀取用（如 chat 的 get 檔案取回）。
+func ResolveInWorkDir(workDir, path string) (string, error) {
+	return resolveInWorkDir(workDir, path)
+}
+
 func resolveInWorkDir(workDir, path string) (string, error) {
 	root, err := evalExisting(workDir)
 	if err != nil {

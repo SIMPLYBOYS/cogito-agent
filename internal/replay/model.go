@@ -38,11 +38,12 @@ type Run struct {
 
 // Task 是 session 裡的一段任務：一則 user 指令與它引出的所有 turns。渲染成獨立的可摺疊卡片。
 type Task struct {
-	Query   string
-	Turns   []*Turn
-	Steps   int     // 實質步數（不含系統提醒）
-	CostUSD float64 // 本任務逐步成本合計（0＝舊 transcript 無 usage 或模型未知，模板據此不顯示）
-	Open    bool    // 只有最後一個任務預設展開——舊任務摺疊，頁面才不會隨任務數無限長
+	Query     string
+	Turns     []*Turn
+	Steps     int      // 實質步數（不含系統提醒）
+	CostUSD   float64  // 本任務逐步成本合計（0＝舊 transcript 無 usage 或模型未知，模板據此不顯示）
+	Open      bool     // 只有最後一個任務預設展開——舊任務摺疊，頁面才不會隨任務數無限長
+	Artifacts []string // 本任務寫過的檔案（write_file/edit_file 的 path，含子 agent；去重保序）——產物可發現性
 }
 
 // Turn 是主 agent 的一步：thinking + 若干 action（工具呼叫）；或最終回答；或一條系統提醒。
@@ -67,6 +68,7 @@ type Action struct {
 	AgentType   string
 	Report      string
 	CallID      string  // ToolCall.ID——用來找 subagents/<CallID>.json
+	WritePath   string  // write_file/edit_file 的目標路徑（自 raw 參數抽出，供任務產出清單）
 	SubTurns    []*Turn // 子 agent 內部逐輪（有落地 sub-history 時才有）
 	SubModel    string  // 子 agent 實際用的模型（可能與主 agent 不同）
 	SubCostUSD  float64 // 子 agent 內部逐步成本合計（fan-out 卡片的標頭數字）
@@ -124,7 +126,39 @@ func Build(id string, history []schema.Message, meta Meta, sessWorkDir string) R
 		t.Actions = rest
 	}
 
+	// 任務產出清單：收集本任務寫過的檔案（含子 agent 內部的寫入）。在 sub-run 掛回後才收，
+	// implementer 類子 agent 的寫檔才看得到。Tasks 與 turns 共享 *Turn 指標，直接掃即可。
+	for _, tk := range run.Tasks {
+		tk.Artifacts = collectArtifacts(tk.Turns)
+	}
+
 	return run
+}
+
+// collectArtifacts 掃一段 turns（含 Fan 委派的子 agent 內部）收 write_file/edit_file 的目標路徑，
+// 去重保序。失敗的寫入不特別排除——路徑仍指出「agent 動過哪裡」，誤列成本低。
+func collectArtifacts(turns []*Turn) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(a *Action) {
+		if a.WritePath != "" && !seen[a.WritePath] {
+			seen[a.WritePath] = true
+			out = append(out, a.WritePath)
+		}
+	}
+	for _, t := range turns {
+		for _, a := range t.Actions {
+			add(a)
+		}
+		for _, f := range t.Fan {
+			for _, st := range f.SubTurns {
+				for _, a := range st.Actions {
+					add(a)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // groupTasks 把扁平 turns 依任務切段。邊界判準【不猜文字內容】：一則 user 訊息（Note）只有在
@@ -196,6 +230,9 @@ func reconstruct(history []schema.Message) (turns []*Turn, query string, hasSub 
 			t := &Turn{Thinking: m.Content, Usage: m.Usage}
 			for _, tc := range m.ToolCalls {
 				a := &Action{Tool: tc.Name, Args: prettyArgs(tc.Arguments), CallID: tc.ID}
+				if tc.Name == "write_file" || tc.Name == "edit_file" {
+					a.WritePath = jsonField(tc.Arguments, "path") // Args 已截斷供顯示，產出清單要從 raw 抽
+				}
 				if tc.Name == "spawn_subagent" {
 					a.IsSubagent = true
 					hasSub = true

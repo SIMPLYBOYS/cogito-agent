@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -45,7 +47,47 @@ func NewTelegramBot(factory chatbot.EngineFactory, workDir string) *TelegramBot 
 		log.Fatalf("Telegram getMe 失敗，請檢查 TELEGRAM_BOT_TOKEN: %s", b.scrubErr(err))
 	}
 	b.core = chatbot.NewCore(platform, workDir, factory, b.send)
+	chatbot.RegisterFileSender(platform, b.sendFile) // `get` 檔案取回（user-pull）
 	return b
+}
+
+// sendFile 用 sendDocument 把檔案傳回聊天（multipart：Bot API 上傳本機檔的唯一方式）。
+// 僅供 core 的 `get` 指令（user-pull）呼叫；上限 50MB 由 core 先擋，這裡不重複。
+func (b *TelegramBot) sendFile(chatID, path string) error {
+	id, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("非法 chat_id %q", chatID)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("chat_id", strconv.FormatInt(id, 10))
+	part, err := w.CreateFormFile("document", filepath.Base(path))
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	resp, err := b.client.Post(apiBase+b.token+"/sendDocument", w.FormDataContentType(), &buf)
+	if err != nil {
+		return fmt.Errorf("sendDocument 失敗: %s", b.scrubErr(err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return fmt.Errorf("sendDocument HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 // scrubErr 把錯誤訊息裡的 bot token 遮掉，供記 log 用。

@@ -68,6 +68,11 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
   .run .taskgrp>summary .tchips { margin-left:auto; color:var(--m); font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .run .taskgrp[open]>summary { border-bottom:1px solid var(--ln); padding-bottom:8px; margin-bottom:10px; }
   .run .taskgrp .q { margin:2px 0 12px; }
+  /* 任務產出清單：agent 寫過的檔案（產物可發現性——IM 端可 get 取回） */
+  .run .arts { border-top:1px dashed var(--ln); margin-top:10px; padding-top:9px; font-size:12.5px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; }
+  .run .arts .lbl { color:var(--m); font-size:10.5px; text-transform:uppercase; letter-spacing:.14em; }
+  .run .arts code { background:var(--p); border:1px solid var(--ln); border-radius:4px; padding:1px 7px; }
+  .run .arts .hint { color:var(--m); font-size:11px; }
   /* fan-out：一輪派出多個子 agent → 扇形卡片（一節點 → 多分支） */
   /* 由左向右的樹：根節點在左，虛線扇出到右邊的專員卡片 */
   .run .fan { display:flex; align-items:center; gap:0; margin:10px 0 8px 2px; }
@@ -128,6 +133,7 @@ var fragmentTmpl = template.Must(template.New("run").Funcs(template.FuncMap{
     <summary>{{trunc .Query}}<span class="tchips">{{.Steps}} 步{{if .CostUSD}} · ${{printf "%.4f" .CostUSD}}{{end}}</span></summary>
     <div class="q"><span class="lbl">收到任務</span>{{.Query}}</div>
     {{template "turns" .Turns}}
+    {{if .Artifacts}}<div class="arts"><span class="lbl">本次產出</span>{{range .Artifacts}}<code>{{.}}</code>{{end}}<span class="hint">（IM 端可用 <code>get &lt;路徑&gt;</code> 取回）</span></div>{{end}}
   </details>
   {{end}}
 </div>

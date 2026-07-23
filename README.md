@@ -314,6 +314,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `goal <驗收標準>` | 設一個持久目標，agent 每輪完成後用 LLM judge 驗收、未達成自動續跑（封頂 5 次；受成本熔斷/回合上限保護）。`goal status`/`pause`/`resume`/`clear` 管理 |
    | `stop` | 中止本頻道正在執行的任務（可取消 context，回合邊界即時停下）。連結身分（`COGITO_USER_LINK`）下，從任一平台都能中止同一份共享 session |
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
+   | `get <路徑>` | 把本頻道工作區裡的檔案傳回聊天（Telegram `sendDocument`／Slack 檔案上傳；上限 50 MB）。**user-pull**——只有人打指令才外傳，agent 沒有上傳工具（防 prompt injection 外滲） |
    | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |
    | `compress` | 手動摺疊 context（把舊訊息摺進滾動摘要），縮短歷史省成本 |
    | `learn` | 從本次對話蒸餾一個【提案】技能（進暫存區，過 `skillgate` 把關才生效） |

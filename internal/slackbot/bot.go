@@ -7,6 +7,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -45,6 +46,25 @@ func NewSlackBot(factory chatbot.EngineFactory, workDir string) *SlackBot {
 			log.Printf("[Slack] 消息發送失敗: %v\n", err)
 		}
 	}
+	// `get` 檔案取回（user-pull）：走 files 三段式上傳（getUploadURLExternal → POST → complete）。
+	chatbot.RegisterFileSender(platform, func(channelID, path string) error {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		_, err = api.UploadFile(slackapi.UploadFileParameters{
+			Reader:   f,
+			FileSize: int(fi.Size()),
+			Filename: filepath.Base(path),
+			Channel:  channelID,
+		})
+		return err
+	})
 	return &SlackBot{
 		core:      chatbot.NewCore(platform, workDir, factory, send),
 		client:    socketmode.New(api),

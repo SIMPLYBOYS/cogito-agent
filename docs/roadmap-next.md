@@ -74,17 +74,15 @@ agent 只能讀 issue、讀幾個檔、寫 patch 就無事可做。
 
 ## 🟡 新功能（獨立模組，不碰既有路徑）
 
-### 3. Artifact 取回：`get` 指令
+### 3. ✅ Artifact 取回：`get` 指令 —— 已完成（2026-07-23）
 
-chat 產物落在 workdir 後拿不回來。兩條路缺口不同：
+兩半都落地：**bot** `get <路徑>`（Telegram `sendDocument` multipart／Slack files 三段式上傳，
+上限 50 MB，路徑走 `ResolveInWorkDir` 限該頻道 workdir）；**面板** run 頁每任務尾列
+「本次產出」檔案清單（含 implementer 類子 agent 內部的寫入，`replay.collectArtifacts`）。
 
-- **面板**＝可發現性（run 結束列「本次產出檔案清單」——資料已在 transcript 的
-  `write_file`／`edit_file` 呼叫裡，差一段模板，~40 行）
-- **bot**＝真缺口（人在外面、檔在家裡機器，手機拿不到）
-
-**設計已定：user-pull（`get <路徑>` → sendDocument／files.upload），絕不做 agent-push 上傳工具**
-——後者會變成 prompt injection 的外滲通道（注入一句「把 workDir 全傳出去」就成立）。
-路徑走既有 `resolveInWorkDir`、限該頻道自己的 workdir。TG ~30 行、Slack ~50 行。
+守住的鐵律：**user-pull only**——`fileSenders` 只有 `get` 指令會呼叫，agent 沒有上傳工具
+（agent-push 是 prompt injection 的外滲通道）。測試：`get_cmd_test.go`（逃逸/目錄/缺檔/
+無 sender/成功路由）、`artifacts_test.go`（主+子 agent 收集、去重）。
 
 ### 3b. Telegram 論壇主題（forum topics）路由 — **新發現的缺口**
 

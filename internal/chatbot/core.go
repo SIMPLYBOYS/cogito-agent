@@ -23,6 +23,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
 // 自動斷點續跑（opt-in，COGITO_AUTO_RESUME=1）：任務因【暫時性】錯誤中止時最多自動續跑幾次。
@@ -64,6 +65,29 @@ func SendMessage(convID, text string) {
 	if s, ok := senders.Load(plat); ok {
 		s.(func(string, string))(raw, text)
 	}
+}
+
+// fileSenders：platform → 該平台的原生【檔案】發送（Telegram sendDocument / Slack files upload）。
+// 與 senders 同一路由模型。刻意只有 user-pull 的 `get` 指令會呼叫——絕不做成 agent 可用的上傳工具，
+// 那會變成 prompt injection 的外滲通道（注入一句「把 workDir 全傳出去」就成立）。
+var fileSenders sync.Map
+
+// RegisterFileSender 讓傳輸層註冊原生檔案發送（rawID 為該平台的頻道 ID、path 為已解析的絕對路徑）。
+func RegisterFileSender(platform string, fn func(rawID, path string) error) {
+	fileSenders.Store(platform, fn)
+}
+
+// sendFile 把命名空間 convID 路由到該平台的檔案發送。平台沒註冊（如面板/CLI）回明確錯誤。
+func sendFile(convID, path string) error {
+	plat, raw, ok := strings.Cut(convID, ":")
+	if !ok {
+		return fmt.Errorf("非命名空間 convID: %q", convID)
+	}
+	s, ok := fileSenders.Load(plat)
+	if !ok {
+		return fmt.Errorf("平台 %s 不支援檔案取回", plat)
+	}
+	return s.(func(string, string) error)(raw, path)
 }
 
 // lastRoute：連結身分（"user:<canonical>"）→ 最後一次來訊的實際 convID（"platform:rawID"）。
@@ -287,7 +311,7 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	// （不佔鎖、不當成新任務；stop/status/model 即便忙碌也要能處理）。
 	if c.tryStopCommand(id, text) || c.tryStatusCommand(id, text) || c.tryModelCommand(id, text) ||
 		c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) ||
-		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) {
+		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) || c.tryGetCommand(id, text) {
 		return
 	}
 	// compress / learn / goal：會摺疊 session、蒸餾技能，或起一個持久目標任務（各自處理鎖）。命中即消費。
@@ -467,6 +491,7 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"**執行控制**\n" +
 	"`stop` — 中止本頻道正在跑的任務\n" +
 	"`status` — 看本會話花費 / token / 歷史長度 / 模型\n" +
+	"`get <路徑>` — 把工作區裡的檔案傳回聊天（如 `get report.md`；上限 50 MB）\n" +
 	"`model` / `model <id>` — 查看 / 切換本頻道模型（`model reset` 還原預設）\n" +
 	"`goal <驗收標準>` — 設一個目標，我追到 judge 判定達成為止（`goal status/pause/resume/clear` 管理）\n" +
 	"`compress` — 手動摺疊 context，縮短歷史省成本\n" +
@@ -504,6 +529,47 @@ func (c *Core) isRunning(workDir string) bool {
 	_, ok := running[workDir]
 	runningMu.Unlock()
 	return ok
+}
+
+// maxGetFileBytes 是 `get` 取回單檔的上限（Telegram Bot API sendDocument 的硬限制即 50MB；
+// Slack 對齊同值——超過的產物本來就不該走 IM 傳）。
+const maxGetFileBytes = 50 << 20
+
+// tryGetCommand：把本頻道 workdir 內的檔案傳回聊天（`get <路徑>`）。命中即消費；唯讀、
+// 忙碌時也可用。這是【user-pull】：只有人打指令才外傳，路徑錨定在頻道自己的 workdir 內。
+func (c *Core) tryGetCommand(convID, text string) bool {
+	t := strings.TrimSpace(text)
+	low := strings.ToLower(t)
+	if low != "get" && low != "/get" && !strings.HasPrefix(low, "get ") && !strings.HasPrefix(low, "/get ") {
+		return false
+	}
+	arg := ""
+	if i := strings.IndexByte(t, ' '); i >= 0 {
+		arg = strings.TrimSpace(t[i+1:])
+	}
+	if arg == "" {
+		SendMessage(convID, "用法：`get <檔案路徑>`（相對本頻道工作區，如 `get report.md`）")
+		return true
+	}
+	full, err := tools.ResolveInWorkDir(c.channelWorkDir(convID), arg)
+	if err != nil {
+		SendMessage(convID, "⚠️ "+err.Error())
+		return true
+	}
+	fi, err := os.Stat(full)
+	switch {
+	case err != nil:
+		SendMessage(convID, fmt.Sprintf("⚠️ 找不到檔案：%s", arg))
+	case fi.IsDir():
+		SendMessage(convID, fmt.Sprintf("⚠️ `%s` 是目錄——請指定單一檔案（不確定檔名可以直接問我裡面有什麼）", arg))
+	case fi.Size() > maxGetFileBytes:
+		SendMessage(convID, fmt.Sprintf("⚠️ 檔案 %.1f MB 超過取回上限 50 MB", float64(fi.Size())/(1<<20)))
+	default:
+		if err := sendFile(convID, full); err != nil {
+			SendMessage(convID, "⚠️ 檔案傳送失敗："+err.Error())
+		}
+	}
+	return true
 }
 
 // tryStopCommand：中止本頻道正在執行的任務（`/stop`）。命中即消費（即便忙碌也要能處理——這正是重點）。
