@@ -559,7 +559,7 @@ func (c *Core) tryGetCommand(convID, text string) bool {
 	fi, err := os.Stat(full)
 	switch {
 	case err != nil:
-		SendMessage(convID, fmt.Sprintf("⚠️ 找不到檔案：%s", arg))
+		SendMessage(convID, fmt.Sprintf("⚠️ 找不到檔案：%s\n（範圍＝**本頻道自己的工作區**，各頻道互相隔離；不確定有什麼，直接問我「列出工作區的檔案」即可）", arg))
 	case fi.IsDir():
 		SendMessage(convID, fmt.Sprintf("⚠️ `%s` 是目錄——請指定單一檔案（不確定檔名可以直接問我裡面有什麼）", arg))
 	case fi.Size() > maxGetFileBytes:
