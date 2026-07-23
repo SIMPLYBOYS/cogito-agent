@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -239,6 +240,11 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		Reporter:     t.reporter,
 	})
 	if err != nil {
+		if errors.Is(err, ErrPolicyDenied) {
+			// 政策拒絕【不做】error-as-observation：原樣回傳讓 registry 標 Denied，主迴圈據此
+			// 終止整個目標——否則主 agent 會把「子 agent 被拒」當成可重試的觀察，換個方式再派。
+			return "", err
+		}
 		// error-as-observation：讓主 agent 看到失敗但不中斷主 ReAct 迴圈。
 		return fmt.Errorf("子 agent執行失敗: %v", err).Error(), nil
 	}

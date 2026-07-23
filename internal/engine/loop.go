@@ -317,8 +317,9 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 				// 【核心攔截與注入】出錯時由 RecoveryManager 診斷並注入"救援指南"，
 				// reporter 與 session.history 兩處都用注入後的版本，保證人/模型/歷史三者一致。
+				// 政策拒絕（Denied）例外：拒絕不是要救援的失敗，注入「怎麼繞」的指南正好助長繞過。
 				finalOutput := result.Output
-				if result.IsError {
+				if result.IsError && !result.Denied {
 					finalOutput = e.recovery.AnalyzeAndInject(call.Name, result.Output)
 				}
 
@@ -338,6 +339,21 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		// 工具結果作為 user 消息進 session，保證下一輪 role 必然 user→assistant 交替
 		session.Append(observationMsgs...)
+
+		// 【硬防線④】政策拒絕＝該目標的終止，不是可重試的觀察。實測（incident-blacklist-bypass.md）：
+		// 拒絕以工具錯誤回到迴圈時，agent 會「改用不觸發黑名單的方式」主動繞過。故 Deny／無人值守
+		// fail-closed 一律在此終止本輪、回報給人。觀察已先落 history（tool_use/tool_result 成對，
+		// 不留孤兒）。人工拒絕（HITL）不標 Denied、不走這裡——人在場，拒絕理由本來就是給它改道的。
+		for _, tr := range turnResults {
+			if tr.Denied {
+				msg := fmt.Sprintf("🚫 政策拒絕：%s。任務已終止——安全政策的拒絕不是「換個方法再試」的訊號；若此操作確實必要，請人工放行（調整 policy.json）或改由人執行。", capRunes(tr.Output, 300))
+				if reporter != nil {
+					reporter.OnMessage(ctx, msg)
+				}
+				turnSpan.EndSpan()
+				return fmt.Errorf("政策拒絕，任務終止：%s", capRunes(tr.Output, 200))
+			}
+		}
 
 		// 【無窮迴圈探測】：本輪工具若與歷史同參數連續失敗達閾值，注入強提醒。
 		// 該提醒是普通 user 文本，會緊跟在 tool_results 之後——claude.go 會把它併入
@@ -438,6 +454,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 		}
 
 		observationMsgs := make([]schema.Message, len(actionResp.ToolCalls))
+		deniedMsgs := make([]string, len(actionResp.ToolCalls)) // 非空＝該呼叫被政策拒絕（終止子 agent 用）
 		var wg sync.WaitGroup
 
 		// 子 agent的工具 fan-out 同樣限流（獨立於主迴圈的信號量——這正是 per-turn 設計
@@ -460,9 +477,12 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 				}
 
 				result := readOnlyRegistry.Execute(ctx, call)
+				if result.Denied {
+					deniedMsgs[idx] = result.Output
+				}
 
 				finalOutput := result.Output
-				if result.IsError {
+				if result.IsError && !result.Denied { // 拒絕不注入救援指南（同主迴圈，別教它繞）
 					finalOutput = e.recovery.AnalyzeAndInject(call.Name, result.Output)
 				}
 
@@ -480,6 +500,19 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 
 		wg.Wait()
 		contextHistory = append(contextHistory, observationMsgs...)
+
+		// 政策拒絕＝子 agent 同樣終止（同主迴圈的硬防線④）：先把含觀察的內部 history 落地
+		// （dashboard 才看得到「在哪一步被拒」），再掛 sentinel 回報——spawn_subagent 據此把
+		// 拒絕原樣上傳，主迴圈收到後終止整個目標，不會把子 agent 的失敗當可重試的觀察。
+		for _, dm := range deniedMsgs {
+			if dm != "" {
+				if sess := SessionFromContext(ctx); sess != nil {
+					_ = replay.WriteSubRun(sess.WorkDir, tools.CallIDFromContext(ctx),
+						replay.SubRun{Prompt: task.Prompt, History: contextHistory, Model: e.provider.ModelName()})
+				}
+				return "", fmt.Errorf("%w：子 agent 的工具呼叫被政策拒絕——%s", tools.ErrPolicyDenied, capRunes(dm, 200))
+			}
+		}
 	}
 }
 

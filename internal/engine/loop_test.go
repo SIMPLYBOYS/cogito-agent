@@ -20,10 +20,11 @@ import (
 // fakeProvider 永遠回一個工具呼叫（製造一個本來會無限迴圈的 ReAct），可選地每輪累加成本，
 // 用來驗證框架層的硬防線會在無上限迴圈中強制中止。
 type fakeProvider struct {
-	mu      sync.Mutex
-	calls   int
-	costPer float64
-	sess    *ctxpkg.Session
+	mu       sync.Mutex
+	calls    int
+	costPer  float64
+	sess     *ctxpkg.Session
+	toolName string // 每輪呼叫的工具名；空＝noop
 }
 
 func (f *fakeProvider) Generate(ctx context.Context, _ []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
@@ -33,9 +34,13 @@ func (f *fakeProvider) Generate(ctx context.Context, _ []schema.Message, _ []sch
 	if f.sess != nil && f.costPer > 0 {
 		f.sess.RecordUsage(10, 10, f.costPer)
 	}
+	name := f.toolName
+	if name == "" {
+		name = "noop"
+	}
 	return &schema.Message{
 		Role:      schema.RoleAssistant,
-		ToolCalls: []schema.ToolCall{{ID: "1", Name: "noop", Arguments: []byte("{}")}},
+		ToolCalls: []schema.ToolCall{{ID: "1", Name: name, Arguments: []byte("{}")}},
 	}, nil
 }
 func (f *fakeProvider) MaxContextTokens() int { return 200000 }

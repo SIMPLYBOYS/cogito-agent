@@ -64,15 +64,21 @@ func Guard(p *Policy, builtinDangerous func(tool, args string) bool, asker Asker
 					orDefault(reason, "高危操作")))
 			}
 			if allowed, why := asker(ctx, call); !allowed {
-				return deniedResult(call, fmt.Sprintf("執行被系統攔截。原因: %s", why))
+				// 人工拒絕【刻意不標 Denied】：人在現場、拒絕理由可引導 agent 改走可接受的替代路
+				// （HITL 的意義就在此），且人隨時可 /stop。與 Deny／無人值守的差異：後者沒有人
+				// 盯著，「換個方法再試」就是實測發生過的黑名單繞過（incident-blacklist-bypass.md）。
+				return schema.ToolResult{ToolCallID: call.ID,
+					Output: fmt.Sprintf("執行被系統攔截。原因: %s", why), IsError: true}
 			}
 		}
 		return next(ctx, call)
 	}
 }
 
+// deniedResult 是【政策層】的拒絕（Deny／無人值守 fail-closed）：標 Denied，引擎收到即終止該目標
+// ——拒絕不是可重試的觀察。人工拒絕不走這裡（見 Ask 分支註解）。
 func deniedResult(call schema.ToolCall, msg string) schema.ToolResult {
-	return schema.ToolResult{ToolCallID: call.ID, Output: msg, IsError: true}
+	return schema.ToolResult{ToolCallID: call.ID, Output: msg, IsError: true, Denied: true}
 }
 
 func orDefault(s, def string) string {

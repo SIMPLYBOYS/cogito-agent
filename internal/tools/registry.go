@@ -4,6 +4,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -17,6 +18,10 @@ type BaseTool interface {
 	Definition() schema.ToolDefinition
 	Execute(ctx context.Context, args json.RawMessage) (string, error)
 }
+
+// ErrPolicyDenied 是「政策拒絕」的 sentinel：工具（目前是 spawn_subagent 把子 agent 內部的拒絕
+// 往上傳）用 errors.Is 掛上它回傳，Execute 會把結果標成 Denied——引擎據此終止該目標而非重試。
+var ErrPolicyDenied = errors.New("政策拒絕")
 
 // ToolHandler 是中間件鏈中的「下一步」，最終落到工具本身的執行。
 type ToolHandler func(ctx context.Context, call schema.ToolCall) schema.ToolResult
@@ -111,6 +116,7 @@ func (r *registryImpl) Execute(ctx context.Context, call schema.ToolCall) schema
 				ToolCallID: call.ID,
 				Output:     fmt.Sprintf("Error executing %s: %v", call.Name, err),
 				IsError:    true,
+				Denied:     errors.Is(err, ErrPolicyDenied), // 子 agent 內部的政策拒絕往上傳
 			}
 		}
 		// 截前 N 字元放進 Trace 預覽，防止 trace 膨脹（過小會讓 Langfuse 看到一堆 ...）

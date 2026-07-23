@@ -100,3 +100,20 @@ d
 政策拒絕目前是**以工具錯誤的形式回到迴圈**，agent 讀到後把它當成「換個方法再試」的回饋。
 對「安全政策」而言，拒絕或許該是**該目標的終止**，而不是可重試的錯誤。
 這是本次最有價值的發現，已記入 `docs/roadmap-next.md`。
+
+---
+
+## ✅ 已修復（2026-07-24，roadmap 2b）
+
+④ 的語意已改：`ToolResult` 增 `Denied` 旗標——policy 的 **Deny 與無人值守 fail-closed** 標之，
+引擎收到即**終止該目標**（觀察先落 history、不注入救援指南、回報給人），不再回迴圈當可重試
+的觀察；子 agent 內部被拒同樣經 `ErrPolicyDenied` sentinel 上傳、終止整個目標。
+**人工拒絕（HITL）刻意不標**——人在場，拒絕理由本來就是給它改道的。
+
+**同場景實測複驗**：同一句「rm -rf scratch/build」、同一條 deny 規則——
+修復前 agent 改寫成 `cd scratch/build && rm app.bin app.map && rmdir build` 完成刪除；
+修復後 run 於拒絕當下終止，`app.bin`/`app.map` 完好，回報
+「🚫 政策拒絕…任務已終止——安全政策的拒絕不是『換個方法再試』的訊號」。
+
+黑名單抓錯抽象的問題（①③）**不因此消失**——字串比對仍列不完；這次修的是「拒絕之後
+會發生什麼」。真正邊界仍是 `resolveInWorkDir` ＋ sandbox 掛載範圍。

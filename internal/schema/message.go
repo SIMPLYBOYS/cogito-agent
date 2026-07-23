@@ -37,6 +37,10 @@ type ToolResult struct {
 	ToolCallID string `json:"tool_call_id"`
 	Output     string `json:"output"`
 	IsError    bool   `json:"is_error"`
+	// Denied：政策拒絕（Deny／無人值守 fail-closed）。與一般 IsError 的語意差異是引擎的處理：
+	// 一般錯誤是「可重試的觀察」（附救援指南餵回迴圈），政策拒絕是【該目標的終止】——實測
+	// （docs/incident-blacklist-bypass.md）agent 會把拒絕當「換個方法再試」的回饋而主動繞過黑名單。
+	Denied bool `json:"denied,omitempty"`
 }
 
 type ToolDefinition struct {
