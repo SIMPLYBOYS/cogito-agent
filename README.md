@@ -250,7 +250,7 @@ cp .env.example .env
 | 變數 | 說明 |
 |------|------|
 | `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，從 <https://console.anthropic.com> 獲取 |
-| `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history` |
+| `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history`、`files:write`（`get` 檔案取回用；後補 scope 需 Reinstall to Workspace） |
 | `SLACK_APP_TOKEN` | Slack App-Level Token（`xapp-` 開頭，scope `connections:write`），啟用 Socket Mode 後取得；走 outbound websocket 免公開 URL |
 | `TELEGRAM_BOT_TOKEN` | （選填，多平台）Telegram Bot Token，向 @BotFather 申請；設了就與 Slack 同行程跑 getUpdates 長輪詢 |
 | `COGITO_ALLOWED_USERS` | **（伺服器端務必設）** 可驅動 agent 的 user id 白名單（逗號分隔）。不設＝fail-closed 拒絕所有入站。Telegram＝數字 id、Slack＝`U` 開頭 |

@@ -5,6 +5,7 @@ package slackbot
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,6 +64,10 @@ func NewSlackBot(factory chatbot.EngineFactory, workDir string) *SlackBot {
 			Filename: filepath.Base(path),
 			Channel:  channelID,
 		})
+		if err != nil && strings.Contains(err.Error(), "missing_scope") {
+			// 裸 missing_scope 沒人看得懂——舊 App 多半只申請了 chat:write 等，檔案上傳要 files:write。
+			return fmt.Errorf("Slack App 缺 `files:write` scope——到 OAuth & Permissions 加上後 Reinstall to Workspace（token 若變記得更新 .env）。原始錯誤：%w", err)
+		}
 		return err
 	})
 	return &SlackBot{
