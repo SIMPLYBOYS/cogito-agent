@@ -1,7 +1,10 @@
-# 下一批 Action Item（2026-07-22 盤點）
+# 下一批 Action Item（2026-07-22 盤點；07-24 更新）
 
 面試前刻意停手的東西，集中在這裡。**排序依據是「動它的風險」而不是價值**——會被延後的，
 多半是因為改動面敏感，不是因為不重要。
+
+> **07-24 現況**：面試（07-23）已結束。三條已結案（皆帶實測證據）：✅ 1 caching 斷點③、
+> ✅ 2b 政策拒絕＝目標終止、✅ 3 artifact `get`。剩餘見文末「建議順序」。
 
 > 現況基準：CI 四關綠、23 個套件通過。詳細數據見 [eval-results.md](eval-results.md)、
 > demo 腳本見 [demo-runbook.md](demo-runbook.md)。
@@ -219,17 +222,21 @@ Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與
 
 ---
 
-## 📌 面試後立刻做（零風險）
+## 📌 面試後立刻做（零風險）——已清（07-24）
 
-- [ ] `/cron` 把兩個 job 開回來（demo 前為避免補跑推播而停用）
-- [ ] `workspace/.sessions-archive/` 的 6 個歸檔 session：確認不用就刪
-- [ ] `./scripts/demo.sh restore` 若還沒跑，補跑（`.env` 的 `COGITO_ALLOWED_USERS`）
+- [x] `/cron` 兩個 job 已開回（cron.json 每輪 Tick 重讀，改檔即生效）
+- [x] `.env` 的 `COGITO_ALLOWED_USERS` 已確認是正常名單（無須 restore）
+- [ ] `workspace/.sessions-archive/`：**`retrospect-e2e-41fcdf39.json` 別刪**——它是
+      `delegate-and-verify-file` 提案來源的唯一 provenance 證據（agent 經 retrospect 技能
+      ＋write_file 寫入、非 SkillSynthesizer 管線，故無 generated_by 戳記）；其餘 5 檔
+      （accept／cron×3／subdepth-demo）確認不用可刪。提案本身已過 skillgate，晉升/丟棄待裁決。
 
 ---
 
-## 建議順序
+## 建議順序（07-24 更新；原順序的 get 與 caching 已結案）
 
-**🟢 評測補完 → 🟡 artifact get（3）→ 🟡 Telegram thread（3b，若走 orchestrator 路線）→ 🔴 caching 斷點③**
+**🟢 評測補完 → 🔴 2. SWE-bench `-swe-env-setup` → 🟡 3b. Telegram thread（若走 orchestrator 路線）→ 🟡 4/5. 面板身分（tsnet 或反代標頭）**
 
-理由：綠的那組能把「p=0.206」升級成真結論，而那是**已經寫進 README 的數字**；
-紅的那個雖然省最多錢，但目前用量還撐得住，不值得為它冒改壞核心路徑的風險。
+理由：綠的那組能把「p=0.206」升級成真結論，而那是**已經寫進 README 的數字**，僅剩的阻礙
+是一筆小成本（~$0.7）；#2 是「一個結論值 25 題」的驗證；3b 取決於產品方向（orchestrator
+常駐與否）；4/5 等部署形態明朗（上雲/反代）再選邊。
