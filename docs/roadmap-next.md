@@ -10,7 +10,23 @@
 
 ## 🔴 動核心路徑（改壞是全面失效，不是單一功能失效）
 
-### 1. Prompt caching 補第三個斷點（對話尾端）
+### 1. ✅ Prompt caching 斷點③（對話尾端）——已完成（2026-07-24）
+
+三件事一起落地（缺一不可）：**斷點③**（buildParams 在最後一則訊息的最後一個 block 掛
+ephemeral；`≥3 則`才掛——一次性呼叫如 evolve 反思/judge 掛了是純 1.25x 寫入稅）；
+**錨定式窗口**（EnableSummary 開＝主迴圈吃全量，history 由逐出機制有界、序列 append-only
+前綴才穩定；滑窗每輪動頭部會讓對話快取輪輪全滅還倒貼寫入費）；**入口對齊**（operator chat
+與 claw-cli 先前漏接 EnableSummary、一直走滑窗，已補——.env.example 本來就寫「對話式入口預設開」）。
+
+**實測（同一面板多輪任務，前後對照）**：
+修復前快取讀死在 1414（靜態前綴）、全價輸入 645→3908→4200 一路長大；
+修復後快取讀 6905→7154→7277→7398 逐輪成長，**全價輸入每輪只剩 2 tk**，寫入僅增量（~100-250 tk）。
+
+已知可接受的 miss（刻意不修）：摘要 commit 輪（system 換摘要，每 ~20 輪一次）、
+Plan Mode 打勾輪（進度錨在 system）。原始分析見 vault
+`cogito-agent-Context-成本結構實測-Prompt-Caching-的覆蓋缺口`。
+
+<details><summary>原始分析（2026-07-22）</summary>
 
 **現況**：`internal/provider/claude.go:143,150` 兩個 ephemeral 斷點，蓋住 `tools + system` 前綴。
 `params.Messages`（對話歷史）**一個斷點都沒有**。
@@ -32,6 +48,8 @@ call 3   輸入 4200 tk   快取讀 1414 / 寫 0
 **為何延後**：改的是 `buildParams`，所有 LLM 呼叫的必經之路。
 **重啟條件**：任何一次長任務的成本明顯刺眼時。
 **完整分析**：vault `cogito-agent-Context-成本結構實測-Prompt-Caching-的覆蓋缺口`。
+
+</details>
 
 ### 2. SWE-bench 補 `-swe-env-setup`（驗證那個推測）
 

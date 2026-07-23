@@ -157,7 +157,16 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		e.maintainSummary(turnCtx, session)
 
 		availableTools := e.registry.GetAvailableTools()
-		workingMemory := session.GetWorkingMemory(summaryTailMsgs)
+		// 錨定式窗口（prompt caching 斷點③的前提）：EnableSummary 開著時 history 由逐出機制保證
+		// 有界（超過 summaryTriggerMsgs 即摺進摘要、收斂回末 summaryTailMsgs），直接吃全量——訊息
+		// 序列在摘要 commit 之間 append-only，前綴穩定，對話快取輪輪可命中；多送的舊訊息以 0.1x
+		// 計價，遠小於省下的。滑窗（末 N 則）在 history 超過 N 後【每輪動頭部】，前綴輪輪全滅、
+		// 快取寫入 1.25x 反而倒貼。EnableSummary 關（bench 等）→ 維持滑窗防 history 無界。
+		window := summaryTailMsgs
+		if e.EnableSummary {
+			window = 0 // 0＝全量
+		}
+		workingMemory := session.GetWorkingMemory(window)
 
 		// 滑動窗口截斷後，首條可能變成 Assistant（違反 Anthropic「首條須為 user」/嚴格交替）。
 		// 在頭部強行插入一條佔位 User 消息穩住協議。（與 GetWorkingMemory 的孤兒 tool_result

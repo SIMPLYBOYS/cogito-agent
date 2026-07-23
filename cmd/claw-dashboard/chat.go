@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,6 +88,9 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	registry.Use(guard)
 
 	eng := engine.NewAgentEngine(tracked, registry, false, false)
+	// 與 bot（cmd/claw）對齊：對話式入口預設開滾動摘要（.env.example 文件語意）。先前漏接使
+	// operator chat 一直走滑窗——這也是 caching 斷點③的前提（錨定式窗口，見 engine loop）。
+	eng.EnableSummary = os.Getenv("COGITO_SUMMARY") != "off"
 
 	hub := &sseHub{}
 	// 事件同時打到終端（跑 dashboard 的 console）與 SSE hub（瀏覽器即時串流）。

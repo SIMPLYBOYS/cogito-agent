@@ -151,7 +151,39 @@ func (p *ClaudeProvider) buildParams(msgs []schema.Message, availableTools []sch
 		}
 	}
 
+	// 斷點③（對話尾端）：多輪對話中，上一輪已送過的 messages 也是不變前綴——在最後一則訊息掛
+	// 斷點，下一輪整段對話即可 0.1x 計費（否則對話增量每輪全價重送，實測快取讀死在靜態前綴）。
+	// 條件 ≥minMsgsForConvoCache：一次性呼叫（evolve 反思/judge/摘要，1~2 則、沒有下一輪）掛了
+	// 只付 1.25x 寫入稅、零回收。前提是呼叫端的訊息序列 append-only（滑窗每輪動頭部會全 miss
+	// 還倒貼寫入費——引擎主迴圈已配合改錨定式窗口，見 loop.go）。合計 3 斷點，≤ Anthropic 上限 4。
+	if len(anthropicMsgs) >= minMsgsForConvoCache {
+		markLastBlockEphemeral(anthropicMsgs)
+	}
+
 	return params
+}
+
+// minMsgsForConvoCache 是掛「對話尾端快取斷點」的最少訊息數：低於它視為一次性呼叫，不掛。
+const minMsgsForConvoCache = 3
+
+// markLastBlockEphemeral 在最後一則訊息的最後一個 content block 掛 ephemeral 斷點（斷點③）。
+// 只處理本專案會組出的 block 型別（text / tool_use / tool_result）；其他型別寧可不掛也不誤掛。
+func markLastBlockEphemeral(msgs []anthropic.MessageParam) {
+	if len(msgs) == 0 {
+		return
+	}
+	blocks := msgs[len(msgs)-1].Content
+	if len(blocks) == 0 {
+		return
+	}
+	switch b := &blocks[len(blocks)-1]; {
+	case b.OfText != nil:
+		b.OfText.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	case b.OfToolResult != nil:
+		b.OfToolResult.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	case b.OfToolUse != nil:
+		b.OfToolUse.CacheControl = anthropic.NewCacheControlEphemeralParam()
+	}
 }
 
 // extractMessage 把 Anthropic 回應的 content blocks + usage 轉成統一的 schema.Message。Generate（一次

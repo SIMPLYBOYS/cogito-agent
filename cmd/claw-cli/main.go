@@ -110,6 +110,9 @@ func main() {
 	defer taskMgr.KillAll()
 
 	eng := engine.NewAgentEngine(trackedProvider, registry, false, *planPtr)
+	// 與 bot 對齊：對話式入口預設開滾動摘要（先前漏接使 CLI 一直走滑窗）。
+	// 這也是 caching 斷點③的前提（錨定式窗口，見 engine loop）。
+	eng.EnableSummary = os.Getenv("COGITO_SUMMARY") != "off"
 	reporter := engine.NewTerminalReporter()
 
 	// spawn_subagent（含 worktree 隔離）：CLI 也能委派具名子 agent（.claw/agents/*.md）。子 agent
