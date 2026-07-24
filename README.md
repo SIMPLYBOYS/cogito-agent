@@ -340,6 +340,8 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 
 機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度即時回覆到對應會話。
 
+> **Telegram 論壇主題（Forum Topics）**：開了 Topics 的超級群組，**每個主題各自獨立 session／工作目錄**（一個群組、一個 bot、依 `message_thread_id` 分流），回覆也會落回原主題——「一個專員一個主題區」的最小前提。判準用 `is_topic_message`：一般群組的回覆串（非主題）**不**分家，避免把普通群組拆成一堆 session。
+
 > ⚠️ **安全提示**：預設（`HostExecutor`）下 `bash` 會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改檔案——請僅在隔離/受控環境中執行。**生產建議啟用 Docker 沙箱**取得 OS 級硬邊界：
 >
 > ```bash

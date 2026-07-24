@@ -54,7 +54,7 @@ func NewTelegramBot(factory chatbot.EngineFactory, workDir string) *TelegramBot 
 // sendFile 用 sendDocument 把檔案傳回聊天（multipart：Bot API 上傳本機檔的唯一方式）。
 // 僅供 core 的 `get` 指令（user-pull）呼叫；上限 50MB 由 core 先擋，這裡不重複。
 func (b *TelegramBot) sendFile(chatID, path string) error {
-	id, err := strconv.ParseInt(chatID, 10, 64)
+	id, thread, err := parseChatThread(chatID)
 	if err != nil {
 		return fmt.Errorf("非法 chat_id %q", chatID)
 	}
@@ -67,6 +67,9 @@ func (b *TelegramBot) sendFile(chatID, path string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	_ = w.WriteField("chat_id", strconv.FormatInt(id, 10))
+	if thread != 0 {
+		_ = w.WriteField("message_thread_id", strconv.Itoa(thread)) // 檔案也送回原主題
+	}
 	part, err := w.CreateFormFile("document", filepath.Base(path))
 	if err != nil {
 		return err
@@ -145,21 +148,50 @@ func (b *TelegramBot) ResumeInterrupted() { b.core.ResumeInterrupted() }
 // send 是核心注入的原生發送：chatID 為純數字字串，Bot API 的 chat_id 要整數。
 // 先以 HTML parse_mode 送（表格→<pre> 等寬對齊、**粗體**→<b>）；若 HTML 不合法（如標記不平衡）
 // Telegram 會回非 2xx，此時退回純文字重送一次，確保訊息不因格式化而整條發不出去。
+// chatKey 把 (chat, thread) 摺成一個原生頻道 key，交給 core.Dispatch。只在【論壇主題】
+// （is_topic_message）時附 thread——如此該主題的 convID、session、工作目錄就與群組其他主題各自獨立。
+// 刻意不對「一般群組的回覆串」（有 message_thread_id 但非主題）分家：否則普通群組會被回覆鏈拆成
+// 一堆 session。key 一路帶到 SendMessage 再由 parseChatThread 還原（namespace 只切第一個冒號，安全）。
+func chatKey(m *tgMessage) string {
+	key := strconv.FormatInt(m.Chat.ID, 10)
+	if m.IsTopicMessage && m.MessageThreadID != 0 {
+		key += ":" + strconv.Itoa(m.MessageThreadID)
+	}
+	return key
+}
+
+// parseChatThread 從 send/sendFile 收到的原生 key（"chat" 或 "chat:thread"）還原 chat_id 與
+// thread_id。chat_id 可為負（超級群組），thread 為正整數；無冒號＝無 thread（一般聊天/主題 General）。
+func parseChatThread(raw string) (chatID int64, threadID int, err error) {
+	chatStr, threadStr, hasThread := strings.Cut(raw, ":")
+	chatID, err = strconv.ParseInt(chatStr, 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	if hasThread {
+		threadID, _ = strconv.Atoi(threadStr) // 解不出就當無 thread（容錯，不擋送訊）
+	}
+	return chatID, threadID, nil
+}
+
 func (b *TelegramBot) send(chatID, text string) {
-	id, err := strconv.ParseInt(chatID, 10, 64)
+	id, thread, err := parseChatThread(chatID)
 	if err != nil {
 		log.Printf("[Telegram] 非法 chat_id %q: %v\n", chatID, err)
 		return
 	}
-	if b.postMessage(id, telegramHTML(text), "HTML") {
+	if b.postMessage(id, thread, telegramHTML(text), "HTML") {
 		return
 	}
-	b.postMessage(id, text, "") // fallback：純文字
+	b.postMessage(id, thread, text, "") // fallback：純文字
 }
 
 // postMessage 送一則訊息，回傳是否成功（HTTP 2xx）。parseMode 空字串＝純文字。
-func (b *TelegramBot) postMessage(id int64, text, parseMode string) bool {
+func (b *TelegramBot) postMessage(id int64, thread int, text, parseMode string) bool {
 	m := map[string]any{"chat_id": id, "text": text}
+	if thread != 0 {
+		m["message_thread_id"] = thread // 回覆掉回原主題，否則落到群組主層
+	}
 	if parseMode != "" {
 		m["parse_mode"] = parseMode
 	}
@@ -221,14 +253,16 @@ func (b *TelegramBot) Start(ctx context.Context) {
 			if !ok {
 				continue // 群組閒聊、沒叫到我 → 不理
 			}
+			// chatKey 把論壇主題摺進頻道 key——同一群組不同主題各自獨立 session／工作目錄。
+			key := chatKey(m)
 			if prompt == "/start" { // Telegram 慣例的開場，不當任務
-				b.send(strconv.FormatInt(m.Chat.ID, 10), "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。打 `help` 看完整指令。")
+				b.send(key, "👋 我是 cogito-agent。直接打字交辦任務即可（群組裡請 @我 或回覆我）；危險操作會請你回覆 approve/reject。打 `help` 看完整指令。")
 				continue
 			}
 			if m.Chat.Type == "private" {
-				b.core.DispatchDM(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
+				b.core.DispatchDM(key, strconv.FormatInt(m.From.ID, 10), prompt)
 			} else {
-				b.core.Dispatch(strconv.FormatInt(m.Chat.ID, 10), strconv.FormatInt(m.From.ID, 10), prompt)
+				b.core.Dispatch(key, strconv.FormatInt(m.From.ID, 10), prompt)
 			}
 		}
 	}
@@ -271,10 +305,12 @@ type update struct {
 }
 
 type tgMessage struct {
-	Text           string     `json:"text"`
-	Chat           tgChat     `json:"chat"`
-	From           *tgUser    `json:"from"`
-	ReplyToMessage *tgMessage `json:"reply_to_message"`
+	Text            string     `json:"text"`
+	Chat            tgChat     `json:"chat"`
+	From            *tgUser    `json:"from"`
+	ReplyToMessage  *tgMessage `json:"reply_to_message"`
+	MessageThreadID int        `json:"message_thread_id"` // 論壇主題／回覆串的 thread id
+	IsTopicMessage  bool       `json:"is_topic_message"`  // true＝送到論壇主題（用它區隔「主題」與「一般回覆串」）
 }
 
 type tgChat struct {
