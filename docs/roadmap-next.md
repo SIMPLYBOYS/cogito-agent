@@ -29,6 +29,9 @@ ephemeral；`≥3 則`才掛——一次性呼叫如 evolve 反思/judge 掛了�
 Plan Mode 打勾輪（進度錨在 system）。原始分析見 vault
 `cogito-agent-Context-成本結構實測-Prompt-Caching-的覆蓋缺口`。
 
+結構圖（三斷點 + 錨定窗口 + 前後對照）：[`docs/diagrams/caching-breakpoints.svg`](diagrams/caching-breakpoints.svg)
+（原始檔 `docs/diagrams/caching-breakpoints.drawio`）。
+
 <details><summary>原始分析（2026-07-22）</summary>
 
 **現況**：`internal/provider/claude.go:143,150` 兩個 ephemeral 斷點，蓋住 `tools + system` 前綴。

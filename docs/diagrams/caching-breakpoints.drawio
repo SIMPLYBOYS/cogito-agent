@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="caching-breakpoints">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="2" value="cogito-agent · Prompt Caching 三斷點 ＋ 錨定式窗口（斷點③補在對話尾端）" style="text;html=1;align=left;verticalAlign=middle;fontSize=17;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="3" value="每輪送 API 的完整 payload（前綴不變、掛斷點就 0.1x 計費）" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="600" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="4" value="① tools 區　7 核心 + 2 gateway（含 106 行 MCP 目錄）　≈ 6,030 tk" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="620" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="5" value="② system prompt　身分/紀律 · AGENTS.md · 記憶索引　≈ 1,850 tk" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="620" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="6" value="③ messages[]　對話歷史 ＋ 每一輪工具輸出　每輪長大 →" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=left;spacingLeft=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="220" width="620" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="7" value="斷點① 最後一個 tool（既有）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="105" width="230" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="8" value="斷點② system（既有）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="170" width="230" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="9" value="★ 斷點③ 最後一則訊息（新增）&#xa;整段對話成為可命中前綴" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="690" y="245" width="250" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="10" value="◄ 修復前快取邊界到此為止（messages 無斷點 → 每輪全價重送）；斷點③把它下移到對話尾端" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#b85450;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="315" width="620" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="11" value="計價　快取讀 ×0.1　·　寫入 ×1.25　·　全價 ×1.0&#xa;&#xa;斷點③的前提＝錨定式窗口（缺它會反虧）&#xa;　EnableSummary 開 → 主迴圈吃全量：history 由逐出機制有界、&#xa;　序列在摘要 commit 間 append-only、前綴穩定 → 對話快取輪輪命中&#xa;　滑窗每輪動頭部 → 前綴從頭全滅、還倒貼 1.25x 寫入&#xa;&#xa;只在 ≥3 則訊息才掛斷點③&#xa;　一次性呼叫（judge / 反思 / 摘要，1~2 則）不掛，&#xa;　否則是純付寫入稅、零回收&#xa;&#xa;合計 3 斷點 ≤ Anthropic 上限 4" style="shape=note;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;size=20;" vertex="1" parent="1">
+          <mxGeometry x="970" y="90" width="560" height="245" as="geometry" />
+        </mxCell>
+
+        <mxCell id="12" value="修復前　messages 無斷點" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="400" width="700" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="13" value="輪1　快取讀 0　　　全價輸入 645&#xa;輪2　快取讀 1414　全價輸入 3908　← 3908 全價（輪1已送過）&#xa;輪3　快取讀 1414　全價輸入 4200　← 快取讀【死在 1414】&#xa;&#xa;快取讀＝靜態前綴大小、固定不動；&#xa;對話增量每輪以全價重送，一毛折扣都沒有。" style="text;html=1;align=left;verticalAlign=top;fontSize=12;fontFamily=Courier New;" vertex="1" parent="12">
+          <mxGeometry x="16" y="44" width="668" height="190" as="geometry" />
+        </mxCell>
+
+        <mxCell id="14" value="修復後　斷點③ ＋ 錨定窗口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;align=left;spacingLeft=12;verticalAlign=top;spacingTop=10;" vertex="1" parent="1">
+          <mxGeometry x="770" y="400" width="760" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="15" value="輪1　快取讀 0　　　寫 6905&#xa;輪2　快取讀 6905　全價輸入 2　寫 249&#xa;輪3　快取讀 7154　全價輸入 2&#xa;輪4　快取讀 7398　全價輸入 2　← 快取讀【逐輪長大】&#xa;&#xa;整段對話 0.1x 命中；全價輸入從數千 → 每輪 2 tk，&#xa;寫入只剩本輪增量（~100–250 tk）。" style="text;html=1;align=left;verticalAlign=top;fontSize=12;fontFamily=Courier New;" vertex="1" parent="14">
+          <mxGeometry x="16" y="44" width="728" height="190" as="geometry" />
+        </mxCell>
+
+        <mxCell id="16" value="※ 兩組數字取自【不同 session】（前綴大小不同，故 1414 vs 6905）——重點是【型態】：快取讀由「死平」變「逐輪長大」、全價輸入由「隨對話長大」變「每輪 2 tk」。" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="660" width="1490" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="17" value="已知可接受的 miss（刻意不修）：摘要 commit 輪（system 換摘要，每 ~20 輪一次）、Plan Mode 打勾輪（進度錨在 system）。" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="690" width="1490" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="20" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=none;html=1;rounded=0;strokeColor=#999999;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="4" target="7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="21" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=none;html=1;rounded=0;strokeColor=#999999;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="5" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="22" value="" style="edgeStyle=orthogonalEdgeStyle;dashed=1;endArrow=none;html=1;rounded=0;strokeColor=#d6b656;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="6" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

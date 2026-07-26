@@ -49,6 +49,7 @@
   - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @
 - 🔗 **DM 跨平台連續性**（`COGITO_USER_LINK`）：宣告同一人的各平台 id 後，在 Telegram 私聊問到一半換 Slack 也能接著問——同一份 session 歷史，回覆與審批通知送到最後說話的那個平台。僅私聊生效，群組不合併。
 - 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
+- 🧊 **Prompt caching 三斷點**：`tools` / `system` / **對話尾端**各掛一個 ephemeral 斷點 ＋ 錨定式窗口（`EnableSummary` 開時吃全量，前綴 append-only 才穩定命中），長對話的全價輸入從數千 tk 降到**每輪 2 tk**。[結構圖](docs/diagrams/caching-breakpoints.svg)
 - 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 - 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
