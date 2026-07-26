@@ -7,6 +7,9 @@
 隔離 context** 的子 agent，multi-agent 不是在聊天室看到五個帳號講話，而是在**執行樹**裡
 看到一棵可回放、每步有成本的樹——那正是 Hermes 的 watch-windows（並行 live 串流）做不到的。
 
+流程圖（含工具邊界與政策護欄）：[`diagrams/orchestration-flow.svg`](diagrams/orchestration-flow.svg)
+（原始檔 `diagrams/orchestration-flow.drawio`，draw.io 可編輯）。
+
 ## 這些檔屬於版控（workspace/ 被 gitignore，故正本放這）
 
 - `target/payment.go` `target/go.mod` — 標的，**故意種三個問題**，一個對應一個專員：

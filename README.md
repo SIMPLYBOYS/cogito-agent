@@ -648,6 +648,12 @@ isolation: worktree             # 可選；在 git worktree 隔離執行，完�
 
 「主 agent 規劃 → 分派子 agent（並行/串行）→ 審查 → 糾錯 → 整合」這種 orchestration**就是 ReAct**：主 agent 的「行動」是 `spawn_subagent`、子 agent 的報告是「觀察」，據此迭代到達成。cogito **不需要 workflow DAG 引擎**（那是 framework-driven、偏離 ReAct）；要讓主 agent 可靠地進入這個模式，寫一個 **`orchestrate` 技能**（`.claw/skills/orchestrate/SKILL.md`，內容是編排 playbook）即可——主 agent 碰到複雜任務時 `read_skill` 讀它、照著把 `implementer`/`code-reviewer` 等具名 agent 編排起來。**純 prompt、零引擎改動、與 per-agent 選模型和 worktree 隔離自然疊加**（例如 orchestrator 用大模型、worker 用小模型）。
 
+下圖是這個模式的一次實跑（[`demo/mission-control`](demo/mission-control/) 的多視角 code review）：orchestrator 同一輪並行派出三個窄專員各審一個面向、隔離 context，最後整合成上線判斷。兩個護欄是框架層而非 prompt 求來的——**工具邊界**由註冊表 `Subset` 擋（三專員 `[read_file, bash]`、連 `write_file` 都沒有）、**政策 Deny＝目標終止**（任一工具被拒即終止回報，不給 agent 改寫繞過的空間）。
+
+![多 agent 編排流：orchestrator → 同一輪並行三專員 → 整合上線判斷](demo/mission-control/diagrams/orchestration-flow.svg)
+
+> 可編輯原始檔：[`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)（拖回 draw.io 即可改）。
+
 ### 跑多個員工（多實例，零程式碼）
 
 導言說 cogito 是「一名數位員工」——要一個團隊，就**每個員工一個目錄**。`claw` 從當前目錄載 `.env`、工作區固定在 `<當前目錄>/workspace`，所以一個目錄就是一個完整隔離的員工：自己的 IM 身分（bot token）、自己的人格與技能庫（`workspace/.claw/`）、自己的記憶與會話（`COGITO_SESSION_DIR`）、自己的白名單與模型設定。
