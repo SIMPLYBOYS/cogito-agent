@@ -33,13 +33,39 @@ type MemoryRecord struct {
 // 正文由 recall 工具按需檢索載入——避免記憶一多就把上下文撐爆（取代「AGENTS.md 整檔每輪全載」）。
 type MemoryLoader struct {
 	workDir string
+	memDir  string // 非空＝直接用它當記憶目錄（跳過 <workDir>/.claw/memory 慣例）；供 per-agent 記憶等非慣例路徑
 }
 
 func NewMemoryLoader(workDir string) *MemoryLoader {
 	return &MemoryLoader{workDir: workDir}
 }
 
-func (m *MemoryLoader) dir() string { return filepath.Join(m.workDir, ".claw", "memory") }
+// NewMemoryLoaderAt 把 loader 直接 root 在指定記憶目錄（繞過 <workDir>/.claw/memory 慣例）——
+// 供 per-agent 記憶（.claw/agents/<name>/memory）這種非慣例路徑，見 docs/multi-tenancy.md。
+func NewMemoryLoaderAt(memDir string) *MemoryLoader { return &MemoryLoader{memDir: memDir} }
+
+func (m *MemoryLoader) dir() string {
+	if m.memDir != "" {
+		return m.memDir
+	}
+	return filepath.Join(m.workDir, ".claw", "memory")
+}
+
+// LoadForInjection 把所有記憶記錄組成一段可【直接注入】system prompt 的文字（名稱＋正文），供沒有
+// recall 工具的具名子 agent「開場即記得」過往同類任務的沉澱。無記錄回空字串。
+// ponytail: 全量注入——per-agent 記憶預期少量；多到會脹 context 時改成「索引＋給子 agent recall 工具」。
+func (m *MemoryLoader) LoadForInjection() string {
+	recs := m.loadAll()
+	if len(recs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n---\n## 你的長期記憶（過往同類任務沉澱，供參考；仍以本次實際觀察為準）\n")
+	for _, r := range recs {
+		fmt.Fprintf(&b, "\n### %s\n%s\n", r.Name, strings.TrimSpace(r.Body))
+	}
+	return b.String()
+}
 
 // ── 使用帳本（sidecar usage ledger）─────────────────────────────────────────
 // app 自己記每筆記憶的「最近使用時間 + 命中次數」，取代用檔案 mtime 當 last-used。mtime 會被備份 /

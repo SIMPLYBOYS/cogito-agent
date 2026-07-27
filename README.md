@@ -660,6 +660,7 @@ isolation: worktree             # 可選；在 git worktree 隔離執行，完�
 - **選模型 / effort**：`model` 讓探路用便宜快的（haiku）、審查用強的（opus）分層；`effort` 調輸出深度（token 上限）。provider 支援才生效，成本仍記進同一 session。effort 是輸出上限的粗略代理，非 extended-thinking。
 - **worktree 隔離**（`isolation: worktree`）：可寫 agent 在 base 的 git worktree 隔離跑，完事把 diff **序列化 apply 回主工作區**——這樣一輪並行多個可寫 agent 也不會相互覆蓋（各寫各的 worktree，回寫一個一個來）。前提：workspace 是 git repo（否則自動降級為共享工作區）、host 執行模式（docker sandbox 下 bash 掛在 base 容器，與 worktree 檔案隔離不完全對齊）。回寫衝突時，diff 會附在子 agent 報告裡交主 agent 處理。
 - **背景/非同步委派**（`background: true`）：丟背景池非同步跑、立即回一個 ID（如 `bg-1`），主 agent 可先繼續、之後用 `subagent_result`（帶 id）取結果、`subagent_list` 看全部。per-session 池、有並發上限與保留式清理（對齊背景 bash 的 TaskManager）。背景模式在**共享工作區** silent 跑（不做 worktree 隔離）；要並行隔離寫入請用同步的 `isolation: worktree`。
+- **per-agent 長期記憶**（`.claw/agents/<name>/memory/`）：具名 agent 有自己的記憶目錄，spawn 時其記錄（記憶格式同 `.claw/memory`）會注入該子 agent 的 role prompt——讓專員跨 spawn「記得」過往同類任務的沉澱，而不污染主 context、也不與其他 agent 互見。目前是**讀半邊**（記憶靠手寫填）；**寫半邊**（跑後自動反思→per-agent 提案→治理放行）為後續（見 [docs/multi-tenancy.md](docs/multi-tenancy.md)）。
 
 #### 編排模式（Orchestrator）——model-driven、零框架碼
 

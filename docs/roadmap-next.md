@@ -229,7 +229,14 @@ Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@examp
 
 ---
 
-## 🧭 具名 agent 的持久記憶（短板「專員無記憶」的低成本半解）
+## 🧭 具名 agent 的持久記憶 —— 讀半邊已完成（2026-07-24）
+
+**讀半邊已實作**：`.claw/agents/<name>/memory/` per-agent 記憶，spawn 時注入子 agent role prompt
+（`NewMemoryLoaderAt` / `LoadForInjection` + subagent.go；測試 subagent_memory_test.go）。記憶靠手寫填、
+不與其他 agent 互見。**寫半邊（跑後反思→per-agent 提案→治理放行）仍延後**——淨新增子 agent 反思點
++ per-agent 治理面，等「orchestrator 實跑確認每次從零開始真的痛」再上。詳見 docs/multi-tenancy.md。
+
+<details><summary>原始分析</summary>
 
 完整解是 inter-agent messaging（大，不做）。中間解：每個具名 agent 給自己的
 `.claw/agents/<name>/memory/`，spawn 時載入、產出的記憶**走既有 governance 提案通道**。
@@ -237,6 +244,8 @@ Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@examp
 Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與治理哲學相容，不是另開一套**。
 規模中等（複用 `MemoryLoader`，~150–200 行）。**觸發條件**：orchestrator 實際跑過，
 確認「專員每次從零開始」真的痛。
+
+</details>
 
 ---
 

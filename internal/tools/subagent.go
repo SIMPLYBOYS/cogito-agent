@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
@@ -55,11 +56,12 @@ func effortToMaxTokens(effort string) int {
 var defaultSubagentTools = []string{"read_file", "bash"}
 
 type SubagentTool struct {
-	runner      AgentRunner
-	registry    Registry // 子 agent 可用工具的【超集】；預設取唯讀子集，具名 agent 依其 tools 選用
-	reporter    interface{}
-	skillLoader *ctxpkg.SkillLoader
-	agentLoader *ctxpkg.AgentLoader
+	runner        AgentRunner
+	registry      Registry // 子 agent 可用工具的【超集】；預設取唯讀子集，具名 agent 依其 tools 選用
+	reporter      interface{}
+	skillLoader   *ctxpkg.SkillLoader
+	agentLoader   *ctxpkg.AgentLoader
+	agentsBaseDir string // 含 .claw/agents 的根；用來找 per-agent 記憶 .claw/agents/<name>/memory
 
 	// worktree 隔離（可選）：baseWorkDir 是 session 工作區；regFactory 依給定目錄建同款工具超集。
 	// isolation:worktree 的 agent 會在 baseWorkDir 的 git worktree 裡跑，工具 rooted 在該 worktree。
@@ -74,12 +76,13 @@ type SubagentTool struct {
 // subagentRegistry 是子 agent 可委派工具的超集（探索用 read_file+bash；實作型 agent 另需 write/edit）。
 func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter interface{}, skillsBaseDir string) *SubagentTool {
 	return &SubagentTool{
-		runner:      runner,
-		registry:    subagentRegistry,
-		reporter:    reporter,
-		skillLoader: ctxpkg.NewSkillLoader(skillsBaseDir),
-		agentLoader: ctxpkg.NewAgentLoader(skillsBaseDir),
-		subMgr:      NewSubagentManager(runner),
+		runner:        runner,
+		registry:      subagentRegistry,
+		reporter:      reporter,
+		skillLoader:   ctxpkg.NewSkillLoader(skillsBaseDir),
+		agentLoader:   ctxpkg.NewAgentLoader(skillsBaseDir),
+		agentsBaseDir: skillsBaseDir,
+		subMgr:        NewSubagentManager(runner),
 	}
 }
 
@@ -158,6 +161,15 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		role = d.Name
 		log.Printf("[Subagent] 🎭 使用具名 agent [%s]（工具 %v，model=%q effort=%q isolation=%q）\n",
 			d.Name, d.Tools, d.Model, d.Effort, d.Isolation)
+
+		// per-agent 長期記憶（.claw/agents/<agent_type>/memory）：載入並注入子 agent 的 role prompt，
+		// 讓具名專員跨 spawn「記得」過往同類任務的沉澱。目錄名對齊 def 檔名（input.AgentType），不是 d.Name。
+		// 這是讀半邊；寫半邊（跑後反思→per-agent 提案→治理放行）待後續（見 docs/multi-tenancy.md 🧭）。
+		memDir := filepath.Join(t.agentsBaseDir, ".claw", "agents", input.AgentType, "memory")
+		if mem := ctxpkg.NewMemoryLoaderAt(memDir).LoadForInjection(); mem != "" {
+			def.Prompt += mem
+			log.Printf("[Subagent] 🧠 注入 [%s] 的 per-agent 長期記憶\n", input.AgentType)
+		}
 	}
 
 	// 工具集：具名 agent 宣告了 tools 就用（可含 write/edit），否則預設唯讀探路者工具集（安全底線）。

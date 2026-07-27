@@ -107,3 +107,18 @@ tsnet + `WhoIs`（roadmap #4，未實作）——那時每個租戶的 dashboard
 - **KG（知識圖譜）跟隨記憶 root**：channel 模式下 KG 也 per-conversation（同一個記憶 root）；
   跨對話的多跳關係因此也不互見——與記憶記錄一致。
 - **授權仍 per-行程**：軟租戶內無 per-conversation 白名單。要 per-租戶授權 → 硬租戶（各自 `.env`）。
+
+---
+
+## 具名 agent 的 per-agent 記憶（讀半邊已實作）
+
+與租戶隔離同構的另一軸：每個具名 agent（`.claw/agents/<name>.md`）可有自己的記憶目錄
+`.claw/agents/<name>/memory/`（記錄格式同 `.claw/memory`）。`spawn_subagent(agent_type=<name>)`
+時，該 agent 的記憶記錄會**注入子 agent 的 role prompt**——具名專員跨 spawn「記得」過往同類任務的
+沉澱，且**不污染主 context、不與其他 agent 互見**（scout 的記憶不會出現在 planner 的 context）。
+
+- **已實作（讀）**：載入 + 注入。記憶靠**手寫**填（像技能）。實作 `internal/context`（`NewMemoryLoaderAt`
+  / `LoadForInjection`）＋ `internal/tools/subagent.go`（spawn 注入）。測試 `subagent_memory_test.go`。
+- **未實作（寫）**：子 agent 跑完自動反思 → per-agent 提案記憶 → 治理放行。這是淨新增的子 agent
+  反思點 + per-agent 治理面，規模較大且原 gate 在「orchestrator 實跑確認每次從零開始真的痛」——
+  等該痛確認再上。目前全量注入（per-agent 記憶預期少量；多到脹 context 時改索引＋給子 agent recall）。
