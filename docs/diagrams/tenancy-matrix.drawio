@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="tenancy-matrix">
+    <mxGraphModel dx="1200" dy="820" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="960" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="2" value="cogito-agent · 多租戶隔離矩陣（硬租戶＝一行程一租戶　vs　軟租戶＝一行程內 per-conversation）" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1300" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="3" value="維度" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="470" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="4" value="軟租戶（一行程內 per-conversation）&#xa;同一 bot 服務一個團隊 / 多室" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="70" width="420" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="5" value="硬租戶（一行程一租戶）&#xa;互不信任的租戶各自一個目錄" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="70" width="410" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="10" value="檔案工具（read/write/bash/edit）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="114" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="11" value="✅ 隔離　sess.WorkDir = channels/{id}/" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="114" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="12" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="114" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="20" value="會話狀態（history / model / goal）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="154" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="21" value="✅ 隔離　session platform:id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="154" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="22" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="154" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="30" value="成本 / token 記帳" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="194" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="31" value="✅ 隔離　per-conversation CostTracker（天生 per-tenant 歸因）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="194" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="32" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="194" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="40" value="長期記憶 .claw/memory（recall）＋ KG" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="234" width="470" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="41" value="⚙️ 預設共享，可 opt-in 隔離&#xa;COGITO_MEMORY_SCOPE=channel → per-conversation" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="234" width="420" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="42" value="✅ 隔離（各自 .claw/memory）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="234" width="410" height="44" as="geometry" />
+        </mxCell>
+
+        <mxCell id="50" value="技能 .claw/skills ／ 具名 agent" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="278" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="51" value="❌ 共享　rootDir（bot 的能力/人格＝租戶內全域）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="278" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="52" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="278" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="60" value="政策 / 調參（policy / knobs）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="318" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="61" value="❌ 共享　rootDir" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="318" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="62" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="318" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="70" value="LLM 憑證 / provider（API key）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="358" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="71" value="❌ 共享　一行程一把 key" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="358" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="72" value="✅ 隔離（各自 .env 的 key）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="358" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="80" value="授權名單（ALLOWED / ADMIN）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#cccccc;align=left;spacingLeft=10;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="398" width="470" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="81" value="❌ 共享　行程 env（同一份「誰能使喚我」）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="510" y="398" width="420" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="82" value="✅ 隔離（各自白名單）" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="930" y="398" width="410" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="90" value="一句話：軟租戶隔離「這個對話產生／碰到的東西」（檔案・對話・花費），共享「這個 bot 是誰」（技能人格・憑證・誰能使喚它）。&#xa;→ 互不信任的租戶用【硬租戶】（各自 .env / 行程 / 檔案系統，無共享面）；同一助手服務一個團隊多人用【軟租戶】。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf0f3;strokeColor=#6c8ebf;align=left;spacingLeft=12;verticalAlign=middle;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="458" width="1300" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="91" value="圖例" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="544" width="60" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="92" value="✅ 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="100" y="544" width="100" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="93" value="⚙️ 可 opt-in 隔離" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="210" y="544" width="140" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="94" value="❌ 共享" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="360" y="544" width="100" height="24" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

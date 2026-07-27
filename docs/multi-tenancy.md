@@ -35,6 +35,10 @@
 
 ## 隔離矩陣（軟租戶：一行程內 per-conversation）
 
+![多租戶隔離矩陣：硬租戶 vs 軟租戶，逐維度標示隔離／可 opt-in 隔離／共享](diagrams/tenancy-matrix.svg)
+
+> 原始檔：[`diagrams/tenancy-matrix.drawio`](diagrams/tenancy-matrix.drawio)（draw.io 可編輯）。下表為同內容的文字版。
+
 | 維度 | per-conversation？ | scoped 在 | 依據 |
 |---|---|---|---|
 | 檔案工具（read / write / bash / edit） | ✅ **隔離** | `sess.WorkDir` = `channels/<id>/` | `RegisterCoreTools(r, sess.WorkDir, …)` |

@@ -238,6 +238,10 @@ internal/
 
 ![Prompt caching 三斷點與錨定窗口，含修復前後快取讀型態對照](docs/diagrams/caching-breakpoints.svg)
 
+**多租戶隔離矩陣** — 硬租戶（一行程一租戶）vs 軟租戶（一行程內 per-conversation）逐維度對照：檔案/對話/成本天生隔離、技能/記憶/憑證/授權預設共享（記憶可 opt-in 隔離）。完整論述見 [docs/multi-tenancy.md](docs/multi-tenancy.md)。原始檔：[`tenancy-matrix.drawio`](docs/diagrams/tenancy-matrix.drawio)
+
+![多租戶隔離矩陣：硬租戶 vs 軟租戶逐維度隔離／共享對照](docs/diagrams/tenancy-matrix.svg)
+
 ## Install
 
 從源碼建置：
