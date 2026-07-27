@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/authz"
 )
@@ -49,9 +50,36 @@ func (d *governanceData) fillAuthz(store *authz.Store) {
 	sort.Slice(d.Revoked, func(i, j int) bool { return d.Revoked[i].RevokedAt > d.Revoked[j].RevokedAt })
 }
 
-// operatorID 是面板操作者寫進稽核軌跡的身分。面板無認證（綁 loopback＝操作者即機器主人），
-// 所以只能記到「這是從面板做的」這個粒度——誠實標示，不假裝知道是誰。
+// operatorID 是面板操作者寫進稽核軌跡的【預設】身分。面板無認證（綁 loopback＝操作者即機器主人），
+// 只能記到「這是從面板做的」這個粒度——誠實標示，不假裝知道是誰。
 const operatorID = "dashboard(operator)"
+
+// operatorIDFrom 回傳寫進稽核軌跡的操作者身分：若前面有【可信反向代理】注入 X-Forwarded-User
+// （oauth2-proxy / tailscale serve 之類），就把粒度從 "dashboard(operator)" 升級成具體的人
+// （aaron@example.com）；沒有就退回預設。
+//
+// ⚠️ 這【不是認證】：只綁 loopback、前面沒有代理時，直連者可自行偽造這個標頭——但能直連 loopback 的
+// 本來就是機器主人，偽造只是改自己稽核裡的署名，風險可接受。要讓它可信，前提是「面板唯一入口是會
+// 覆寫此標頭的可信代理」。標頭來自信任邊界，故截長 + 濾掉控制字元，免污染稽核記錄（log/JSON 注入）。
+func operatorIDFrom(r *http.Request) string {
+	u := strings.TrimSpace(r.Header.Get("X-Forwarded-User"))
+	if u == "" {
+		return operatorID
+	}
+	if len(u) > 120 {
+		u = u[:120]
+	}
+	u = strings.Map(func(rn rune) rune {
+		if rn < 0x20 || rn == 0x7f {
+			return -1 // 丟掉換行/控制字元
+		}
+		return rn
+	}, u)
+	if u == "" {
+		return operatorID
+	}
+	return u
+}
 
 func (s *server) authzApprove(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
@@ -63,7 +91,7 @@ func (s *server) authzApprove(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("role") == authz.RoleAdmin {
 		role = authz.RoleAdmin
 	}
-	req, err := s.authzStore().ApprovePair(r.FormValue("code"), role, operatorID)
+	req, err := s.authzStore().ApprovePair(r.FormValue("code"), role, operatorIDFrom(r))
 	if err != nil {
 		s.setFlash("⚠️ " + err.Error())
 	} else {
@@ -99,7 +127,7 @@ func (s *server) authzRevoke(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/governance", http.StatusSeeOther)
 		return
 	}
-	if err := s.authzStore().Revoke(entry, operatorID); err != nil {
+	if err := s.authzStore().Revoke(entry, operatorIDFrom(r)); err != nil {
 		s.setFlash("⚠️ " + err.Error())
 	} else {
 		s.setFlash("🚫 已撤銷 " + entry + "——bot 下次查詢即失效。")

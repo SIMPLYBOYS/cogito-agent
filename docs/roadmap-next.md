@@ -172,13 +172,17 @@ convID 還原出 chatID + threadID）。注意 `sanitizeSegment` 已會把 `:` �
 `WhoIs` 回傳在某些司法管轄區屬個資。
 **待驗證 5 項**見 vault `cogito-agent-Operator-Dashboard-C-Spec` §八。
 
-### 5. 面板讀反向代理注入的身分標頭（tsnet 的輕量替代）
+### 5. ✅ 面板讀反向代理注入的身分標頭 —— 已完成（2026-07-24）
 
-`authzpage.go` 的 `operatorID` 現在是 const `"dashboard(operator)"`，只用在兩處。
-改成讀 `X-Forwarded-User`（約 5 行），稽核就從「從面板做的」升級成「aaron@example.com 做的」。
+`operatorID` const 保留為預設；新增 `operatorIDFrom(r)`：有 `X-Forwarded-User` 就用它（截長 120 +
+濾控制字元防 log/JSON 注入），沒有就退回 `"dashboard(operator)"`。兩處稽核寫入（ApprovePair /
+Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@example.com 做的」——**當且僅當**前面有會
+覆寫此標頭的可信代理；否則零行為改變。測試 `authzpage_test.go`（有/無標頭、清洗、截長）。
 
-**前提**：面板只綁 loopback 且**唯一入口是可信代理**，否則標頭可偽造。
-**與 tsnet 的取捨**：這個輕、但只在有反代時成立；tsnet 重、但信任鏈更硬。
+**這不是認證**（程式碼註解已明載）：純 loopback 直連者可偽造標頭，但那就是機器主人本人，署名自己
+的稽核而已。硬信任鏈仍是 #4 tsnet（`WhoIs` 從 WireGuard 拿身分，無標頭可偽造）——兩者不衝突。
+**部署備註**：現在跑純 loopback，尚無代理，此升級待實際擺一個反代（oauth2-proxy / tailscale serve）
+在前面才顯效。
 
 ---
 
