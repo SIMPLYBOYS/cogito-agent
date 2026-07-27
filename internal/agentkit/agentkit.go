@@ -17,15 +17,17 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
 
-// RegisterCoreTools 註冊標準工具集：檔案讀寫/bash/編輯 rooted 在 workDir；技能與長期記憶 rooted 在
-// skillMemDir（bot 用共享根 rootDir，cli/dashboard 用 workDir 本身）；外加等寬長條圖。
-func RegisterCoreTools(r tools.Registry, workDir, skillMemDir string, executor sandbox.Executor) {
+// RegisterCoreTools 註冊標準工具集：檔案讀寫/bash/編輯 rooted 在 workDir；技能 rooted 在 skillDir；
+// 長期記憶（recall）rooted 在 memoryDir。skillDir/memoryDir 通常同一個（bot 用共享根 rootDir、
+// cli/dashboard 用 workDir 本身）；只有 COGITO_MEMORY_SCOPE=channel 時 bot 把 memoryDir 設成該對話
+// 自己的 WorkDir，使記憶 per-conversation 隔離而技能仍共享（見 docs/multi-tenancy.md）。外加長條圖。
+func RegisterCoreTools(r tools.Registry, workDir, skillDir, memoryDir string, executor sandbox.Executor) {
 	r.Register(tools.NewReadFileTool(workDir))
 	r.Register(tools.NewWriteFileTool(workDir))
 	r.Register(tools.NewBashToolWithExecutor(workDir, executor))
 	r.Register(tools.NewEditFileTool(workDir))
-	r.Register(tools.NewReadSkillTool(skillMemDir))
-	r.Register(tools.NewRecallTool(skillMemDir))
+	r.Register(tools.NewReadSkillTool(skillDir))
+	r.Register(tools.NewRecallTool(memoryDir))
 	r.Register(tools.NewBarChartTool())
 }
 

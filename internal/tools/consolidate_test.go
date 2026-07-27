@@ -29,7 +29,7 @@ func TestConsolidate_NoFlagsNoLLM(t *testing.T) {
 	sess := ctxpkg.NewSession("c1", t.TempDir())
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: "做點事"})
 
-	tool := NewConsolidateTool(nil, t.TempDir(), sess) // provider=nil：旗標全關時不會被呼叫
+	tool := NewConsolidateTool(nil, t.TempDir(), t.TempDir(), sess) // provider=nil：旗標全關時不會被呼叫
 	out, err := tool.Execute(context.Background(), []byte(`{}`))
 	if err != nil {
 		t.Fatal(err)

@@ -120,6 +120,16 @@ type Core struct {
 	authz        *authz.Store      // 授權記錄檔（.claw/authorized-users.json）：env 之上的動態授權；nil＝只用 env
 	userLink     map[string]string // COGITO_USER_LINK：平台 user id → canonical 身分；DM 跨平台連續性用
 
+	memScopeChannel bool // COGITO_MEMORY_SCOPE=channel：記憶提案的放行（apply memory/edges）落在該對話目錄
+}
+
+// memoryDir 回傳「這個對話的記憶 root」：channel scope 時為該對話工作目錄，否則共用 workDir。
+// 用於 apply/reject memory・edges 的放行落點，與 recall 讀路徑同源（見 docs/multi-tenancy.md）。
+func (c *Core) memoryDir(convID string) string {
+	if c.memScopeChannel {
+		return c.channelWorkDir(convID)
+	}
+	return c.workDir
 }
 
 // running：per-WorkDir 執行中任務的取消函式（存在＝忙碌鎖）。同目錄序列化、不同頻道並行；
@@ -156,8 +166,9 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		adminUsers:   admins,
 		// env 是 bootstrap 不是遺留：第一個 admin 必須從檔案外面來，否則沒人有權批准第一個人。
 		// 記錄檔在 env 之上做加法，讓「加人／撤銷」免改 .env、免重啟。
-		authz:    authz.New(filepath.Join(workDir, ".claw"), allowed, admins),
-		userLink: parseUserLink(os.Getenv("COGITO_USER_LINK")),
+		authz:           authz.New(filepath.Join(workDir, ".claw"), allowed, admins),
+		userLink:        parseUserLink(os.Getenv("COGITO_USER_LINK")),
+		memScopeChannel: os.Getenv("COGITO_MEMORY_SCOPE") == "channel",
 	}
 }
 
@@ -814,7 +825,7 @@ func (c *Core) tryPlanCommand(convID, text string) bool {
 func (c *Core) tryMemoryCommand(convID, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "apply memory", "approve memory":
-		applied, err := evolve.ApplyProposedMemory(c.workDir)
+		applied, err := evolve.ApplyProposedMemory(c.memoryDir(convID))
 		switch {
 		case err != nil:
 			SendMessage(convID, fmt.Sprintf("❌ 併入失敗: %v", err))
@@ -825,7 +836,7 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 		}
 		return true
 	case "reject memory", "discard memory":
-		if had, _ := evolve.DiscardProposedMemory(c.workDir); had {
+		if had, _ := evolve.DiscardProposedMemory(c.memoryDir(convID)); had {
 			SendMessage(convID, "🗑️ 已丟棄提案記憶（未放行）。")
 		} else {
 			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
@@ -839,7 +850,7 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 func (c *Core) tryEdgesCommand(convID, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "apply edges", "approve edges":
-		applied, rejected, err := ctxpkg.ApplyProposedEdges(c.workDir)
+		applied, rejected, err := ctxpkg.ApplyProposedEdges(c.memoryDir(convID))
 		switch {
 		case err != nil:
 			SendMessage(convID, fmt.Sprintf("❌ 套用關係失敗: %v", err))
@@ -850,7 +861,7 @@ func (c *Core) tryEdgesCommand(convID, text string) bool {
 		}
 		return true
 	case "reject edges", "discard edges":
-		if had, _ := ctxpkg.DiscardProposedEdges(c.workDir); had {
+		if had, _ := ctxpkg.DiscardProposedEdges(c.memoryDir(convID)); had {
 			SendMessage(convID, "🗑️ 已丟棄提案關係（未放行）。")
 		} else {
 			SendMessage(convID, "ℹ️ 目前沒有提案關係。")

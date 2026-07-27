@@ -20,13 +20,16 @@ import (
 //
 // 跑哪幾種反思，沿用 post-task hook 的同一組 opt-in 旗標（COGITO_SKILL_SYNTH / _MEMORY_SYNTH / _KG_SYNTH）。
 type ConsolidateTool struct {
-	provider provider.LLMProvider
-	root     string
-	session  *ctxpkg.Session
+	provider  provider.LLMProvider
+	skillRoot string // 技能提案 root（共享，rootDir）
+	memRoot   string // 記憶／KG 提案 root（隨 COGITO_MEMORY_SCOPE：預設＝skillRoot，channel 時＝該對話 WorkDir）
+	session   *ctxpkg.Session
 }
 
-func NewConsolidateTool(p provider.LLMProvider, root string, session *ctxpkg.Session) *ConsolidateTool {
-	return &ConsolidateTool{provider: p, root: root, session: session}
+// NewConsolidateTool：skillRoot 供技能提案；memRoot 供記憶/KG 提案。多數場景兩者相同；只有
+// COGITO_MEMORY_SCOPE=channel 時 memRoot 為該對話目錄，使記憶 per-conversation 而技能仍共享。
+func NewConsolidateTool(p provider.LLMProvider, skillRoot, memRoot string, session *ctxpkg.Session) *ConsolidateTool {
+	return &ConsolidateTool{provider: p, skillRoot: skillRoot, memRoot: memRoot, session: session}
 }
 
 func (t *ConsolidateTool) Name() string { return "consolidate" }
@@ -64,18 +67,18 @@ func (t *ConsolidateTool) Execute(ctx context.Context, args json.RawMessage) (st
 
 	var parts []string
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
-		dir := filepath.Join(t.root, ".claw", evolve.ProposedSkillsDirName)
+		dir := filepath.Join(t.skillRoot, ".claw", evolve.ProposedSkillsDirName)
 		if path, err := evolve.NewSkillSynthesizer(t.provider, dir).Reflect(ctx, taskPrompt, history); err == nil && path != "" {
 			parts = append(parts, "1 個提案技能")
 		}
 	}
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
-		if added, err := evolve.NewMemorySynthesizer(t.provider, t.root).Reflect(ctx, taskPrompt, history); err == nil && len(added) > 0 {
+		if added, err := evolve.NewMemorySynthesizer(t.provider, t.memRoot).Reflect(ctx, taskPrompt, history); err == nil && len(added) > 0 {
 			parts = append(parts, fmt.Sprintf("%d 條提案記憶", len(added)))
 		}
 	}
 	if os.Getenv("COGITO_KG_SYNTH") == "1" {
-		if n, err := evolve.NewRelationExtractor(t.provider, t.root).Extract(ctx); err == nil && n > 0 {
+		if n, err := evolve.NewRelationExtractor(t.provider, t.memRoot).Extract(ctx); err == nil && n > 0 {
 			parts = append(parts, fmt.Sprintf("%d 條提案關係", n))
 		}
 	}

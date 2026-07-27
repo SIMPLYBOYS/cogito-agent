@@ -665,6 +665,10 @@ isolation: worktree             # 可選；在 git worktree 隔離執行，完�
 
 ### 跑多個員工（多實例，零程式碼）
 
+> **多租戶架構**：這是「硬租戶」——一行程一租戶、完整隔離。另有「軟租戶」（一行程內 per-conversation，
+> 檔案/對話/成本天生隔離，記憶可 `COGITO_MEMORY_SCOPE=channel` 開隔離）。兩層的完整隔離矩陣與信任邊界見
+> **[docs/multi-tenancy.md](docs/multi-tenancy.md)**。
+
 導言說 cogito 是「一名數位員工」——要一個團隊，就**每個員工一個目錄**。`claw` 從當前目錄載 `.env`、工作區固定在 `<當前目錄>/workspace`，所以一個目錄就是一個完整隔離的員工：自己的 IM 身分（bot token）、自己的人格與技能庫（`workspace/.claw/`）、自己的記憶與會話（`COGITO_SESSION_DIR`）、自己的白名單與模型設定。
 
 ```bash

@@ -18,7 +18,7 @@ func toolNames(r tools.Registry) map[string]bool {
 
 func TestRegisterCoreTools(t *testing.T) {
 	r := tools.NewRegistry()
-	RegisterCoreTools(r, t.TempDir(), t.TempDir(), sandbox.FromEnv())
+	RegisterCoreTools(r, t.TempDir(), t.TempDir(), t.TempDir(), sandbox.FromEnv())
 	names := toolNames(r)
 	for _, want := range []string{"read_file", "write_file", "bash", "edit_file", "read_skill", "recall", "bar_chart"} {
 		if !names[want] {

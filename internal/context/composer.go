@@ -15,12 +15,17 @@ type PromptComposer struct {
 	memoryLoader *MemoryLoader
 }
 
-func NewPromptComposer(workDir string, planMode bool) *PromptComposer {
+// NewPromptComposer：workDir 供技能與 AGENTS.md；memoryDir 供長期記憶索引（空＝沿用 workDir）。
+// 拆開兩者，才能「記憶 per-channel、技能仍共享」（COGITO_MEMORY_SCOPE=channel，見 docs/multi-tenancy.md）。
+func NewPromptComposer(workDir, memoryDir string, planMode bool) *PromptComposer {
+	if memoryDir == "" {
+		memoryDir = workDir
+	}
 	return &PromptComposer{
 		workDir:      workDir,
 		planMode:     planMode,
 		skillLoader:  NewSkillLoader(workDir),
-		memoryLoader: NewMemoryLoader(workDir),
+		memoryLoader: NewMemoryLoader(memoryDir),
 	}
 }
 

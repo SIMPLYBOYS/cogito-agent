@@ -97,9 +97,9 @@ func main() {
 
 	registry := tools.NewRegistry()
 	// 核心工具集（skillMemDir=workDir：CLI 工作區即技能/記憶來源）。
-	agentkit.RegisterCoreTools(registry, workDir, workDir, executor)
+	agentkit.RegisterCoreTools(registry, workDir, workDir, workDir, executor) // 單一目錄：技能=記憶=workDir
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
-		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, sess)) // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
+		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, workDir, sess)) // 單租戶：技能=記憶=workDir。agent 可主動沉澱（產物仍 gated）
 	}
 
 	// 背景任務工具：長命命令（dev server / 長建置）不受 bash 30s 逾時限制。退出時統一收掉。

@@ -113,13 +113,27 @@ func main() {
 		log.Printf("[Timing] 工具 %s 物理執行耗時 %dms\n", toolName, durationMs)
 	})
 
+	// COGITO_MEMORY_SCOPE=channel：長期記憶 per-conversation 隔離（技能仍共享）。預設 global＝現況。
+	// 見 docs/multi-tenancy.md。memoryRootFor 集中一處決定「這個對話的記憶 root」。
+	memScopeChannel := os.Getenv("COGITO_MEMORY_SCOPE") == "channel"
+	memoryRootFor := func(sess *ctxpkg.Session) string {
+		if memScopeChannel {
+			return sess.WorkDir // channels/<id>/.claw/memory
+		}
+		return rootDir // 全 bot 共用
+	}
+	if memScopeChannel {
+		log.Printf("[Session] 記憶隔離＝per-conversation（COGITO_MEMORY_SCOPE=channel）；技能仍共享")
+	}
+
 	factory := func(sess *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine {
 		registry := tools.NewRegistry()
-		// 核心工具集：檔案讀寫/bash/編輯 rooted 在 sess.WorkDir（per-channel 磁碟隔離）；技能與長期
-		// 記憶 rooted 在 rootDir（與索引同源、全 bot 共用資產）。
-		agentkit.RegisterCoreTools(registry, sess.WorkDir, rootDir, executor)
+		memDir := memoryRootFor(sess)
+		// 核心工具集：檔案讀寫/bash/編輯 rooted 在 sess.WorkDir（per-channel 磁碟隔離）；技能 rooted 在
+		// rootDir（全 bot 共用）；長期記憶（recall）rooted 在 memDir（預設 rootDir，channel scope 時 per-對話）。
+		agentkit.RegisterCoreTools(registry, sess.WorkDir, rootDir, memDir, executor)
 		if selfEvolveEnabled() { // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
-			registry.Register(tools.NewConsolidateTool(llmProvider, rootDir, sess))
+			registry.Register(tools.NewConsolidateTool(llmProvider, rootDir, memDir, sess)) // 技能提案共享、記憶提案隨 scope
 		}
 		agentkit.RegisterMCPTools(registry, mcpGateway) // 外部 MCP 工具經 gateway 漸進式暴露
 		// 背景任務工具（bash_background/task_output/task_kill/task_list）：每會話一個 TaskManager
@@ -166,6 +180,7 @@ func main() {
 		// 技能（.claw/skills）與 AGENTS.md 從【共享根目錄】讀，與 per-channel 工作產物分離：
 		// 工具 rooted 在 sess.WorkDir（各頻道子目錄），但配置/技能是全 bot 共用資產。
 		eng.AssetsDir = rootDir
+		eng.MemoryDir = memDir // 記憶索引 root：預設＝AssetsDir(rootDir)，channel scope 時＝該對話 WorkDir
 
 		// 子 agent工具池（超集）：read_file + bash 供探索；write_file + edit_file 供【實作型】具名
 		// agent（須在 .claw/agents/<name>.md 的 tools 明確宣告才拿得到；預設探路者只取唯讀子集，見
@@ -222,7 +237,13 @@ func main() {
 				}
 			}
 			if memSynth != nil {
-				if added, err := memSynth.Reflect(ctx, taskPrompt, history); err != nil {
+				// 記憶提案寫進【該對話的記憶 root】（channel scope 時 per-conversation，否則共享 rootDir）——
+				// 與 recall 讀路徑同源，跑後反思的產物才落在正確的租戶目錄。
+				ms := memSynth
+				if memScopeChannel {
+					ms = evolve.NewMemorySynthesizer(llmProvider, memoryRootFor(session))
+				}
+				if added, err := ms.Reflect(ctx, taskPrompt, history); err != nil {
 					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
@@ -230,7 +251,11 @@ func main() {
 				}
 			}
 			if kgExtract != nil {
-				if n, err := kgExtract.Extract(ctx); err != nil {
+				ke := kgExtract
+				if memScopeChannel {
+					ke = evolve.NewRelationExtractor(llmProvider, memoryRootFor(session))
+				}
+				if n, err := ke.Extract(ctx); err != nil {
 					log.Printf("[evolve] KG 關係抽取失敗（不影響任務）: %v", err)
 				} else if n > 0 {
 					log.Printf("[evolve] 🔗 新增 %d 條提案關係", n)
@@ -241,7 +266,11 @@ func main() {
 		// live Reflexion：失敗的真實互動 → 萃取教訓進提案記憶（與成功路徑互補；同樣須人工併入）。
 		if memSynth != nil {
 			postFailure = func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string) {
-				if added, err := memSynth.ReflectFailure(ctx, taskPrompt, session.GetWorkingMemory(0), failureMsg); err != nil {
+				ms := memSynth
+				if memScopeChannel {
+					ms = evolve.NewMemorySynthesizer(llmProvider, memoryRootFor(session))
+				}
+				if added, err := ms.ReflectFailure(ctx, taskPrompt, session.GetWorkingMemory(0), failureMsg); err != nil {
 					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 從失敗萃取 %d 條教訓", len(added))

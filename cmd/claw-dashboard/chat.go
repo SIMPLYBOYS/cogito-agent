@@ -60,7 +60,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 	executor := sandbox.FromEnv()
 
 	registry := tools.NewRegistry()
-	agentkit.RegisterCoreTools(registry, workDir, workDir, executor)
+	agentkit.RegisterCoreTools(registry, workDir, workDir, workDir, executor) // operator chat：單租戶，技能=記憶=workDir
 
 	taskMgr := tools.NewTaskManager(executor, workDir)
 	for _, tt := range tools.NewTaskTools(taskMgr) {

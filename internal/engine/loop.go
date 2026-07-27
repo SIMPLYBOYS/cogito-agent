@@ -49,6 +49,10 @@ type AgentEngine struct {
 	// 用於把「共享配置/技能」與「per-channel 工作產物目錄」解耦：Slack 多頻道時工具 rooted
 	// 在各頻道子目錄，但技能與 AGENTS.md 從根 workspace 共享讀取。
 	AssetsDir string
+	// MemoryDir 是長期記憶索引（system prompt 的 recall 索引）的 root。空＝沿用 AssetsDir（技能與記憶
+	// 同源，現況）。COGITO_MEMORY_SCOPE=channel 時由呼叫端設為【該對話自己的 WorkDir】，使記憶
+	// per-conversation 隔離而技能仍共享。見 docs/multi-tenancy.md。
+	MemoryDir string
 	// EnableSummary 開啟「滾動摘要 + history 有界化」：長對話中把超出逐字尾的舊訊息 LLM 摺進
 	// session.summary 並真正逐出，兼顧跨逐出連貫性與記憶體收斂。預設關（bench/一次性任務要確定性）；
 	// 對話式入口（Slack/Telegram）由 cmd 開啟。見 summarizer.go。
@@ -94,7 +98,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	if assetsDir == "" {
 		assetsDir = session.WorkDir
 	}
-	composer := ctxpkg.NewPromptComposer(assetsDir, e.PlanMode)
+	composer := ctxpkg.NewPromptComposer(assetsDir, e.MemoryDir, e.PlanMode) // MemoryDir 空＝沿用 assetsDir
 	systemMsg := composer.Build()
 
 	// per-task 成本熔斷的基準：快照本次 Run 進入時 session 的累計花費。成本檢查只比較
