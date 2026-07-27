@@ -172,6 +172,11 @@ convID 還原出 chatID + threadID）。注意 `sanitizeSegment` 已會把 `:` �
 `WhoIs` 回傳在某些司法管轄區屬個資。
 **待驗證 5 項**見 vault `cogito-agent-Operator-Dashboard-C-Spec` §八。
 
+**📋 分 Phase 的 Action Plan**（真要動時照著走）：[docs/tsnet-plan.md](tsnet-plan.md)
+——Phase 0 spike 去風險 → Phase 1 依賴隔離決策（傾向獨立 nested module 保住精簡 go.sum）→
+listener+WhoIs middleware（與 #5 匯流：稽核身分改用 WhoIs）→ 真 tailnet 兩裝置驗證。
+**觸發條件**：面板要給本機以外的人用／多實例遠端聚合／上雲——在那之前 loopback + SSH tunnel 已足夠。
+
 ### 5. ✅ 面板讀反向代理注入的身分標頭 —— 已完成（2026-07-24）
 
 `operatorID` const 保留為預設；新增 `operatorIDFrom(r)`：有 `X-Forwarded-User` 就用它（截長 120 +
