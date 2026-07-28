@@ -90,3 +90,8 @@ skills-lock.json
 
 # 個人面試小抄（本機參考，不對外公開）
 /docs/interview/
+
+# 根目錄 .claw 是指向 workspace/.claw 的 symlink（-dir . 跑 claw-cli 時找具名 agent 用）
+/.claw
+# -dir . 跑 claw-cli 時的子 agent replay 落地（供 dashboard run-tree 用）
+/subagents/
