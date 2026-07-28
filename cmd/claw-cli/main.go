@@ -40,6 +40,8 @@ func main() {
 	verifyPtr := flag.String("verify", "", "goal 迴圈：驗證 bash 指令（退出碼 0 = 目標達成）。設了即跑到通過或用盡次數")
 	judgePtr := flag.String("verify-judge", "", "goal 迴圈：用 LLM 依此【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）。與 -verify 二擇一")
 	attemptsPtr := flag.Int("max-attempts", 5, "goal 迴圈最大嘗試次數")
+	officePtr := flag.String("office", "", "像素辦公室橋 URL（如 http://localhost:8123）——執行事件投影到 Unity 辦公室")
+	officeAgentPtr := flag.String("office-agent", "p17", "辦公室 NPC 的 persona id（配合 -office）")
 	flag.Parse()
 
 	cmdutil.PrintBanner() // 啟動 logo（非終端自動不印）
@@ -113,7 +115,13 @@ func main() {
 	// 與 bot 對齊：對話式入口預設開滾動摘要（先前漏接使 CLI 一直走滑窗）。
 	// 這也是 caching 斷點③的前提（錨定式窗口，見 engine loop）。
 	eng.EnableSummary = os.Getenv("COGITO_SUMMARY") != "off"
-	reporter := engine.NewTerminalReporter()
+	var reporter engine.Reporter = engine.NewTerminalReporter()
+	// -office：事件同時投影到像素辦公室（unity_demo 橋）。Begin/End 標記任務起訖，供橋掛起/釋放 NPC。
+	var office *engine.OfficeReporter
+	if *officePtr != "" {
+		office = engine.NewOfficeReporter(*officePtr, *officeAgentPtr)
+		reporter = engine.MultiReporter{reporter, office}
+	}
 
 	// spawn_subagent（含 worktree 隔離）：CLI 也能委派具名子 agent（.claw/agents/*.md）。子 agent
 	// 工具超集依目錄重建，isolation:worktree 的 agent 在 git worktree 隔離跑、完事 apply 回 workDir。
@@ -127,11 +135,18 @@ func main() {
 	fmt.Printf("\n🎯 收到任務: %s\n\n", prompt)
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
+	if office != nil {
+		office.Begin(prompt)
+	}
 	var runErr error
 	if *verifyPtr != "" || *judgePtr != "" {
 		runErr = runGoalLoop(eng, sess, reporter, *verifyPtr, *judgePtr, workDir, *attemptsPtr)
 	} else {
 		runErr = eng.Run(context.Background(), sess, reporter)
+	}
+	if office != nil {
+		office.End(runErr)
+		office.Close() // 排空投影事件，退出前保 done 送達
 	}
 
 	// Tier 4 技能自生成（opt-in）：任務【成功】後反思軌跡，把可複用流程寫成「提案技能」到暫存區。
