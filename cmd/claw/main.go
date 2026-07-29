@@ -204,6 +204,9 @@ func main() {
 
 	bot = slackbot.NewSlackBot(factory, rootDir)
 
+	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。
+	startOfficeHTTP(factory, rootDir)
+
 	// Tier 4 自我進化（opt-in）：任務成功後反思軌跡。安全鐵律一致——產物只進【暫存區】、不自動生效，
 	// 須人工 review（技能用 skillgate 晉升；提案記憶 apply 後放行為 .claw/memory/ 記錄才生效）。
 	var skillSynth *evolve.SkillSynthesizer
