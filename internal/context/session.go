@@ -157,21 +157,21 @@ func (s *Session) GetWorkingMemory(limit int) []schema.Message {
 	defer s.mu.RUnlock()
 
 	total := len(s.history)
-	if total <= limit || limit <= 0 {
-		res := make([]schema.Message, total)
+	var res []schema.Message
+	if total <= limit || limit <= 0 { // limit<=0＝全量（錨定式窗口，EnableSummary 開時）
+		res = make([]schema.Message, total)
 		copy(res, s.history)
-		return sanitizeDanglingToolUse(res) // 短歷史也可能懸空——別漏了這條路徑
+	} else {
+		res = make([]schema.Message, limit)
+		copy(res, s.history[total-limit:])
 	}
 
-	res := make([]schema.Message, limit)
-	copy(res, s.history[total-limit:])
-
-	for len(res) > 0 {
-		if res[0].Role == schema.RoleUser && res[0].ToolCallID != "" {
-			res = res[1:]
-		} else {
-			break
-		}
+	// 從頭剝掉孤兒 tool_result，直到首條是合法 turn 起點。孤兒的來源有二：滑窗把對應的
+	// tool_use 截在窗外；或【摘要逐出】把前綴切掉後，新的 history 頭部正好是 tool_result。
+	// 【必須對全量分支也做】——錨定式窗口用 limit<=0 走全量，逐出後的頭部同樣可能是孤兒
+	// （Anthropic：每個 tool_result 前一則必須有對應 tool_use，否則 400）。
+	for len(res) > 0 && res[0].Role == schema.RoleUser && res[0].ToolCallID != "" {
+		res = res[1:]
 	}
 
 	return sanitizeDanglingToolUse(res)

@@ -139,3 +139,28 @@ func TestGetWorkingMemory_KeepsPairedToolUse(t *testing.T) {
 	}
 	t.Fatal("配對完整的 tool_use 被誤刪了")
 }
+
+// 回歸：全量分支（limit<=0，錨定式窗口）也必須剝除【開頭】的孤兒 tool_result——
+// 摘要逐出把前綴切掉後，history 頭部可能就是 tool_result（前面沒有對應 tool_use）。
+// 錨定窗口把 GetWorkingMemory(20) 改成 GetWorkingMemory(0) 後，這條路徑漏了剝除 → 送出即 400。
+func TestGetWorkingMemory_StripsLeadingOrphanToolResult_FullHistory(t *testing.T) {
+	s := NewSession("orphan-head", t.TempDir())
+	// 模擬摘要逐出後的殘餘：history 頭部就是一個 tool_result（無前導 tool_use）
+	s.Append(
+		schema.Message{Role: schema.RoleUser, ToolCallID: "gone", Content: "工具結果，但對應的 tool_use 已被逐出"},
+		schema.Message{Role: schema.RoleAssistant, Content: "續下一步"},
+		schema.Message{Role: schema.RoleUser, Content: "再來"},
+	)
+
+	got := s.GetWorkingMemory(0) // 0＝全量（錨定式窗口路徑）
+	if len(got) == 0 {
+		t.Fatal("不該全被剝空")
+	}
+	if got[0].Role == schema.RoleUser && got[0].ToolCallID != "" {
+		t.Fatalf("全量分支開頭的孤兒 tool_result 應被剝除（否則 messages.0 送出即 400），得到 %+v", got[0])
+	}
+	// 首條之後的內容保留
+	if got[0].Content != "續下一步" {
+		t.Errorf("剝掉孤兒後首條應為『續下一步』，得到 %q", got[0].Content)
+	}
+}
