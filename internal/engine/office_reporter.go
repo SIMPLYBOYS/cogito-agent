@@ -89,11 +89,12 @@ func (r *OfficeReporter) OnToolResult(_ context.Context, name, result string, is
 	if isErr {
 		kind = "error"
 	}
-	r.push(kind, name, schema.TruncRunes(result, 160, "…"))
+	r.push(kind, name, schema.TruncRunes(result, 400, "…"))
 }
 func (r *OfficeReporter) OnMessage(_ context.Context, content string) {
 	if content != "" {
-		r.push("msg", schema.TruncRunes(content, 200, "…"), "")
+		// 全文供橋端「點 NPC 看報告」面板用，上限放寬；泡泡顯示由橋端自行截短。
+		r.push("msg", schema.TruncRunes(content, 2000, "…"), "")
 	}
 }
 
