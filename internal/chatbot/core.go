@@ -362,8 +362,16 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	defer session.SetRunning(false) // 正常結束（成功/終局失敗）都清掉——只有硬砍才會留 true
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
-	reporter := &reporter{convID: convID}
-	eng := c.factory(session, reporter)
+	var rep engine.Reporter = &reporter{convID: convID}
+	// COGITO_OFFICE_URL 設定時，引擎事件同步投影到像素辦公室（unity_demo 橋）。convID 直接當
+	// 事件的 agent 身分——橋端把未知 id 動態指派給閒置 NPC（黏性映射，同頻道固定同員工）。
+	var taskErr error // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
+	if office := newOfficeReporter(convID); office != nil {
+		office.Begin(prompt)
+		defer func() { office.End(taskErr); office.Close() }()
+		rep = engine.MultiReporter{rep, office}
+	}
+	eng := c.factory(session, rep)
 
 	startCost := session.CostUSD() // 快照本次任務進入時的累計花費，收尾時報「本次」增量（session 是跨任務累加的）
 	goalContinues := 0             // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
@@ -371,7 +379,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
 	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。
 	for attempt := 0; ; {
-		err := eng.Run(ctx, session, reporter)
+		err := eng.Run(ctx, session, rep)
 		if err == nil {
 			session.ClearResume() // 成功 → 清跨重啟續跑計數（running 由上面的 defer 清）
 
@@ -412,6 +420,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		// 使用者 /stop 取消：乾淨收尾（不當失敗、不觸發 postFailure、不自動續跑）。
 		if errors.Is(err, context.Canceled) {
 			session.ClearResume()
+			taskErr = err
 			SendMessage(convID, fmt.Sprintf("🛑 已中止本次任務（本次花費 $%.4f）。", session.CostUSD()-startCost))
 			return
 		}
@@ -423,12 +432,22 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 			session.Append(schema.Message{Role: schema.RoleUser, Content: resumeNudge})
 			continue
 		}
+		taskErr = err
 		SendMessage(convID, fmt.Sprintf("⚠️ 任務未能完成（本次花費 $%.4f）：%v", session.CostUSD()-startCost, err))
 		if c.postFailure != nil {
 			c.postFailure(context.Background(), session, prompt, err.Error())
 		}
 		return
 	}
+}
+
+// newOfficeReporter 讀 COGITO_OFFICE_URL（如 http://localhost:8123）；未設回 nil＝不投影。
+func newOfficeReporter(convID string) *engine.OfficeReporter {
+	url := os.Getenv("COGITO_OFFICE_URL")
+	if url == "" {
+		return nil
+	}
+	return engine.NewOfficeReporter(url, convID)
 }
 
 // isRecoverableErr 判斷任務中止是否屬「暫時性/可恢復」（網路類），值得等恢復後自動續跑。
