@@ -41,10 +41,21 @@ func NewOfficeReporter(url, agent string) *OfficeReporter {
 	return r
 }
 
-// Close 排空緩衝後返回——程序退出前呼叫，確保 done 事件送達（橋不在線時連線秒拒，不會卡）。
+// closeDrainBudget 是 Close 等待緩衝排空的【總】預算。橋健康時排空是毫秒級、橋不在線時連線秒拒，
+// 兩者都不會用到它；真正的風險是【半死的橋】（接受連線但不回應）——每筆事件吃滿 client timeout，
+// 64 筆緩衝能讓 Close 卡上兩分鐘。而 Close 跑在 handleAgentRun 的 defer、在釋放頻道鎖【之前】，
+// 於是使用者看到「✅ 任務完成」後，兩分鐘內發不了下一則（被回「上一個任務仍在進行」）。
+// 狀態投影不值這個代價——這正是本檔開頭「絕不能反壓 agent 主迴圈」該涵蓋的最後一哩。
+const closeDrainBudget = 2 * time.Second
+
+// Close 排空緩衝後返回，確保 done 事件送達；逾時即放生 sender goroutine——channel 已關，它自己
+// 排完剩餘事件就結束（不洩漏），只是那些事件晚一點（或送不到）。掉幀無害，卡住有害。
 func (r *OfficeReporter) Close() {
 	close(r.ch)
-	<-r.done
+	select {
+	case <-r.done:
+	case <-time.After(closeDrainBudget):
+	}
 }
 
 func (r *OfficeReporter) send(endpoint string) {

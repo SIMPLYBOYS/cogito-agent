@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // 合約測試：事件經 HTTP 送達橋端，kind/label 與 unity_demo 的投影表（backend/main.py）對齊。
@@ -60,4 +61,27 @@ func TestOfficeReporterBridgeDown(t *testing.T) {
 	r.Begin("x", "")
 	r.End(nil)
 	r.Close() // 卡住即測試逾時失敗
+}
+
+// 半死的橋（接受連線但不回應）：Close 必須在預算內返回，不能無上限等排空。
+// 它跑在 handleAgentRun 的 defer、在釋放頻道鎖【之前】——卡住等於「顯示任務完成，但下一則被擋」。
+// 修復前實測：10 筆緩衝事件卡 20 秒（每筆吃滿 2s client timeout），64 筆滿載可達 ~128 秒。
+func TestOfficeReporterCloseBoundedOnSlowBridge(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-block // 收下請求卻不回應，直到測試收尾
+	}))
+	defer srv.Close()
+	defer close(block) // LIFO：先解封 handler，srv.Close() 才不會等在途請求
+
+	r := NewOfficeReporter(srv.URL, "p01")
+	for i := 0; i < 20; i++ {
+		r.OnToolCall(context.Background(), "bash", "ls")
+	}
+
+	start := time.Now()
+	r.Close()
+	if elapsed := time.Since(start); elapsed > closeDrainBudget+2*time.Second {
+		t.Errorf("Close 應在 ~%v 內放生 sender 返回，實際卡了 %v", closeDrainBudget, elapsed)
+	}
 }
