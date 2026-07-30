@@ -401,6 +401,9 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 					done, reason, jerr := eng.JudgeGoal(ctx, session, g)
 					switch {
 					case jerr != nil:
+						// 賦值 taskErr：辦公室的收工泡讀它。使用者在這裡收到的是 ⚠️（驗收沒跑成、也不觸發
+						// 反思），看板不該同時亮綠燈「ok」——兩個介面對同一次任務講不同的話最難查。
+						taskErr = fmt.Errorf("目標驗收出錯: %w", jerr)
 						SendMessage(convID, fmt.Sprintf("⚠️ 目標驗收出錯（%v），視為完成（本次花費 $%.4f）。", jerr, session.CostUSD()-startCost))
 						return
 					case done:
@@ -415,6 +418,8 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 						session.Append(schema.Message{Role: schema.RoleUser, Content: "目標尚未達成。驗收評語：" + reason + "\n請據此繼續，直到達成目標。"})
 						continue
 					default:
+						// 同上：目標【未達成】就收手，是警告不是成功，看板別亮綠燈。
+						taskErr = fmt.Errorf("已達自動續跑上限（%d 次），目標仍未達成: %s", maxGoalContinue, reason)
 						SendMessage(convID, fmt.Sprintf("⚠️ 已達自動續跑上限（%d 次），目標仍未達成：%s（本次花費 $%.4f）。可補充指令或 `goal clear`。", maxGoalContinue, reason, session.CostUSD()-startCost))
 						return
 					}

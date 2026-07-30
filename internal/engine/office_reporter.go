@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -31,12 +32,23 @@ type OfficeReporter struct {
 	agent string
 	ch    chan officeEvent
 	done  chan struct{}
+	// quit 是收工訊號。【刻意不關 ch】——關了的話，任何 Close 之後才到的事件都會讓 push panic
+	// （送進已關的 channel 必 panic，select/default 擋不住），而 reporter 是交給引擎與子 agent 持有的，
+	// 生命週期靠約定維持。一個「掉幀無害」的狀態投影絕不該有能力弄垮 agent，故改用 quit 訊號收工：
+	// ch 永不關 → push 永遠安全，最壞只是事件被丟。
+	quit      chan struct{}
+	closeOnce sync.Once // Close 冪等（重複呼叫不 panic）
 }
 
 // NewOfficeReporter 建投影回報器。url 為橋的根位址（如 http://localhost:8123），
 // agent 為對應 Unity NPC 的 persona id（如 p17）。
 func NewOfficeReporter(url, agent string) *OfficeReporter {
-	r := &OfficeReporter{agent: agent, ch: make(chan officeEvent, 64), done: make(chan struct{})}
+	r := &OfficeReporter{
+		agent: agent,
+		ch:    make(chan officeEvent, 64),
+		done:  make(chan struct{}),
+		quit:  make(chan struct{}),
+	}
 	go r.send(strings.TrimRight(url, "/") + "/office/event")
 	return r
 }
@@ -48,10 +60,10 @@ func NewOfficeReporter(url, agent string) *OfficeReporter {
 // 狀態投影不值這個代價——這正是本檔開頭「絕不能反壓 agent 主迴圈」該涵蓋的最後一哩。
 const closeDrainBudget = 2 * time.Second
 
-// Close 排空緩衝後返回，確保 done 事件送達；逾時即放生 sender goroutine——channel 已關，它自己
-// 排完剩餘事件就結束（不洩漏），只是那些事件晚一點（或送不到）。掉幀無害，卡住有害。
+// Close 送出收工訊號、等緩衝排空（有預算）後返回。冪等；逾時即放生 sender goroutine——它排完
+// 剩餘事件自行結束（不洩漏），只是那些事件晚一點或送不到。掉幀無害，卡住有害。
 func (r *OfficeReporter) Close() {
-	close(r.ch)
+	r.closeOnce.Do(func() { close(r.quit) })
 	select {
 	case <-r.done:
 	case <-time.After(closeDrainBudget):
@@ -61,16 +73,34 @@ func (r *OfficeReporter) Close() {
 func (r *OfficeReporter) send(endpoint string) {
 	defer close(r.done)
 	client := &http.Client{Timeout: 2 * time.Second}
-	for ev := range r.ch {
+	post := func(ev officeEvent) {
 		b, _ := json.Marshal(ev)
 		resp, err := client.Post(endpoint, "application/json", bytes.NewReader(b))
 		if err != nil {
-			continue // 橋不在線：靜默丟
+			return // 橋不在線：靜默丟
 		}
 		resp.Body.Close()
 	}
+	for {
+		select {
+		case ev := <-r.ch:
+			post(ev)
+		case <-r.quit:
+			// 收工：把已緩衝的排完再走（Close 那頭有總預算，卡住也不會拖著呼叫端）。
+			// 排空當下若又有新事件進來，下一輪 default 就結束——收工後的事件本來就是可丟的。
+			for {
+				select {
+				case ev := <-r.ch:
+					post(ev)
+				default:
+					return
+				}
+			}
+		}
+	}
 }
 
+// push 投遞事件：緩衝滿或已收工都直接丟棄，永不阻塞、永不 panic（ch 不會被關，見 quit 的說明）。
 func (r *OfficeReporter) push(kind, label, detail string) {
 	select {
 	case r.ch <- officeEvent{Agent: r.agent, Kind: kind, Label: label, Detail: detail}:

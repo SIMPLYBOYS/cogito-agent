@@ -85,3 +85,54 @@ func TestOfficeReporterCloseBoundedOnSlowBridge(t *testing.T) {
 		t.Errorf("Close 應在 ~%v 內放生 sender 返回，實際卡了 %v", closeDrainBudget, elapsed)
 	}
 }
+
+// 生命週期安全：reporter 交給引擎與子 agent 持有，「Close 之後不會再有事件」只是約定。
+// 一個「掉幀無害」的狀態投影絕不該有能力弄垮 agent——故 Close 後 push、以及重複 Close，
+// 都必須是 no-op 而非 panic（先前 Close 是 close(ch)，兩者都會 panic）。
+func TestOfficeReporterCloseIsSafe(t *testing.T) {
+	var got int
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		mu.Lock()
+		got++
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	r := NewOfficeReporter(srv.URL, "p01")
+	r.Begin("任務", "/tmp/x")
+	r.End(nil)
+	r.Close()
+
+	// Close 後仍有事件到（模擬殘留的 goroutine）：必須靜默丟棄，不 panic
+	r.OnToolCall(context.Background(), "bash", "ls")
+	r.OnMessage(context.Background(), "遲到的訊息")
+	r.OnTurn(context.Background(), 7)
+	r.End(errors.New("遲到的收工"))
+
+	// 重複 Close：必須冪等，不 panic
+	r.Close()
+	r.Close()
+}
+
+// 併發下 push 與 Close 交錯也不能 panic（-race 下跑更有意義）。
+func TestOfficeReporterConcurrentPushClose(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer srv.Close()
+
+	r := NewOfficeReporter(srv.URL, "p01")
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				r.OnToolCall(context.Background(), "bash", "ls")
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() { defer wg.Done(); r.Close() }() // 與上面的 push 同時發生
+	wg.Wait()
+	r.Close() // 再關一次也無妨
+}
