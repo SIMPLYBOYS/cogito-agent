@@ -1,9 +1,11 @@
 package engine
 
 // OfficeReporter 把 agent 執行事件投影到像素辦公室（unity_demo 的 FastAPI 橋）。
-// 契約：POST <url>/office/event {"agent","kind","label","detail"}，kind ∈
-// start/turn/think/tool/result/error/msg/done——與 dashboard sseReporter 同一套事件詞彙，
-// 子 agent 事件沿用 "[Subagent:名] 工具" 前綴（由橋端解析）。
+// 契約：POST <url>/office/event，kind ∈ start/turn/think/tool/result/error/msg/done——與 dashboard
+// sseReporter 同一套事件詞彙，子 agent 事件沿用 "[Subagent:名] 工具" 前綴（由橋端解析）。
+//
+// 【協定全文】docs/office-protocol.md（欄位語意、截斷長度、傳遞保證、版本演進規則）。
+// 可執行正本是本套件的 TestOfficeReporterContract——改動事件形狀請同時更新那三處。
 //
 // 事件走緩衝 channel + 單一 sender goroutine，fire-and-forget：橋不在線或太慢就丟事件。
 // 辦公室是狀態投影，掉幀無害，絕不能反壓 agent 主迴圈。
@@ -21,7 +23,13 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
+// officeProtocolVersion 是事件協定版本，隨每個事件送出。橋端據此在協定演進時分支相容；
+// 沒有它的話，改欄位語意就只能靠雙方同時上線。**只有不相容的變更才進版號**（加欄位不算——
+// 那對「忽略未知欄位」的解析器天生相容）。契約全文見 docs/office-protocol.md。
+const officeProtocolVersion = 1
+
 type officeEvent struct {
+	V      int    `json:"v"`
 	Agent  string `json:"agent"`
 	Kind   string `json:"kind"`
 	Label  string `json:"label"`
@@ -106,7 +114,7 @@ func (r *OfficeReporter) send(endpoint string) {
 // push 投遞事件：緩衝滿或已收工都直接丟棄，永不阻塞、永不 panic（ch 不會被關，見 quit 的說明）。
 func (r *OfficeReporter) push(kind, label, detail string) {
 	select {
-	case r.ch <- officeEvent{Agent: r.agent, Kind: kind, Label: label, Detail: detail}:
+	case r.ch <- officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: kind, Label: label, Detail: detail}:
 	default: // 緩衝滿：丟事件保引擎不阻塞
 	}
 }

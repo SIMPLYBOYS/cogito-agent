@@ -38,12 +38,12 @@ func TestOfficeReporterContract(t *testing.T) {
 	r.Close() // 排空後 got 即完整
 
 	want := []officeEvent{
-		{Agent: "p17", Kind: "start", Label: "盤點 TODO", Detail: "/tmp/wd"},
-		{Agent: "p17", Kind: "tool", Label: "bash", Detail: `{"command":"grep TODO"}`},
-		{Agent: "p17", Kind: "result", Label: "bash", Detail: "3 處"},
-		{Agent: "p17", Kind: "error", Label: "bash", Detail: "boom"},
-		{Agent: "p17", Kind: "msg", Label: "完成"},
-		{Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷"},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "start", Label: "盤點 TODO", Detail: "/tmp/wd"},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "tool", Label: "bash", Detail: `{"command":"grep TODO"}`},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "result", Label: "bash", Detail: "3 處"},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "error", Label: "bash", Detail: "boom"},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "msg", Label: "完成"},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("事件數 %d != %d: %+v", len(got), len(want), got)
@@ -51,6 +51,10 @@ func TestOfficeReporterContract(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Errorf("事件 %d: got %+v want %+v", i, got[i], want[i])
+		}
+		// 每個事件都必須帶協定版本——橋端靠它在協定演進時分支（見 docs/office-protocol.md）
+		if got[i].V != officeProtocolVersion {
+			t.Errorf("事件 %d 缺協定版本：v=%d", i, got[i].V)
 		}
 	}
 }
