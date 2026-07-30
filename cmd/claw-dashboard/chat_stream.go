@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -70,35 +69,6 @@ func (r sseReporter) OnToolResult(_ context.Context, name, result string, isErr 
 func (r sseReporter) OnMessage(_ context.Context, content string) {
 	if content != "" {
 		r.hub.push(evJSON("msg", content))
-	}
-}
-
-// multiReporter 把事件同時打到終端（跑 dashboard 的 console）與 SSE hub（瀏覽器）。
-type multiReporter struct{ rs []engine.Reporter }
-
-func (m multiReporter) OnTurn(ctx context.Context, t int) {
-	for _, r := range m.rs {
-		r.OnTurn(ctx, t)
-	}
-}
-func (m multiReporter) OnThinking(ctx context.Context) {
-	for _, r := range m.rs {
-		r.OnThinking(ctx)
-	}
-}
-func (m multiReporter) OnToolCall(ctx context.Context, n, a string) {
-	for _, r := range m.rs {
-		r.OnToolCall(ctx, n, a)
-	}
-}
-func (m multiReporter) OnToolResult(ctx context.Context, n, res string, e bool) {
-	for _, r := range m.rs {
-		r.OnToolResult(ctx, n, res, e)
-	}
-}
-func (m multiReporter) OnMessage(ctx context.Context, c string) {
-	for _, r := range m.rs {
-		r.OnMessage(ctx, c)
 	}
 }
 

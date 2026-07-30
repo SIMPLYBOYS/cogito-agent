@@ -94,7 +94,7 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 
 	hub := &sseHub{}
 	// 事件同時打到終端（跑 dashboard 的 console）與 SSE hub（瀏覽器即時串流）。
-	reporter := multiReporter{rs: []engine.Reporter{engine.NewTerminalReporter(), sseReporter{hub: hub}}}
+	reporter := engine.MultiReporter{engine.NewTerminalReporter(), sseReporter{hub: hub}}
 
 	agentkit.WireSubagent(registry, eng, workDir, agentkit.SubagentOpts{
 		Executor:      executor,
