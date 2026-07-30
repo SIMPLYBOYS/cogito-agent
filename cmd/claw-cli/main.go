@@ -136,7 +136,7 @@ func main() {
 	sess.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
 	if office != nil {
-		office.Begin(prompt)
+		office.Begin(prompt, workDir)
 	}
 	var runErr error
 	if *verifyPtr != "" || *judgePtr != "" {

@@ -367,7 +367,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	// 事件的 agent 身分——橋端把未知 id 動態指派給閒置 NPC（黏性映射，同頻道固定同員工）。
 	var taskErr error // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
 	if office := newOfficeReporter(convID); office != nil {
-		office.Begin(prompt)
+		office.Begin(prompt, workDir)
 		defer func() { office.End(taskErr); office.Close() }()
 		rep = engine.MultiReporter{rep, office}
 	}

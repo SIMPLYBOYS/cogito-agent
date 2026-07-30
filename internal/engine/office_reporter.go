@@ -68,7 +68,10 @@ func (r *OfficeReporter) push(kind, label, detail string) {
 }
 
 // Begin / End 標記一次任務的起訖（Reporter 介面沒有生命週期事件，由 caller 顯式呼叫）。
-func (r *OfficeReporter) Begin(task string) { r.push("start", schema.TruncRunes(task, 80, "…"), "") }
+// Begin 標記任務開始；workDir 帶上該會話的工作目錄，讓辦公室看板直接標出產出落在哪。
+func (r *OfficeReporter) Begin(task, workDir string) {
+	r.push("start", schema.TruncRunes(task, 80, "…"), workDir)
+}
 func (r *OfficeReporter) End(err error) {
 	if err != nil {
 		r.push("done", "error", schema.TruncRunes(err.Error(), 120, "…"))

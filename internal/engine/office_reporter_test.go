@@ -28,7 +28,7 @@ func TestOfficeReporterContract(t *testing.T) {
 
 	ctx := context.Background()
 	r := NewOfficeReporter(srv.URL+"/", "p17") // 尾斜線要被容忍
-	r.Begin("盤點 TODO")
+	r.Begin("盤點 TODO", "/tmp/wd")
 	r.OnToolCall(ctx, "bash", `{"command":"grep TODO"}`)
 	r.OnToolResult(ctx, "bash", "3 處", false)
 	r.OnToolResult(ctx, "bash", "boom", true)
@@ -37,7 +37,7 @@ func TestOfficeReporterContract(t *testing.T) {
 	r.Close() // 排空後 got 即完整
 
 	want := []officeEvent{
-		{Agent: "p17", Kind: "start", Label: "盤點 TODO"},
+		{Agent: "p17", Kind: "start", Label: "盤點 TODO", Detail: "/tmp/wd"},
 		{Agent: "p17", Kind: "tool", Label: "bash", Detail: `{"command":"grep TODO"}`},
 		{Agent: "p17", Kind: "result", Label: "bash", Detail: "3 處"},
 		{Agent: "p17", Kind: "error", Label: "bash", Detail: "boom"},
@@ -57,7 +57,7 @@ func TestOfficeReporterContract(t *testing.T) {
 // 橋不在線：事件靜默丟、Close 不卡死。
 func TestOfficeReporterBridgeDown(t *testing.T) {
 	r := NewOfficeReporter("http://127.0.0.1:1", "p17") // 連線秒拒
-	r.Begin("x")
+	r.Begin("x", "")
 	r.End(nil)
 	r.Close() // 卡住即測試逾時失敗
 }
