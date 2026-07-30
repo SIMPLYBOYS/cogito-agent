@@ -72,6 +72,9 @@ func (r *OfficeReporter) Close() {
 
 func (r *OfficeReporter) send(endpoint string) {
 	defer close(r.done)
+	// client 每個 sender 各一份，但 Transport 為 nil ＝ 共用 http.DefaultTransport 的連線池，
+	// 跨 reporter 實例本來就重用連線（實測：5 個 reporter 送 5 個請求，伺服器端只見 1 條新 TCP 連線）。
+	// 別為了「共用 client」重構——那是不存在的問題。
 	client := &http.Client{Timeout: 2 * time.Second}
 	post := func(ev officeEvent) {
 		b, _ := json.Marshal(ev)
