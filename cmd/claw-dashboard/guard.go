@@ -2,34 +2,16 @@ package main
 
 import (
 	"fmt"
-	"net"
-)
 
-// bindIsLoopback 判斷監聽位址是否只綁本機（loopback）。
-//
-// 【只認字面 loopback，不做 DNS 解析】空 host（如 ":8091"）＝所有介面＝非 loopback；"localhost" 視為
-// loopback；其餘一律 net.ParseIP 後看 IsLoopback()。刻意不解析主機名——避免「名字解析成 loopback 但
-// 實際綁到別處」的模糊，保守優先。
-func bindIsLoopback(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr // 沒有 host:port 分隔就整串當 host（下面多半 ParseIP 失敗 → 非 loopback，保守）
-	}
-	switch host {
-	case "":
-		return false // ":8091" = 綁所有介面
-	case "localhost":
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
-}
+	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
+)
 
 // checkBindSafety 是【fail-closed 守衛】：非 loopback 綁定時，除非顯式 insecure，否則回一段拒絕理由
 // （非空字串＝呼叫端應拒絕啟動）。這是本階段唯一的 dashboard 存取控制——remote-auth 尚未實作，故不讓
 // 一個無認證的 operator dashboard 意外對外曝光。理由與設計見 vault：C-Spec 的 §三「本階段 ① 的實作」。
+// 「哪些位址算 loopback」共用 cmdutil.IsLoopback（office HTTP 入口同一把尺）。
 func checkBindSafety(addr string, insecure bool) (deny string) {
-	if bindIsLoopback(addr) {
+	if cmdutil.IsLoopback(addr) {
 		return "" // loopback：只有本機連得到，安全
 	}
 	if insecure {

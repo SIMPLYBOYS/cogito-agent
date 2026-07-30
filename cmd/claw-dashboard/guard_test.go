@@ -5,22 +5,6 @@ import (
 	"testing"
 )
 
-func TestBindIsLoopback(t *testing.T) {
-	loopback := []string{"127.0.0.1:8091", "localhost:8091", "[::1]:8091", "127.0.0.1:0"}
-	for _, a := range loopback {
-		if !bindIsLoopback(a) {
-			t.Errorf("%q 應判為 loopback", a)
-		}
-	}
-	// 非 loopback：空 host（所有介面）、對外 IP、0.0.0.0、無 port 分隔的怪字串
-	notLoopback := []string{":8091", "0.0.0.0:8091", "192.168.1.5:8091", "10.0.0.1:8091", "garbage"}
-	for _, a := range notLoopback {
-		if bindIsLoopback(a) {
-			t.Errorf("%q 不該判為 loopback", a)
-		}
-	}
-}
-
 // fail-closed 守衛：這是本階段唯一的 dashboard 存取控制，退回「不守衛」就是把無認證面板對外曝光。
 func TestCheckBindSafety(t *testing.T) {
 	// loopback → 放行（deny 為空）
