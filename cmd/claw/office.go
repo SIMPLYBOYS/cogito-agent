@@ -20,7 +20,9 @@ import (
 // 進 Core 後沿用 fail-closed allowlist——COGITO_HTTP_USER（預設 office-web）必須列在
 // COGITO_ALLOWED_USERS 才會被受理，審批（approve/reject）同一身分走同一入口。
 // 出訊（審批卡/完成/失敗訊息）經 rawSend POST 回橋的 /office/chat，顯示在 Web 工作串。
-func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string) {
+// hooks 是【必填參數】而非事後 setter：這個入口先前漏掛 postRun/postFailure，導致從辦公室派的工
+// 跑完不反思（同一 agent、同一 factory，行為卻依入口而異）。設成參數後，新入口漏接就編譯不過。
+func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbot.Hooks) {
 	addr, token := os.Getenv("COGITO_HTTP_ADDR"), os.Getenv("COGITO_HTTP_TOKEN")
 	if addr == "" || token == "" {
 		return
@@ -55,6 +57,8 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string) {
 	}
 
 	core := chatbot.NewCore("office", rootDir, factory, send)
+	core.SetHooks(hooks)     // 與 Slack/TG 掛同一包：自我進化不因入口而異
+	core.ResumeInterrupted() // 跨重啟續跑（需 AUTO_RESUME + SESSION_DIR），同 Slack/TG
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch))

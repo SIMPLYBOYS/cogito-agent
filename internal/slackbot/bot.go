@@ -90,9 +90,7 @@ func slackMrkdwn(s string) string {
 	return slackBoldRe.ReplaceAllString(s, "*$1*")
 }
 
-func (b *SlackBot) SetPostRunHook(h chatbot.PostRunHook)         { b.core.SetPostRunHook(h) }
-func (b *SlackBot) SetPostFailureHook(h chatbot.PostFailureHook) { b.core.SetPostFailureHook(h) }
-func (b *SlackBot) SetLearnHook(h chatbot.LearnHook)             { b.core.SetLearnHook(h) }
+func (b *SlackBot) SetHooks(h chatbot.Hooks) { b.core.SetHooks(h) }
 
 // SendMessage 以命名空間 convID（"slack:頻道"）路由發送，供 cmd 的審批/提案通知用。
 func (b *SlackBot) SendMessage(convID, text string) { chatbot.SendMessage(convID, text) }

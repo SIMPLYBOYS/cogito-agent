@@ -204,9 +204,6 @@ func main() {
 
 	bot = slackbot.NewSlackBot(factory, rootDir)
 
-	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。
-	startOfficeHTTP(factory, rootDir)
-
 	// Tier 4 自我進化（opt-in）：任務成功後反思軌跡。安全鐵律一致——產物只進【暫存區】、不自動生效，
 	// 須人工 review（技能用 skillgate 晉升；提案記憶 apply 後放行為 .claw/memory/ 記錄才生效）。
 	var skillSynth *evolve.SkillSynthesizer
@@ -282,11 +279,8 @@ func main() {
 			}
 		}
 	}
-	bot.SetPostRunHook(postRun)
-	bot.SetPostFailureHook(postFailure)
-
 	// `learn` 手動蒸餾技能：獨立於自動 skill_synth 的 gating（explicit 使用者意圖，一律可用）；
-	// 產物仍只進暫存區，須 skillgate 把關才生效。同一 hook 掛給 Slack 與 Telegram。
+	// 產物仍只進暫存區，須 skillgate 把關才生效。
 	learnSynth := evolve.NewSkillSynthesizer(llmProvider, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
 	learnHook := func(ctx context.Context, session *ctxpkg.Session) (string, error) {
 		history := session.GetWorkingMemory(0)
@@ -299,7 +293,15 @@ func main() {
 		}
 		return filepath.Base(filepath.Dir(path)), nil // <slug>/SKILL.md → slug
 	}
-	bot.SetLearnHook(learnHook)
+
+	// 【入口平權】鉤子組一次、每個入口掛同一包——先前是三個 setter × 三個入口＝九處要記得接，
+	// office HTTP 就漏了兩個（那邊派的工跑完不反思）。整包傳遞讓漏接變成編譯期問題。
+	hooks := chatbot.Hooks{PostRun: postRun, PostFailure: postFailure, Learn: learnHook}
+	bot.SetHooks(hooks)
+
+	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。
+	// 【必須在 hooks 組好之後】——先前擺在前面，結構上就不可能掛到鉤子。
+	startOfficeHTTP(factory, rootDir, hooks)
 
 	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停傳輸層（websocket/長輪詢隨 ctx 取消），再 flush OTel span。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -310,9 +312,7 @@ func main() {
 	// telegram:），但設了 COGITO_USER_LINK 時，已連結使用者的 DM 會刻意跨平台共用同一份狀態。
 	if os.Getenv("TELEGRAM_BOT_TOKEN") != "" {
 		tg := telegrambot.NewTelegramBot(factory, rootDir)
-		tg.SetPostRunHook(postRun)
-		tg.SetPostFailureHook(postFailure)
-		tg.SetLearnHook(learnHook)
+		tg.SetHooks(hooks)
 		go tg.Start(ctx)
 		tg.ResumeInterrupted() // 跨重啟續跑：續本次被硬砍中斷的 Telegram 任務（需 AUTO_RESUME + SESSION_DIR）
 	}

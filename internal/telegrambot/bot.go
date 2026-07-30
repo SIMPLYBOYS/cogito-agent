@@ -135,9 +135,7 @@ func (b *TelegramBot) fetchIdentity() error {
 	return nil
 }
 
-func (b *TelegramBot) SetPostRunHook(h chatbot.PostRunHook)         { b.core.SetPostRunHook(h) }
-func (b *TelegramBot) SetPostFailureHook(h chatbot.PostFailureHook) { b.core.SetPostFailureHook(h) }
-func (b *TelegramBot) SetLearnHook(h chatbot.LearnHook)             { b.core.SetLearnHook(h) }
+func (b *TelegramBot) SetHooks(h chatbot.Hooks) { b.core.SetHooks(h) }
 
 // SendMessage 以命名空間 convID（"telegram:chatID"）路由發送，供 cmd 的審批/提案通知用。
 func (b *TelegramBot) SendMessage(convID, text string) { chatbot.SendMessage(convID, text) }

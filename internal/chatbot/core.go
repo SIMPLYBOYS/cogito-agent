@@ -242,9 +242,20 @@ func (c *Core) sets() (allowed, admin map[string]bool) {
 func (c *Core) isAllowed(userID string) bool { allowed, _ := c.sets(); return c.inSet(allowed, userID) }
 func (c *Core) isAdmin(userID string) bool   { _, admin := c.sets(); return c.inSet(admin, userID) }
 
-func (c *Core) SetPostRunHook(h PostRunHook)         { c.postRun = h }
-func (c *Core) SetPostFailureHook(h PostFailureHook) { c.postFailure = h }
-func (c *Core) SetLearnHook(h LearnHook)             { c.learn = h }
+// Hooks 是「一個入口該掛齊的鉤子」整包。刻意收斂成一個值而非三個 setter：入口一多，
+// 「每個都記得逐一接線」必然會漏——office HTTP 入口就漏掉 postRun/postFailure，於是從像素辦公室
+// 派的工跑完不會反思（同一個 agent、同一個 factory，行為卻依入口而異）。整包傳遞讓「漏接」從
+// 「少寫一行、沒人發現」變成「少傳一個參數、編譯不過」。
+type Hooks struct {
+	PostRun     PostRunHook
+	PostFailure PostFailureHook
+	Learn       LearnHook
+}
+
+// SetHooks 一次掛齊。零值欄位＝該鉤子不啟用（等同過去傳 nil）。
+func (c *Core) SetHooks(h Hooks) {
+	c.postRun, c.postFailure, c.learn = h.PostRun, h.PostFailure, h.Learn
+}
 
 // convID 把傳輸層的原生頻道 ID 加上平台前綴，成為全域唯一的會話標識。
 func (c *Core) convID(channelID string) string { return c.platform + ":" + channelID }
