@@ -1,9 +1,12 @@
 package chatbot
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -59,6 +62,10 @@ func (m *ApprovalManager) WaitForApproval(taskID, channelID, toolName, args stri
 	} else {
 		fmt.Printf("\n[需要審批 TaskID: %s]\n%s\n", taskID, notice)
 	}
+	// 像素辦公室鏡射：Slack/TG 的審批卡本來只送回原平台，辦公室畫面看不到——那位員工會停在
+	// 「工作中」但事件斷流，watchdog 到時把他判成失聯釋放掉，看起來像任務死了（其實在等人按核准）。
+	// office 平台不鏡射：它的 notify 本來就 POST 到同一個端點，鏡射會變兩張卡。
+	mirrorApprovalToOffice(channelID, notice)
 
 	log.Printf("[Approval] 發送審批請求 (TaskID: %s, 頻道: %s)，協程掛起等待...\n", taskID, channelID)
 
@@ -211,4 +218,24 @@ func IsDangerousCommand(toolName string, args string) bool {
 		}
 	}
 	return false
+}
+
+// mirrorApprovalToOffice 把非 office 平台的審批卡鏡射一份到像素辦公室的橋（COGITO_OFFICE_URL）。
+// 送出即忘：辦公室是投影面，橋掛了不該拖累審批本身——獨立 goroutine + 短逾時，錯誤只記 log。
+// convID 原樣帶過去（如 slack:C999），橋據此標示這張審批的來源，不給誤按的核准鈕。
+func mirrorApprovalToOffice(convID, notice string) {
+	url := os.Getenv("COGITO_OFFICE_URL")
+	if url == "" || strings.HasPrefix(convID, "office:") {
+		return // office 平台的 notify 本來就送同一個端點，鏡射會變兩張卡
+	}
+	go func() {
+		b, _ := json.Marshal(map[string]string{"agent": convID, "text": notice})
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Post(strings.TrimRight(url, "/")+"/office/chat", "application/json", bytes.NewReader(b))
+		if err != nil {
+			log.Printf("[Approval] 辦公室鏡射失敗（不影響審批）：%v", err)
+			return
+		}
+		resp.Body.Close()
+	}()
 }
