@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -186,6 +187,21 @@ func markLastBlockEphemeral(msgs []anthropic.MessageParam) {
 	}
 }
 
+// marshalArgsReadable 等同 json.Marshal，但不把 < > & 跳脫成 < 這類序列。
+// 工具參數會【原樣顯示給人看】——審批卡、辦公室工作串、日誌都是它——而 bash 指令裡的
+// > 與 && 被跳脫後幾乎讀不下去（`cmd >/tmp/log 2>&1`）。兩種寫法都是
+// 合法 JSON、解析結果相同，這裡選人讀得懂的那個。
+func marshalArgsReadable(v any) []byte {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		b, _ := json.Marshal(v) // 極少見：退回標準編碼，寧可醜也不要丟參數
+		return b
+	}
+	return bytes.TrimRight(buf.Bytes(), "\n") // Encode 會多補一個換行
+}
+
 // extractMessage 把 Anthropic 回應的 content blocks + usage 轉成統一的 schema.Message。Generate（一次
 // 回傳的 resp）與 GenerateStream（Accumulate 出的 message）內容結構相同，故共用。
 func extractMessage(content []anthropic.ContentBlockUnion, usage anthropic.Usage) *schema.Message {
@@ -196,7 +212,7 @@ func extractMessage(content []anthropic.ContentBlockUnion, usage anthropic.Usage
 		case "text":
 			resultMsg.Content += block.Text
 		case "tool_use":
-			argsBytes, _ := json.Marshal(block.Input)
+			argsBytes := marshalArgsReadable(block.Input)
 			resultMsg.ToolCalls = append(resultMsg.ToolCalls, schema.ToolCall{
 				ID:        block.ID,
 				Name:      block.Name,

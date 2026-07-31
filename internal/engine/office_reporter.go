@@ -136,8 +136,22 @@ func (r *OfficeReporter) OnThinking(context.Context) { r.push("think", "", "") }
 func (r *OfficeReporter) OnTurn(_ context.Context, turn int) {
 	r.push("turn", fmt.Sprintf("%d", turn), "")
 }
+
+// 寫檔工具的參數就是【產出本身】——辦公室要把寫進去的內容當程式碼區塊顯示，120 字只夠看到
+// 「package main」。其餘工具維持短截：bash 指令本來就短，read_file 的參數只是路徑，放寬沒意義。
+var writeTools = map[string]bool{"write_file": true, "edit_file": true}
+
+const (
+	toolArgsMax  = 120
+	writeArgsMax = 2400 // 約 60~80 行；更長的檔案看前段就夠判斷它在寫什麼
+)
+
 func (r *OfficeReporter) OnToolCall(_ context.Context, name, args string) {
-	r.push("tool", name, schema.TruncRunes(args, 120, "…"))
+	max := toolArgsMax
+	if writeTools[name] {
+		max = writeArgsMax
+	}
+	r.push("tool", name, schema.TruncRunes(args, max, "…"))
 }
 func (r *OfficeReporter) OnToolResult(_ context.Context, name, result string, isErr bool) {
 	kind := "result"
