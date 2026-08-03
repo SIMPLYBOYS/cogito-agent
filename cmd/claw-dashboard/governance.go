@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -96,10 +97,10 @@ func (s *server) govApplyMemory(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case err != nil:
 		s.setFlash("⚠️ 套用記憶失敗：" + err.Error())
-	case applied == "":
+	case len(applied) == 0:
 		s.setFlash("無記憶提案可套用。")
 	default:
-		s.setFlash("✓ 已放行記憶：" + applied)
+		s.setFlash(fmt.Sprintf("✓ 已放行 %d 條記憶提案。", len(applied)))
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
@@ -109,14 +110,14 @@ func (s *server) govDiscardMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	had, err := evolve.DiscardProposedMemory(s.workspace)
+	dropped, err := evolve.DiscardProposedMemory(s.workspace)
 	switch {
 	case err != nil:
 		s.setFlash("⚠️ 丟棄記憶失敗：" + err.Error())
-	case !had:
+	case len(dropped) == 0:
 		s.setFlash("無記憶提案可丟棄。")
 	default:
-		s.setFlash("✓ 已丟棄記憶提案。")
+		s.setFlash(fmt.Sprintf("✓ 已丟棄 %d 條記憶提案。", len(dropped)))
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }

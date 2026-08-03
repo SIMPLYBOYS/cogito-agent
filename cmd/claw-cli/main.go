@@ -89,6 +89,9 @@ func main() {
 
 	// 用 CostTracker 包裹 provider 自動記賬；trace 由 engine.Run 內部自動導出
 	trackedProvider := observability.NewCostTracker(realProvider, modelName, sess)
+	// 背景反思用便宜模型（COGITO_REFLECT_MODEL）；未設＝沿用主 provider。CostTracker 的
+	// Configure 會重新包一層，故換模型後成本仍記進同一 session。
+	reflectProv := provider.ReflectProvider(trackedProvider)
 
 	// 沙箱執行器：COGITO_SANDBOX=docker 時 bash 命令丟進隔離容器，否則宿主機直跑。
 	executor := sandbox.FromEnv()
@@ -101,7 +104,7 @@ func main() {
 	// 核心工具集（skillMemDir=workDir：CLI 工作區即技能/記憶來源）。
 	agentkit.RegisterCoreTools(registry, workDir, workDir, workDir, executor) // 單一目錄：技能=記憶=workDir
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
-		registry.Register(tools.NewConsolidateTool(trackedProvider, workDir, workDir, sess)) // 單租戶：技能=記憶=workDir。agent 可主動沉澱（產物仍 gated）
+		registry.Register(tools.NewConsolidateTool(reflectProv, workDir, workDir, sess)) // 單租戶：技能=記憶=workDir。agent 可主動沉澱（產物仍 gated）
 	}
 
 	// 背景任務工具：長命命令（dev server / 長建置）不受 bash 30s 逾時限制。退出時統一收掉。
@@ -153,7 +156,7 @@ func main() {
 	// 安全鐵律：只寫 .claw/skills-proposed/（不自動啟用），需人工 review 後手動移到 .claw/skills/。
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" && runErr == nil {
 		proposedDir := filepath.Join(workDir, ".claw", evolve.ProposedSkillsDirName)
-		synth := evolve.NewSkillSynthesizer(trackedProvider, proposedDir)
+		synth := evolve.NewSkillSynthesizer(reflectProv, proposedDir)
 		if path, err := synth.Reflect(context.Background(), prompt, sess.GetWorkingMemory(0)); err != nil {
 			log.Printf("[evolve] 技能反思失敗（不影響任務結果）: %v", err)
 		} else if path != "" {
@@ -166,7 +169,7 @@ func main() {
 	// Tier 4 記憶自更新（opt-in）：成功→萃取耐久慣例；失敗→live Reflexion 萃取教訓。皆追加到提案
 	// 記憶暫存區（apply 後放行為 .claw/memory/ 記錄），這就是「從真實互動中持續優化判斷決策」的落點。
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
-		mSynth := evolve.NewMemorySynthesizer(trackedProvider, workDir)
+		mSynth := evolve.NewMemorySynthesizer(reflectProv, workDir)
 		var added []string
 		var err error
 		if runErr != nil {
@@ -190,7 +193,7 @@ func main() {
 
 	// KG 關係抽取（opt-in）：任務後從記憶節點抽 typed 關係 → 提案邊（需 apply-edges 過 gate；每次任務多一次 LLM 呼叫）。
 	if os.Getenv("COGITO_KG_SYNTH") == "1" {
-		if n, err := evolve.NewRelationExtractor(trackedProvider, workDir).Extract(context.Background()); err != nil {
+		if n, err := evolve.NewRelationExtractor(reflectProv, workDir).Extract(context.Background()); err != nil {
 			log.Printf("[evolve] KG 關係抽取失敗（不影響任務結果）: %v", err)
 		} else if n > 0 {
 			log.Printf("[evolve] 🔗 新增 %d 條提案關係到 .claw/kg/edges.proposed.jsonl（需 apply-edges 過 gate）", n)

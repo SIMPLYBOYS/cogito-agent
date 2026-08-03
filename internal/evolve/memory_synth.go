@@ -159,40 +159,116 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 // ApplyProposedMemory 把提案記憶放行為【離散的可檢索記錄】（.claw/memory/<slug>.md），而非
 // append 進 AGENTS.md——後者會讓常駐 System Prompt 無限膨脹。每條學習落成一筆記錄，由 recall 工具
 // 按需檢索。人工 review 後手動觸發；放行後清掉提案檔。回傳放行的內容（空字串＝當前沒有提案）。
-func ApplyProposedMemory(root string) (string, error) {
-	ctxpkg.LockKnowledge() // 整個 read-proposed→寫記錄→刪 proposed→Prune 視為一個原子單元
-	defer ctxpkg.UnlockKnowledge()
-	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
-	proposed := strings.TrimSpace(stripComments(readFileIgnore(proposedPath)))
-	if proposed == "" {
-		return "", nil
-	}
-	memDir := filepath.Join(root, ".claw", "memory")
-	if err := os.MkdirAll(memDir, 0o755); err != nil {
-		return "", fmt.Errorf("建立記憶目錄失敗: %w", err)
-	}
-	kind, task := "記憶", ""
-	for _, line := range strings.Split(proposed, "\n") {
+// ProposedMemoryEntry 是提案記憶的一條，供【逐條】審核。N 為 1-based 編號，對應 `apply memory <N>`。
+// Header 保留該條所屬的 "## [kind] 來自任務「…」（…）" 原文——只放行部分條目時要靠它把剩下的
+// 寫回提案檔而不丟失分組與時間。
+type ProposedMemoryEntry struct {
+	N        int
+	Header   string
+	Kind     string
+	Task     string
+	Learning string
+}
+
+// ListProposedMemory 把提案檔解析成逐條清單（無提案回空）。供 `memory list` 顯示編號，
+// 以及逐條放行／丟棄。
+func ListProposedMemory(root string) []ProposedMemoryEntry {
+	return parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName)))
+}
+
+func parseProposedMemory(raw string) []ProposedMemoryEntry {
+	var out []ProposedMemoryEntry
+	header, kind, task := "", "記憶", ""
+	for _, line := range strings.Split(stripComments(raw), "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "## "):
+			header, kind, task = line, "", ""
 			kind, task = parseProposedHeader(line)
 		case strings.HasPrefix(line, "- "):
-			learning := strings.TrimSpace(strings.TrimPrefix(line, "- "))
-			if learning == "" {
-				continue
-			}
-			if err := writeMemoryRecord(memDir, kind, task, learning); err != nil {
-				return "", err
+			if l := strings.TrimSpace(strings.TrimPrefix(line, "- ")); l != "" {
+				out = append(out, ProposedMemoryEntry{N: len(out) + 1, Header: header, Kind: kind, Task: task, Learning: l})
 			}
 		}
 	}
-	if err := os.Remove(proposedPath); err != nil {
-		return proposed, fmt.Errorf("清除提案檔失敗: %w", err)
+	return out
+}
+
+// pickProposed 依 only（1-based 編號；空＝全選）把條目切成「選中」與「留下」。編號超出範圍即忽略。
+func pickProposed(all []ProposedMemoryEntry, only []int) (picked, rest []ProposedMemoryEntry) {
+	if len(only) == 0 {
+		return all, nil
+	}
+	sel := map[int]bool{}
+	for _, n := range only {
+		sel[n] = true
+	}
+	for _, e := range all {
+		if sel[e.N] {
+			picked = append(picked, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	return picked, rest
+}
+
+// writeProposedRest 把「留下」的條目寫回提案檔（保留原分組標頭）；沒有剩餘就刪檔。
+func writeProposedRest(path string, rest []ProposedMemoryEntry) error {
+	if len(rest) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("清除提案檔失敗: %w", err)
+		}
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("<!-- ⚠️ 自動生成的『提案記憶』。需人工 review 後放行（apply memory）為可檢索的長期記憶記錄才生效（不會自動套用）。 -->\n")
+	last := ""
+	for _, e := range rest {
+		if e.Header != last {
+			b.WriteString("\n" + e.Header + "\n")
+			last = e.Header
+		}
+		b.WriteString("- " + e.Learning + "\n")
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
+}
+
+// ApplyProposedMemory 把提案記憶放行為【離散的可檢索記錄】（.claw/memory/<slug>.md），而非
+// append 進 AGENTS.md——後者會讓常駐 System Prompt 無限膨脹。人工 review 後手動觸發。
+//
+// only 為 1-based 編號（見 ListProposedMemory）；**留空＝全部放行**（保留原本的批次語意）。
+// 逐條放行的理由：先前是全有全無，一批裡有一條寫壞就得整批丟掉——而反思是批次產出的，
+// 「大致有用但夾一條爛的」才是常態。未選中的條目留在提案檔等後續處置。
+func ApplyProposedMemory(root string, only ...int) ([]string, error) {
+	ctxpkg.LockKnowledge() // 整個 read-proposed→寫記錄→回寫剩餘→Prune 視為一個原子單元
+	defer ctxpkg.UnlockKnowledge()
+	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
+	all := parseProposedMemory(readFileIgnore(proposedPath))
+	if len(all) == 0 {
+		return nil, nil
+	}
+	picked, rest := pickProposed(all, only)
+	if len(picked) == 0 {
+		return nil, nil // 編號都不存在：不動任何東西
+	}
+	memDir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		return nil, fmt.Errorf("建立記憶目錄失敗: %w", err)
+	}
+	var applied []string
+	for _, e := range picked {
+		if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning); err != nil {
+			return applied, err
+		}
+		applied = append(applied, e.Learning)
+	}
+	if err := writeProposedRest(proposedPath, rest); err != nil {
+		return applied, err
 	}
 	// 放行後順手淘汰：超過上限的最久未用記錄歸檔（可復原），避免記憶庫無限長。
 	ctxpkg.NewMemoryLoader(root).Prune(maxMemoryRecords)
-	return proposed, nil
+	return applied, nil
 }
 
 // maxMemoryRecords 是長期記憶庫的記錄上限；超量時 Prune 把最久未用的歸檔到 .claw/memory-archive/。
@@ -233,14 +309,23 @@ func parseProposedHeader(line string) (kind, task string) {
 }
 
 // DiscardProposedMemory 丟棄提案記憶。had 表示原本是否有提案。
-func DiscardProposedMemory(root string) (had bool, err error) {
+// only 為 1-based 編號（見 ListProposedMemory）；留空＝全部丟棄。回傳實際丟棄的條目。
+func DiscardProposedMemory(root string, only ...int) (dropped []string, err error) {
 	ctxpkg.LockKnowledge()
 	defer ctxpkg.UnlockKnowledge()
 	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
-	if strings.TrimSpace(readFileIgnore(proposedPath)) == "" {
-		return false, nil
+	all := parseProposedMemory(readFileIgnore(proposedPath))
+	if len(all) == 0 {
+		return nil, nil
 	}
-	return true, os.Remove(proposedPath)
+	picked, rest := pickProposed(all, only)
+	if len(picked) == 0 {
+		return nil, nil
+	}
+	for _, e := range picked {
+		dropped = append(dropped, e.Learning)
+	}
+	return dropped, writeProposedRest(proposedPath, rest)
 }
 
 // stripComments 去掉 HTML 註解行（提案檔頂部的「需 review」提示，併入後已無意義）。

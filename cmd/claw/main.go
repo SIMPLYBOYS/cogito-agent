@@ -126,6 +126,13 @@ func main() {
 		log.Printf("[Session] 記憶隔離＝per-conversation（COGITO_MEMORY_SCOPE=channel）；技能仍共享")
 	}
 
+	// 背景反思用的 provider：設了 COGITO_REFLECT_MODEL 就換便宜模型跑（技能/記憶/KG 蒸餾是任務後的
+	// 背景工作、產物還要人工放行，沒必要燒主模型）。未設＝沿用主 provider，行為不變。
+	reflectProv := provider.ReflectProvider(llmProvider)
+	if rm := reflectProv.ModelName(); rm != modelName {
+		log.Printf("[evolve] 背景反思改用模型 %s（主模型 %s）", rm, modelName)
+	}
+
 	factory := func(sess *ctxpkg.Session, reporter engine.Reporter) *engine.AgentEngine {
 		registry := tools.NewRegistry()
 		memDir := memoryRootFor(sess)
@@ -133,7 +140,7 @@ func main() {
 		// rootDir（全 bot 共用）；長期記憶（recall）rooted 在 memDir（預設 rootDir，channel scope 時 per-對話）。
 		agentkit.RegisterCoreTools(registry, sess.WorkDir, rootDir, memDir, executor)
 		if selfEvolveEnabled() { // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
-			registry.Register(tools.NewConsolidateTool(llmProvider, rootDir, memDir, sess)) // 技能提案共享、記憶提案隨 scope
+			registry.Register(tools.NewConsolidateTool(reflectProv, rootDir, memDir, sess)) // 技能提案共享、記憶提案隨 scope
 		}
 		agentkit.RegisterMCPTools(registry, mcpGateway) // 外部 MCP 工具經 gateway 漸進式暴露
 		// 背景任務工具（bash_background/task_output/task_kill/task_list）：每會話一個 TaskManager
@@ -209,16 +216,16 @@ func main() {
 	var skillSynth *evolve.SkillSynthesizer
 	var memSynth *evolve.MemorySynthesizer
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" {
-		skillSynth = evolve.NewSkillSynthesizer(llmProvider, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
+		skillSynth = evolve.NewSkillSynthesizer(reflectProv, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
 		log.Printf("[evolve] 技能自生成已啟用（寫入 .claw/%s，需人工 review）", evolve.ProposedSkillsDirName)
 	}
 	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
-		memSynth = evolve.NewMemorySynthesizer(llmProvider, rootDir)
+		memSynth = evolve.NewMemorySynthesizer(reflectProv, rootDir)
 		log.Printf("[evolve] 記憶自更新已啟用（寫入 .claw/%s，apply 後放行為長期記憶記錄）", evolve.ProposedMemoryFileName)
 	}
 	var kgExtract *evolve.RelationExtractor
 	if os.Getenv("COGITO_KG_SYNTH") == "1" {
-		kgExtract = evolve.NewRelationExtractor(llmProvider, rootDir)
+		kgExtract = evolve.NewRelationExtractor(reflectProv, rootDir)
 		log.Printf("[evolve] KG 關係抽取已啟用（任務後抽 typed 關係 → .claw/kg/edges.proposed.jsonl，需 apply-edges 過 gate；每次任務多一次 LLM 呼叫）")
 	}
 	// 自我進化的鉤子做成共用變數（與平台無關，用 chatbot.SendMessage 按 session.ID 路由回對的平台），
@@ -241,7 +248,7 @@ func main() {
 				// 與 recall 讀路徑同源，跑後反思的產物才落在正確的租戶目錄。
 				ms := memSynth
 				if memScopeChannel {
-					ms = evolve.NewMemorySynthesizer(llmProvider, memoryRootFor(session))
+					ms = evolve.NewMemorySynthesizer(reflectProv, memoryRootFor(session))
 				}
 				if added, err := ms.Reflect(ctx, taskPrompt, history); err != nil {
 					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
@@ -253,7 +260,7 @@ func main() {
 			if kgExtract != nil {
 				ke := kgExtract
 				if memScopeChannel {
-					ke = evolve.NewRelationExtractor(llmProvider, memoryRootFor(session))
+					ke = evolve.NewRelationExtractor(reflectProv, memoryRootFor(session))
 				}
 				if n, err := ke.Extract(ctx); err != nil {
 					log.Printf("[evolve] KG 關係抽取失敗（不影響任務）: %v", err)
@@ -268,7 +275,7 @@ func main() {
 			postFailure = func(ctx context.Context, session *ctxpkg.Session, taskPrompt, failureMsg string) {
 				ms := memSynth
 				if memScopeChannel {
-					ms = evolve.NewMemorySynthesizer(llmProvider, memoryRootFor(session))
+					ms = evolve.NewMemorySynthesizer(reflectProv, memoryRootFor(session))
 				}
 				if added, err := ms.ReflectFailure(ctx, taskPrompt, session.GetWorkingMemory(0), failureMsg); err != nil {
 					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
@@ -281,7 +288,7 @@ func main() {
 	}
 	// `learn` 手動蒸餾技能：獨立於自動 skill_synth 的 gating（explicit 使用者意圖，一律可用）；
 	// 產物仍只進暫存區，須 skillgate 把關才生效。
-	learnSynth := evolve.NewSkillSynthesizer(llmProvider, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
+	learnSynth := evolve.NewSkillSynthesizer(reflectProv, filepath.Join(rootDir, ".claw", evolve.ProposedSkillsDirName))
 	learnHook := func(ctx context.Context, session *ctxpkg.Session) (string, error) {
 		history := session.GetWorkingMemory(0)
 		if len(history) == 0 {

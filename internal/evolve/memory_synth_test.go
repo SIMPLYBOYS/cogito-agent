@@ -110,7 +110,7 @@ func TestApplyAndDiscardProposedMemory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(applied, "pnpm") {
+	if !strings.Contains(strings.Join(applied, "\n"), "pnpm") {
 		t.Errorf("應回傳放行內容，got %q", applied)
 	}
 	memDir := filepath.Join(root, ".claw", "memory")
@@ -132,7 +132,7 @@ func TestApplyAndDiscardProposedMemory(t *testing.T) {
 	}
 
 	// 沒提案時 apply → 空、不報錯
-	if out, err := ApplyProposedMemory(root); err != nil || out != "" {
+	if out, err := ApplyProposedMemory(root); err != nil || len(out) != 0 {
 		t.Errorf("沒提案時應回空，got out=%q err=%v", out, err)
 	}
 }
@@ -142,9 +142,9 @@ func TestDiscardProposedMemory(t *testing.T) {
 	fp := &fakeProvider{content: `{"learnings": ["x 慣例"]}`}
 	_, _ = NewMemorySynthesizer(fp, root).Reflect(t.Context(), "t", nil)
 
-	had, err := DiscardProposedMemory(root)
-	if err != nil || !had {
-		t.Fatalf("應丟棄既有提案，got had=%v err=%v", had, err)
+	dropped, err := DiscardProposedMemory(root)
+	if err != nil || len(dropped) == 0 {
+		t.Fatalf("應丟棄既有提案，got dropped=%v err=%v", dropped, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
 		t.Error("丟棄後提案檔應消失")
@@ -188,5 +188,69 @@ func TestMemoryReflect_EmptyNoFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
 		t.Error("無學習時不應建立提案記憶檔")
+	}
+}
+
+// 逐條審核：先前是全有全無——一批裡夾一條爛的就得整批丟，而反思本來就是批次產出的。
+func TestApplyProposedMemory_PerEntry(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"learnings": ["好的 A 慣例", "壞的 B 慣例", "好的 C 慣例"]}`}
+	if _, err := NewMemorySynthesizer(fp, root).Reflect(t.Context(), "任務", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	all := ListProposedMemory(root)
+	if len(all) != 3 || all[0].N != 1 || all[2].N != 3 {
+		t.Fatalf("應解析出 3 條、編號 1..3，got %+v", all)
+	}
+
+	// 只放行 1 和 3
+	applied, err := ApplyProposedMemory(root, 1, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 2 || !strings.Contains(applied[0], "A") || !strings.Contains(applied[1], "C") {
+		t.Errorf("應只放行 A、C，got %v", applied)
+	}
+
+	// 未選中的 B 仍留在提案檔，且【重新編號為 1】
+	rest := ListProposedMemory(root)
+	if len(rest) != 1 || !strings.Contains(rest[0].Learning, "B") || rest[0].N != 1 {
+		t.Fatalf("B 應留下並重新編號為 1，got %+v", rest)
+	}
+	// 分組標頭要保留（否則放行後的記錄失去 kind/task 溯源）
+	if rest[0].Header == "" || rest[0].Kind == "" {
+		t.Errorf("回寫應保留分組標頭，got header=%q kind=%q", rest[0].Header, rest[0].Kind)
+	}
+
+	// 記錄只落了 A、C
+	memDir := filepath.Join(root, ".claw", "memory")
+	entries, _ := os.ReadDir(memDir)
+	if len(entries) != 2 {
+		t.Errorf("應只有 2 筆記錄，got %d", len(entries))
+	}
+
+	// 丟棄剩下那條 → 提案檔消失
+	dropped, err := DiscardProposedMemory(root, 1)
+	if err != nil || len(dropped) != 1 {
+		t.Fatalf("應丟棄 1 條，got %v err=%v", dropped, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claw", ProposedMemoryFileName)); !os.IsNotExist(err) {
+		t.Error("全部處置完畢後提案檔應消失")
+	}
+}
+
+// 編號不存在時不該動任何東西（避免「打錯字就把整批放行」）。
+func TestApplyProposedMemory_UnknownIndexIsNoop(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"learnings": ["只有一條"]}`}
+	_, _ = NewMemorySynthesizer(fp, root).Reflect(t.Context(), "t", nil)
+
+	applied, err := ApplyProposedMemory(root, 9)
+	if err != nil || len(applied) != 0 {
+		t.Errorf("編號不存在應為 no-op，got %v err=%v", applied, err)
+	}
+	if len(ListProposedMemory(root)) != 1 {
+		t.Error("no-op 後提案應原封不動")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -552,7 +553,9 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"**Plan Mode（長任務斷點續傳）**\n" +
 	"`plan on` / `plan off` / `plan status` — 把計畫/進度外部化到 PLAN.md · TODO.md 的開關\n\n" +
 	"**自我進化把關（提案 → 人工放行）**\n" +
-	"`apply memory` / `reject memory` — 放行 / 丟棄提案的長期記憶\n" +
+	"`memory list` — 列出提案記憶（含編號）\n" +
+	"`apply memory` / `reject memory` — 放行 / 丟棄提案的長期記憶（**全部**）\n" +
+	"`apply memory <編號>` / `reject memory <編號>` — 逐條放行 / 丟棄（可多個，如 `apply memory 1 3`）\n" +
 	"`apply edges` / `reject edges` — 放行 / 丟棄提案的知識圖譜關係\n" +
 	"`apply config` / `reject config` — 套用 / 丟棄調參提案\n\n" +
 	"**說明**\n" +
@@ -858,27 +861,95 @@ func (c *Core) tryPlanCommand(convID, text string) bool {
 
 // tryMemoryCommand：apply/reject memory 閘——人點頭才把提案記憶放行為可檢索長期記憶（.claw/memory/）。
 func (c *Core) tryMemoryCommand(convID, text string) bool {
-	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "apply memory", "approve memory":
-		applied, err := evolve.ApplyProposedMemory(c.memoryDir(convID))
+	verb, nums, ok := parseMemoryCommand(text)
+	if !ok {
+		return false
+	}
+	dir := c.memoryDir(convID)
+	switch verb {
+	case "list":
+		entries := evolve.ListProposedMemory(dir)
+		if len(entries) == 0 {
+			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
+			return true
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "🧠 提案記憶 %d 條（`apply memory <編號>` 逐條放行／`apply memory` 全部）：\n", len(entries))
+		for _, e := range entries {
+			fmt.Fprintf(&b, "%d. [%s] %s\n", e.N, e.Kind, e.Learning)
+		}
+		SendMessage(convID, b.String())
+	case "apply", "reject":
+		// 「根本沒提案」與「指定編號不存在」是兩件事，訊息要分開——後者多半是打錯編號。
+		if len(evolve.ListProposedMemory(dir)) == 0 {
+			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
+			return true
+		}
+		var done []string
+		var err error
+		if verb == "apply" {
+			done, err = evolve.ApplyProposedMemory(dir, nums...)
+		} else {
+			done, err = evolve.DiscardProposedMemory(dir, nums...)
+		}
 		switch {
 		case err != nil:
-			SendMessage(convID, fmt.Sprintf("❌ 併入失敗: %v", err))
-		case applied == "":
-			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
+			SendMessage(convID, fmt.Sprintf("❌ 處理失敗: %v", err))
+		case len(done) == 0:
+			SendMessage(convID, "ℹ️ 指定的編號不存在（用 `memory list` 查看目前有哪些）。")
+		case verb == "apply":
+			SendMessage(convID, fmt.Sprintf("✅ 已放行 %d 條提案記憶為可檢索的長期記憶（recall 可取），下次任務起生效。%s",
+				len(done), remainingHint(evolve.ListProposedMemory(dir))))
 		default:
-			SendMessage(convID, "✅ 已把提案記憶放行為可檢索的長期記憶（recall 可取），下次任務起生效。")
+			SendMessage(convID, fmt.Sprintf("🗑️ 已丟棄 %d 條提案記憶（未放行）。%s",
+				len(done), remainingHint(evolve.ListProposedMemory(dir))))
 		}
-		return true
-	case "reject memory", "discard memory":
-		if had, _ := evolve.DiscardProposedMemory(c.memoryDir(convID)); had {
-			SendMessage(convID, "🗑️ 已丟棄提案記憶（未放行）。")
-		} else {
-			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
-		}
-		return true
 	}
-	return false
+	return true
+}
+
+// remainingHint 在逐條處置後提示還剩幾條——否則使用者不知道提案檔還有東西沒處理。
+func remainingHint(rest []evolve.ProposedMemoryEntry) string {
+	if len(rest) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("尚有 %d 條待處置（`memory list`）。", len(rest))
+}
+
+// parseMemoryCommand 解析記憶審核口令：
+//
+//	memory list                    → ("list", nil)
+//	apply|approve memory           → ("apply", nil)      全部
+//	apply memory 2 / apply memory 1 3 → ("apply", [2]) / ("apply", [1 3])  逐條
+//	reject|discard memory [編號…]  → ("reject", …)
+//
+// 編號是 1-based，對應 `memory list` 的顯示。非數字尾綴不當本指令消費（交給後面的閘或當任務）。
+func parseMemoryCommand(text string) (verb string, nums []int, ok bool) {
+	fields := strings.Fields(strings.ToLower(strings.TrimSpace(text)))
+	if len(fields) < 2 {
+		return "", nil, false
+	}
+	switch {
+	case fields[0] == "memory" && fields[1] == "list":
+		if len(fields) != 2 {
+			return "", nil, false // "memory list ..." 帶尾綴：不消費
+		}
+		return "list", nil, true
+	case (fields[0] == "apply" || fields[0] == "approve") && fields[1] == "memory":
+		verb = "apply"
+	case (fields[0] == "reject" || fields[0] == "discard") && fields[1] == "memory":
+		verb = "reject"
+	default:
+		return "", nil, false
+	}
+	for _, f := range fields[2:] {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 1 {
+			return "", nil, false // 帶了看不懂的尾綴：不消費，避免誤吃使用者的話
+		}
+		nums = append(nums, n)
+	}
+	return verb, nums, true
 }
 
 // tryEdgesCommand：apply/reject edges 閘——把 post-task 抽出的 typed 關係過 gate 併入知識圖譜。

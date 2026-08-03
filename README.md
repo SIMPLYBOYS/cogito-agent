@@ -336,7 +336,8 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `compress` | 手動摺疊 context（把舊訊息摺進滾動摘要），縮短歷史省成本 |
    | `learn` | 從本次對話蒸餾一個【提案】技能（進暫存區，過 `skillgate` 把關才生效） |
    | `approve` / `reject`（可帶 taskID） | 放行 / 拒絕被危險指令審批攔下的工具呼叫（僅 `COGITO_ADMIN_USERS`） |
-   | `apply memory` / `reject memory` | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄） |
+   | `memory list` | 列出提案記憶（含編號），供逐條審核 |
+   | `apply memory` / `reject memory`（可帶編號） | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄）。不帶編號＝整批；帶編號＝逐條，如 `apply memory 1 3`——反思是批次產出的，「大致有用但夾一條爛的」才是常態 |
    | `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
    | `apply config` / `reject config` | 放行 / 丟棄 `cmd/bench -tune` 產出的**提案參數**（放行＝晉升為 `.claw/config.json`、下次任務起套用；套用時再 clamp 有界） |
    | `plan on` / `plan off` / `plan status` | 切換**本頻道** Plan Mode（計畫外部化到 `PLAN.md`/`TODO.md` + 目標錨 + 確定性步驟跳過）。多步長任務建議開、閒聊免儀式；狀態隨 session 持久化 |
