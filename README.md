@@ -279,6 +279,16 @@ cp .env.example .env
 | `OTEL_TRACES_EXPORTER` | （選填）設為 `console` 時把 span 印到終端（本地除錯，不需後端） |
 | `COGITO_MCP_CONFIG` | （選填）`.mcp.json` 路徑；載入並連接外部 MCP 工具伺服器 |
 | `COGITO_MCP_TIMEOUT` | （選填）單次 MCP 工具呼叫的秒數上限，預設 300（5 分鐘）。這是**防吊死的 backstop** 而非效能政策——遠端工具合法地可能很慢，但「接受連線卻不回應」的 server 會永久佔住引擎的併發令牌（回合/成本熔斷只在回合**之間**檢查，救不了卡在單次呼叫裡的任務）。設 `0` = 不限（回到舊行為） |
+| `COGITO_SESSION_DIR` | （選填）session 落地目錄；設了才跨重啟續傳、面板 `/runs` 才看得到 bot 的執行樹（斷點粒度＝回合） |
+| `COGITO_AUTO_RESUME` | （選填）`1`＝自動續跑：行程活著時暫時性中斷退避重試；被硬砍後重啟掃出未完成任務續跑（各上限 3 次防迴圈）。跨重啟需一併設 `COGITO_SESSION_DIR` |
+| `COGITO_SUMMARY` | （選填）`off` 關閉對話式入口的滾動摘要（預設開）。**注意**：開著才會走[錨定式窗口](#上下文工程一輪-prompt-怎麼組起來的)，那是 prompt caching 斷點③命中的前提 |
+| `COGITO_MEMORY_SCOPE` | （選填）`channel`＝長期記憶 **per-conversation 隔離**（技能仍共享）；預設 `global` 跨對話共享。見 [docs/multi-tenancy.md](docs/multi-tenancy.md) |
+| `COGITO_REFLECT_MODEL` | （選填）**背景反思改用便宜模型**（技能/記憶/KG 蒸餾）。它們在任務結束後才跑、沒人在等、產物還要人工放行——沒必要燒主模型。刻意**不**涵蓋 goal judge（那道驗收影響任務結果） |
+| `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | （選填）`1` 開啟自我進化的三種反思：提案技能／提案記憶（成功慣例 + 失敗教訓）／提案 KG 關係。**產物一律只進暫存區，需人工放行** |
+| `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
+| `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
+| `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
+| `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。⚠️ 若沒單獨設 `COGITO_ADMIN_USERS`，此身分會連帶取得審批權＝「持 token 者可自我放行」 |
 
 > **平台限定（`COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK` 通用）**：名單條目可寫 `platform:id`（只在該平台生效）或裸 `id`（任何平台皆生效，向後相容既有設定）。**建議加前綴**——裸 id 在每個平台都生效，今天安全只因 Telegram（純數字）與 Slack（`U` 開頭）的 ID 空間恰好不重疊；接入第三個平台那天（如 Discord 的 snowflake 也是純數字），一個同號的陌生人就會**直接通過授權閘**。例：`COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`。注意 `COGITO_USER_LINK` 改用前綴會換掉 session key，既有共享 session 不會自動搬移。
 
@@ -715,6 +725,22 @@ go run ./cmd/skillgate -promote <技能名>   # 名稱＝skills-proposed/ 下的
 ```
 
 CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 gofmt/vet/build/`test -race`（無需 key）；[`benchmark.yml`](.github/workflows/benchmark.yml) 手動或每週排程跑分（需在 repo Secrets 設 `ANTHROPIC_API_KEY`），上傳 JSON 報告為 artifact。
+
+## 文件索引
+
+原始碼之外的設計、協定與實測記錄都在 [`docs/`](docs/)。
+
+| 文件 | 內容 |
+|---|---|
+| [multi-tenancy.md](docs/multi-tenancy.md) | **多租戶架構**：硬租戶（一行程一租戶）vs 軟租戶（per-conversation）的兩層模型、逐維度隔離矩陣、`COGITO_MEMORY_SCOPE` 的記憶隔離 |
+| [office-protocol.md](docs/office-protocol.md) | **像素辦公室協定 v1**：三個 HTTP 端點、事件 `kind` 全集與欄位語意、傳遞保證（會掉幀、不反壓）、版本演進規則 |
+| [eval-results.md](docs/eval-results.md) | **三層評測結果**：檢索（keyword 0.50 → +KG 1.00）、記憶 A/B（步數 −66%）、技能 A/B（1/5→4/5，**p=0.206 未達顯著，照實記**）、SWE-bench |
+| [kg-spec.md](docs/kg-spec.md) | 知識圖譜規格：typed 關係、多跳檢索、提案邊的 gate |
+| [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
+| [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
+| [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
+| [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | demo 腳本：治理三幕 / 多 agent 並行 code review |
+| [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | SWE-bench 官方 harness 跑法、Plan Mode 斷點續傳演示 |
 
 ## Contributing
 
