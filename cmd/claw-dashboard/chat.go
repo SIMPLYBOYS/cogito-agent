@@ -61,6 +61,9 @@ func newChatRunner(workDir string) (*chatRunner, error) {
 
 	registry := tools.NewRegistry()
 	agentkit.RegisterCoreTools(registry, workDir, workDir, workDir, executor) // operator chat：單租戶，技能=記憶=workDir
+	// 過去對話的檢索入口。store 取自 GlobalSessionMgr（-sessions 已在 main 綁好）；沒開持久化就是 nil，
+	// 工具照樣註冊、只是明講「未啟用」。排除 operator 自己這條，免得檢索到剛剛講的話。
+	registry.Register(tools.NewSearchSessionsTool(ctxpkg.GlobalSessionMgr.Store(), operatorSessionID))
 
 	taskMgr := tools.NewTaskManager(executor, workDir)
 	for _, tt := range tools.NewTaskTools(taskMgr) {

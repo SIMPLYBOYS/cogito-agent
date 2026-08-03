@@ -452,6 +452,14 @@ func (sm *SessionManager) SetStore(store SessionStore) {
 	sm.store = store
 }
 
+// Store 回傳目前綁定的 store（未開持久化時為 nil）——給需要【橫向檢索既有 session】的元件用
+// （search_sessions 工具），不必再從 env 重建一份 store。
+func (sm *SessionManager) Store() SessionStore {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.store
+}
+
 // GlobalSessionMgr 是包級全域單例，方便各 IM adapter（Slack 等）共享同一 session 池。
 var GlobalSessionMgr = &SessionManager{
 	sessions: make(map[string]*Session),

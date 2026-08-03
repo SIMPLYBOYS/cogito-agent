@@ -80,9 +80,10 @@ func main() {
 
 	// session 持久化：設 COGITO_SESSION_DIR 即把歷史/費用落地磁碟——讓 -session 斷點續傳跨重啟生效。
 	// 必須在 GetOrCreate 之前 SetStore，才能從磁碟復原既有 session。
-	if store, dir := ctxpkg.StoreFromEnv(); store != nil {
-		ctxpkg.GlobalSessionMgr.SetStore(store)
-		log.Printf("[Session] 持久化已啟用: %s", dir)
+	sessStore, sessDir := ctxpkg.StoreFromEnv() // 提出：search_sessions 也要用它檢索過去的對話
+	if sessStore != nil {
+		ctxpkg.GlobalSessionMgr.SetStore(sessStore)
+		log.Printf("[Session] 持久化已啟用: %s", sessDir)
 	}
 
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(*sessionPtr, workDir)
@@ -103,6 +104,7 @@ func main() {
 	registry := tools.NewRegistry()
 	// 核心工具集（skillMemDir=workDir：CLI 工作區即技能/記憶來源）。
 	agentkit.RegisterCoreTools(registry, workDir, workDir, workDir, executor) // 單一目錄：技能=記憶=workDir
+	registry.Register(tools.NewSearchSessionsTool(sessStore, *sessionPtr))    // 過去對話檢索（排除本次自己）
 	if os.Getenv("COGITO_SKILL_SYNTH") == "1" || os.Getenv("COGITO_MEMORY_SYNTH") == "1" || os.Getenv("COGITO_KG_SYNTH") == "1" {
 		registry.Register(tools.NewConsolidateTool(reflectProv, workDir, workDir, sess)) // 單租戶：技能=記憶=workDir。agent 可主動沉澱（產物仍 gated）
 	}

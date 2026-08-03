@@ -28,6 +28,7 @@
 - `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四件極簡原語。
 - 🧭 **`spawn_subagent`**：把子任務委派給隔離的子 agent，上下文隔離、可並行派多路；可綁定技能進子 context。支援**具名 agent**（`agent_type`）——在 `.claw/agents/<name>.md` 用 frontmatter 定義角色/工具集（code-reviewer、planner、security-auditor…），不指定則為預設探路者。
 - ⏱️ **背景任務**：長命令（dev server、長建置/訓練）丟背景跑、跨輪查輸出/終止；每會話獨立、有並發上限、走同一危險審批。
+- 🔎 **`search_sessions`**：關鍵字檢索**過去的對話**（跨 session／跨頻道，中英皆可），回**有界**摘要——何時、哪個會話、花了多少、命中片段。「這件事以前處理過嗎／上次怎麼解的」不必再自己 grep 整份 session JSON。
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
 
 **駕馭工程（失控控制）**
@@ -41,7 +42,7 @@
 - 🗜️ **自適應壓縮**：壓縮水位按模型真實上下文窗口設定，並用每次回傳的 `PromptTokens` 自校準。
 - 🪟 **滑動窗口 + System Prompt 組裝**：組裝身份/紀律/`AGENTS.md`/技能；支援 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`、可斷點續傳）與**漸進式技能載入**（只放索引、正文按需載入）。
 - 🧠 **可檢索長期記憶（知識圖譜）**：記憶存成離散記錄、System Prompt 只常駐索引（封頂）；`recall` 回**連通子圖**——命中記憶 + 其 `[[連結]]` 鄰域 + 它們之間的關係（中文 bigram 選種子、k 跳擴張），讓模型做多跳關係推理。命中更新 LRU、超量自動歸檔（可復原非刪除）。取代「`AGENTS.md` 整檔全載」，對齊 CoALA 長期語意層。
-- 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原。
+- 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原；並成為 `search_sessions` 的檢索母體——過去的對話從「只能續接」變成「可以回頭查」。
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
 
 **接入與可觀測性**
@@ -168,6 +169,7 @@ flowchart TB
 
 - **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引、記憶索引（皆漸進式，只放目錄不放正文）——整個 Execute 只建一次。
 - **長期記憶**（[memory.go](internal/context/memory.go)）：離散記錄存 `.claw/memory/`，索引常駐封頂、`recall` 工具按需取正文（中文 bigram）；命中更新 LRU、超量歸檔到 `.claw/memory-archive/`（可復原）。取代「`AGENTS.md` 整檔全載」。
+- **過去的對話**（[session_search.go](internal/context/session_search.go)）：`search_sessions` 工具的核心。與 `recall` 共用同一套詞法（英數整詞 + CJK bigram），線性掃描落地的 session 評分，輸出**有界**（每會話 ≤3 段 × 160 字、預設 5 會話、上限 20）——要細節再自己讀那一檔。
 - **動態層**（[session.go](internal/context/session.go) `GetWorkingMemory`）：取末 20 條，剝孤兒 `tool_result`、首條補 `user` 以滿足 Anthropic 嚴格交替。
 - **三道防線**：Compactor 防總量（[75% 水位](internal/context/compactor.go)）、滑動窗口防條數、剝離/補位防協議；皆只動發出去的副本，不毀 `history`。
 - **自校準回饋**：每輪用真實 `PromptTokens` 修正 byte/token 比，估算隨 tokenizer 收斂，自動適配不同窗口的模型。
@@ -209,7 +211,8 @@ internal/
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
 │   ├── read_file/write_file/edit_file/bash.go   內建工具
 │   ├── subagent.go          spawn_subagent（agent-as-tool）
-│   └── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
+│   ├── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
+│   └── search_sessions.go   過去對話檢索（薄殼；評分在 context/session_search.go）
 ├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
 ├── mcp/                     MCP 客戶端（stdio + Streamable HTTP 兩種 transport）+ gateway（漸進式暴露）
 ├── chatbot/                 傳輸無關核心：指令閘/會話隔離/鎖/跑任務管線/進度回報 + HITL 審批 + 跨平台發送路由

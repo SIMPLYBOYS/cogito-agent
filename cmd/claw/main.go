@@ -60,9 +60,10 @@ func main() {
 	sandbox.WarnIfHost(executor) // bot＝開放入口：host 直跑時打醒目警告（見 WarnIfHost 的理由）
 
 	// session 持久化：設 COGITO_SESSION_DIR 即把對話歷史/費用落地磁碟，重啟後按頻道 ID 復原。
-	if store, dir := ctxpkg.StoreFromEnv(); store != nil {
-		ctxpkg.GlobalSessionMgr.SetStore(store)
-		log.Printf("[Session] 持久化已啟用: %s", dir)
+	sessStore, sessDir := ctxpkg.StoreFromEnv() // 提出 if：search_sessions 工具也要用它檢索過去的對話
+	if sessStore != nil {
+		ctxpkg.GlobalSessionMgr.SetStore(sessStore)
+		log.Printf("[Session] 持久化已啟用: %s", sessDir)
 	} else {
 		log.Printf("[Session] 純記憶體模式（設 COGITO_SESSION_DIR 可跨重啟續傳）")
 	}
@@ -139,6 +140,8 @@ func main() {
 		// 核心工具集：檔案讀寫/bash/編輯 rooted 在 sess.WorkDir（per-channel 磁碟隔離）；技能 rooted 在
 		// rootDir（全 bot 共用）；長期記憶（recall）rooted 在 memDir（預設 rootDir，channel scope 時 per-對話）。
 		agentkit.RegisterCoreTools(registry, sess.WorkDir, rootDir, memDir, executor)
+		// 過去對話的檢索入口（跨 session／跨頻道）：排除自己，避免「覆盤自己的覆盤」。
+		registry.Register(tools.NewSearchSessionsTool(sessStore, sess.ID))
 		if selfEvolveEnabled() { // agent 可主動沉澱（與 post-task hook 互補；產物仍 gated）
 			registry.Register(tools.NewConsolidateTool(reflectProv, rootDir, memDir, sess)) // 技能提案共享、記憶提案隨 scope
 		}
