@@ -41,6 +41,7 @@
 **上下文工程**
 - 🗜️ **自適應壓縮**：壓縮水位按模型真實上下文窗口設定，並用每次回傳的 `PromptTokens` 自校準。
 - 🪟 **滑動窗口 + System Prompt 組裝**：組裝身份/紀律/`AGENTS.md`/技能；支援 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`、可斷點續傳）與**漸進式技能載入**（只放索引、正文按需載入）。
+- 👤 **使用者畫像層（常駐）**：標了 `tags: [user]` 的記憶【正文每輪常駐】，不走 `recall`——「他不吃某種寫法」這種事，等模型想起來要查時通常已經寫完了。額度封頂（12 條 / 2000 字）、依名稱穩定排序（凍結前綴、不打掉 prompt cache）、超額寧可整條不放（截斷會把「不要 X」切成「要 X」）。反思時順手從同一次 LLM 呼叫分流出來，不多花錢。
 - 🧠 **可檢索長期記憶（知識圖譜）**：記憶存成離散記錄、System Prompt 只常駐索引（封頂）；`recall` 回**連通子圖**——命中記憶 + 其 `[[連結]]` 鄰域 + 它們之間的關係（中文 bigram 選種子、k 跳擴張），讓模型做多跳關係推理。命中更新 LRU、超量自動歸檔（可復原非刪除）。取代「`AGENTS.md` 整檔全載」，對齊 CoALA 長期語意層。
 - 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原；並成為 `search_sessions` 的檢索母體——過去的對話從「只能續接」變成「可以回頭查」。
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
@@ -169,6 +170,7 @@ flowchart TB
 
 - **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引、記憶索引（皆漸進式，只放目錄不放正文）——整個 Execute 只建一次。
 - **長期記憶**（[memory.go](internal/context/memory.go)）：離散記錄存 `.claw/memory/`，索引常駐封頂、`recall` 工具按需取正文（中文 bigram）；命中更新 LRU、超量歸檔到 `.claw/memory-archive/`（可復原）。取代「`AGENTS.md` 整檔全載」。
+  - **兩級待遇**：`tags: [user]` 的記錄走**使用者畫像**——正文直接鋪進靜態層、每輪常駐（依名稱排序保前綴穩定）；其餘維持漸進式（只放索引、正文等 `recall`）。畫像額度用完的部分照樣在索引裡、`recall` 得到。
 - **過去的對話**（[session_search.go](internal/context/session_search.go)）：`search_sessions` 工具的核心。與 `recall` 共用同一套詞法（英數整詞 + CJK bigram），線性掃描落地的 session 評分，輸出**有界**（每會話 ≤3 段 × 160 字、預設 5 會話、上限 20）——要細節再自己讀那一檔。
 - **動態層**（[session.go](internal/context/session.go) `GetWorkingMemory`）：取末 20 條，剝孤兒 `tool_result`、首條補 `user` 以滿足 Anthropic 嚴格交替。
 - **三道防線**：Compactor 防總量（[75% 水位](internal/context/compactor.go)）、滑動窗口防條數、剝離/補位防協議；皆只動發出去的副本，不毀 `history`。

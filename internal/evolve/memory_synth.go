@@ -40,12 +40,16 @@ const memoryReflectSystemPrompt = `你是專案長期記憶的維護者。看完
 專案指南（AGENTS.md）的「耐久、可泛化」慣例或雷點——例如：建置/測試命令、repo 慣用法、容易踩的坑、
 環境前置。
 
+同時單獨萃取【關於使用者本人】的長期事實與偏好——他要什麼、不要什麼、慣用什麼語言/風格、
+在意什麼。最高價值的訊號是「使用者當場糾正或改變你的做法」：那是偏好，不是專案慣例。
+
 判準（從嚴）：
 - 只保留對【未來任意任務】都有參考價值的；本次一次性的具體事實、與這次資料強綁定的內容【不要】。
 - 每條寫成一句簡潔的祈使句／陳述（不要把這次的具體檔名數值寫死）。
+- 兩者不重複：關於【專案】的放 learnings，關於【這個人】的放 user_facts。
 
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
-{"learnings": ["<一句話>", "<一句話>"]}；若無值得記的，輸出 {"learnings": []}。`
+{"learnings": ["<一句話>"], "user_facts": ["<一句話>"]}；沒有的那項給空陣列。`
 
 // Reflect 反思一段軌跡，把新的耐久學習追加到提案記憶暫存檔。回傳實際追加的條目（去重/安全過濾後）。
 func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, history []schema.Message) ([]string, error) {
@@ -61,11 +65,19 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 
 	var out struct {
 		Learnings []string `json:"learnings"`
+		UserFacts []string `json:"user_facts"`
 	}
 	if err := json.Unmarshal([]byte(extractJSON(resp.Content)), &out); err != nil {
 		return nil, fmt.Errorf("記憶反思輸出非合法 JSON（%q）: %w", resp.Content, err)
 	}
-	return m.proposeLearnings(taskPrompt, out.Learnings, "慣例")
+	added, err := m.proposeLearnings(taskPrompt, out.Learnings, "慣例")
+	if err != nil {
+		return added, err
+	}
+	// 使用者偏好分流成 UserProfileTag——放行後正文【每輪常駐】，不像一般記憶要等 recall。
+	// 同一次 LLM 呼叫順手產出，不多花一次錢。
+	facts, err := m.proposeLearnings(taskPrompt, out.UserFacts, ctxpkg.UserProfileTag)
+	return append(added, facts...), err
 }
 
 const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。一個 agent 在與使用者的互動中嘗試完成任務但【失敗了】

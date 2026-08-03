@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 )
 
 // 放行的記憶記錄要自帶來源標註（provenance）：時間戳 + 由誰/從哪個任務沉澱——對抗幻覺記憶、可溯源。
@@ -252,5 +254,47 @@ func TestApplyProposedMemory_UnknownIndexIsNoop(t *testing.T) {
 	}
 	if len(ListProposedMemory(root)) != 1 {
 		t.Error("no-op 後提案應原封不動")
+	}
+}
+
+// 使用者偏好與專案慣例分流：前者標成 UserProfileTag，放行後正文每輪常駐（不必等 recall）。
+func TestMemoryReflect_RoutesUserFacts(t *testing.T) {
+	root := t.TempDir()
+	fp := &fakeProvider{content: `{"learnings": ["本專案用 pnpm 而非 npm"], "user_facts": ["使用者要繁體中文回覆"]}`}
+	m := NewMemorySynthesizer(fp, root)
+
+	added, err := m.Reflect(t.Context(), "裝依賴並跑測試", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 2 {
+		t.Fatalf("慣例 + 使用者事實共 2 條，got %v", added)
+	}
+
+	entries := ListProposedMemory(root)
+	kinds := map[string]string{}
+	for _, e := range entries {
+		kinds[e.Kind] = e.Learning
+	}
+	if kinds["慣例"] != "本專案用 pnpm 而非 npm" {
+		t.Errorf("慣例分流錯了: %+v", entries)
+	}
+	if kinds[ctxpkg.UserProfileTag] != "使用者要繁體中文回覆" {
+		t.Errorf("使用者事實應標成 %q: %+v", ctxpkg.UserProfileTag, entries)
+	}
+
+	// 放行後落地的記錄要帶 tags: [user]，否則 LoadIndex 認不出來、常駐待遇形同虛設。
+	if _, err := ApplyProposedMemory(root); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := filepath.Glob(filepath.Join(root, ".claw", "memory", "mem-*.md"))
+	found := false
+	for _, f := range files {
+		if b, _ := os.ReadFile(f); strings.Contains(string(b), "tags: ["+ctxpkg.UserProfileTag+"]") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("放行後應有一筆 tags: [%s] 的記錄，got %v", ctxpkg.UserProfileTag, files)
 	}
 }

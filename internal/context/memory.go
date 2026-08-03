@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,17 @@ import (
 // maxIndexEntries 是 System Prompt 常駐記憶索引的條數上限（依最近使用排序取前 N）；其餘記憶不列入
 // 索引，但仍可被 recall 檢索到——避免記憶一多連「索引」本身都把上下文撐爆。
 const maxIndexEntries = 30
+
+// UserProfileTag 標記「關於使用者本人」的記憶（`tags: [user]`）。這類記錄【正文常駐】System Prompt，
+// 不走 recall——使用者的身分/偏好/禁忌必須每輪都在：等模型「想起來要查」才知道對方不吃某種寫法，
+// 那時通常已經寫完了。其餘記憶維持漸進式（索引常駐、正文按需），這是刻意的兩級待遇。
+const UserProfileTag = "user"
+
+// 常駐即成本：畫像是每輪都送的固定開銷，故條數與長度都封頂。超出的部分照樣在索引裡、recall 得到。
+const (
+	maxProfileEntries = 12
+	maxProfileRunes   = 2000
+)
 
 // MemoryRecord 是一筆離散的長期記憶（.claw/memory/<slug>.md）：frontmatter 帶 name/description/tags，
 // body 是正文。與技能（SKILL.md）同構——差別在「記憶」是沉澱的事實/慣例/教訓，「技能」是操作流程。
@@ -214,6 +226,13 @@ func (m *MemoryLoader) LoadIndex() string {
 	if len(recs) == 0 {
 		return ""
 	}
+	profile, recs := splitUserProfile(recs)
+	var b strings.Builder
+	b.WriteString(renderUserProfile(profile))
+	if len(recs) == 0 {
+		return b.String()
+	}
+
 	// 依最近使用排序（帳本優先，缺則檔案 mtime），索引只常駐前 maxIndexEntries 條；其餘仍可被 recall 檢索到。
 	sort.SliceStable(recs, func(i, j int) bool { return recs[i].usedAt.After(recs[j].usedAt) })
 	hidden := 0
@@ -221,7 +240,6 @@ func (m *MemoryLoader) LoadIndex() string {
 		hidden = len(recs) - maxIndexEntries
 		recs = recs[:maxIndexEntries]
 	}
-	var b strings.Builder
 	b.WriteString("\n### 長期記憶索引 (Long-term Memory)\n")
 	b.WriteString("以下是你過往沉澱的長期記憶【索引】（僅標題與摘要，依最近使用排序）。當前任務若與某條相關，先用 `recall` 工具按關鍵字取回正文再參考，不要憑空臆測。\n")
 	for _, r := range recs {
@@ -233,6 +251,48 @@ func (m *MemoryLoader) LoadIndex() string {
 	}
 	if hidden > 0 {
 		fmt.Fprintf(&b, "- …（另有 %d 條未列於索引，需要時直接用 `recall` 關鍵字檢索）\n", hidden)
+	}
+	return b.String()
+}
+
+// splitUserProfile 把 `tags: [user]` 的記錄分流出來（其餘原序回傳，不影響索引的 LRU 排序）。
+func splitUserProfile(recs []MemoryRecord) (profile, rest []MemoryRecord) {
+	for _, r := range recs {
+		if slices.ContainsFunc(r.Tags, func(t string) bool { return strings.EqualFold(t, UserProfileTag) }) {
+			profile = append(profile, r)
+			continue
+		}
+		rest = append(rest, r)
+	}
+	// 依名稱排序而非 LRU：畫像是【凍結的 prompt 前綴】，順序每輪都一樣才不會打掉 prefix cache。
+	sort.Slice(profile, func(i, j int) bool { return profile[i].Name < profile[j].Name })
+	return profile, rest
+}
+
+// renderUserProfile 把畫像記錄的正文直接鋪進 System Prompt（有界）。無記錄回空字串。
+func renderUserProfile(recs []MemoryRecord) string {
+	if len(recs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n### 關於使用者 (User Profile)\n")
+	b.WriteString("以下是關於使用者本人的長期事實與偏好，【每輪常駐】。與之衝突的通用預設一律讓位；本人當場另有指示則以當場為準。\n")
+	used, shown := 0, 0
+	for _, r := range recs {
+		body := strings.TrimSpace(r.Body)
+		if body == "" {
+			body = r.Description
+		}
+		// 超支就整條不放——寧可少一條完整的，也不要半截的偏好（截斷會把「不要 X」切成「要 X」）。
+		if shown >= maxProfileEntries || used+len([]rune(body)) > maxProfileRunes {
+			break
+		}
+		used += len([]rune(body))
+		shown++
+		fmt.Fprintf(&b, "- **%s**：%s\n", r.Name, body)
+	}
+	if rest := len(recs) - shown; rest > 0 {
+		fmt.Fprintf(&b, "- …（另有 %d 條使用者相關記憶超出常駐額度，需要時用 `recall` 取回）\n", rest)
 	}
 	return b.String()
 }
