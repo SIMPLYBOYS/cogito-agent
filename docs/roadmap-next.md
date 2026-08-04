@@ -265,6 +265,22 @@ Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與
 
 ---
 
+## 🆕 對照 YC qm 的新增項（2026-08-04）
+
+qm（YC 內部 harness，2026-07-31 MIT 開源）盤點後有兩項進這份清單，細節在
+[qm-learnings.md](qm-learnings.md)：
+
+- **🟢 SECURITY.md 彙整**（~1h、零風險）：內容已散在 README:36 與 incident-blacklist-bypass.md，
+  缺的只是一頁能一次看完的「防什麼／**不防什麼**」。
+- **🔴 記憶整併動作清單**：`MemorySynthesizer` 目前只 append，沒有任何路徑會 UPDATE/DELETE
+  既有記錄——矛盾的記憶會並存在索引裡。補 `Consolidate()` 回 `UPDATE <n>`/`DELETE <n>`/`ADD`/`NONE`，
+  產物走 P1 已做好的逐條審批；`DELETE` 走歸檔而非真刪。
+
+另兩項（模型核准清單、egress 中間態）掛在「多租戶/外部委託真的發生」的觸發條件上，
+未發生前做了也驗證不了——理由與更正過的前提見該文件。
+
+---
+
 ## 建議順序（07-24 更新；原順序的 get 與 caching 已結案）
 
 **🟢 評測補完 → 🔴 2. SWE-bench `-swe-env-setup` → 🟡 3b. Telegram thread（若走 orchestrator 路線）→ 🟡 4/5. 面板身分（tsnet 或反代標頭）**

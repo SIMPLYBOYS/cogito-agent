@@ -743,6 +743,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 | [kg-spec.md](docs/kg-spec.md) | 知識圖譜規格：typed 關係、多跳檢索、提案邊的 gate |
 | [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
 | [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
+| [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
 | [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
 | [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | demo 腳本：治理三幕 / 多 agent 並行 code review |
 | [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | SWE-bench 官方 harness 跑法、Plan Mode 斷點續傳演示 |
