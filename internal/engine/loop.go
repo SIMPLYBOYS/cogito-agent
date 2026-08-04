@@ -62,6 +62,11 @@ type AgentEngine struct {
 	injector      *ReminderInjector       // 無窮迴圈探測與強提醒注入
 }
 
+// AvailableTools 回報這具引擎【實際掛上】的工具（名稱＋說明）。給外部檢視用——例如像素辦公室
+// 要在名冊上列出「這位員工有哪些能力」。寫成 getter 而不是讓外部自己組一份清單：工具是在
+// factory 裡按頻道組裝的（MCP、背景任務、自我進化都是條件式掛載），任何寫死的列表都會走鐘。
+func (e *AgentEngine) AvailableTools() []schema.ToolDefinition { return e.registry.GetAvailableTools() }
+
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
 	return &AgentEngine{
 		provider:           p,

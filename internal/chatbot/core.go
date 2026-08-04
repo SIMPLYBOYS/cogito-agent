@@ -501,6 +501,16 @@ func (c *Core) sessionFor(convID string) *ctxpkg.Session {
 	return ctxpkg.GlobalSessionMgr.GetOrCreate(convID, c.channelWorkDir(convID))
 }
 
+// Capabilities 回報某個頻道【實際掛上】的工具與可用技能，供外部檢視（像素辦公室的名冊要
+// 列出「這位員工有哪些能力」）。工具是在 factory 裡按頻道組裝的（MCP、背景任務、自我進化
+// 都是條件式掛載），所以只能問引擎本人——任何寫死的清單都會走鐘。
+// 技能 rooted 在 workDir（全 bot 共用的 .claw/skills），與 PromptComposer 讀的是同一份。
+func (c *Core) Capabilities(channelID string) ([]schema.ToolDefinition, []ctxpkg.Skill) {
+	sess := c.sessionFor(c.convID(channelID))
+	eng := c.factory(sess, nil)
+	return eng.AvailableTools(), ctxpkg.NewSkillLoader(c.workDir).List()
+}
+
 // ResumeInterrupted 在行程啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍
 // 標記進行中」的自動從斷點續跑。只處理本平台（platform 前綴）的 session；連續多次續跑仍中斷則停手
 // 防崩潰迴圈。需 COGITO_AUTO_RESUME=1 且有持久化（COGITO_SESSION_DIR），否則自然 no-op。

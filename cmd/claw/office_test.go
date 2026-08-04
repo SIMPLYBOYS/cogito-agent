@@ -5,6 +5,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // 綁定政策：這條是「能執行任意任務的入口別意外對外曝光」的唯一防線。
@@ -85,5 +88,48 @@ func TestOfficeTaskHandler(t *testing.T) {
 	}
 	if dispatched != 1 || gotChannel != "p01" || gotUser != "office-web" || gotText != "跑個測試" {
 		t.Errorf("派工參數錯誤：n=%d channel=%q user=%q text=%q", dispatched, gotChannel, gotUser, gotText)
+	}
+}
+
+// 能力清單同樣要 token：它會透露這台機器掛了哪些 MCP 工具與內部技能名稱。
+func TestOfficeCapsHandler(t *testing.T) {
+	called := ""
+	h := officeCapsHandler("s3cret", func(agent string) ([]schema.ToolDefinition, []ctxpkg.Skill) {
+		called = agent
+		return []schema.ToolDefinition{{Name: "bash", Description: "跑指令"}},
+			[]ctxpkg.Skill{{Name: "git-workflow", Description: "提交流程"}}
+	})
+
+	for _, tc := range []struct {
+		name, auth, query string
+		want              int
+	}{
+		{"沒帶 token", "", "?agent=p01", http.StatusUnauthorized},
+		{"錯的 token", "Bearer nope", "?agent=p01", http.StatusUnauthorized},
+		{"少了 agent", "Bearer s3cret", "", http.StatusBadRequest},
+		{"正常", "Bearer s3cret", "?agent=p01", http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/capabilities"+tc.query, nil)
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		w := httptest.NewRecorder()
+		h(w, req)
+		if w.Code != tc.want {
+			t.Errorf("%s: 狀態碼 %d，期望 %d", tc.name, w.Code, tc.want)
+		}
+	}
+	if called != "p01" {
+		t.Errorf("agent 沒有傳到 caps()：%q", called)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/capabilities?agent=p01", nil)
+	req.Header.Set("Authorization", "Bearer s3cret")
+	w := httptest.NewRecorder()
+	h(w, req)
+	body := w.Body.String()
+	for _, want := range []string{`"tools"`, `"bash"`, `"skills"`, `"git-workflow"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("回應缺少 %s：%s", want, body)
+		}
 	}
 }

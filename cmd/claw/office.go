@@ -11,6 +11,8 @@ import (
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // startOfficeHTTP：COGITO_HTTP_ADDR 與 COGITO_HTTP_TOKEN 都設定時，開一個 HTTP 派工入口，
@@ -62,6 +64,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch))
+	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
 	// Dispatch 本身很快（任務進背景 goroutine），但指令路徑會同步 POST 回橋，故 write 留寬一點。
 	srv := &http.Server{
@@ -78,6 +81,37 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 			log.Printf("[office] HTTP 入口結束: %v", err)
 		}
 	}()
+}
+
+// officeCapsHandler 回報某頻道實際掛上的工具與技能（唯讀）。像素辦公室的名冊用它顯示
+// 「這位員工有哪些能力」——清單來自引擎本人，不是寫死的表，否則工具增減就會失真。
+// 同樣要 token：它會透露這台機器上掛了哪些 MCP 工具與內部技能名稱。
+func officeCapsHandler(token string, caps func(string) ([]schema.ToolDefinition, []ctxpkg.Skill)) http.HandlerFunc {
+	wantAuth := []byte("Bearer " + token)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), wantAuth) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		agent := r.URL.Query().Get("agent")
+		if agent == "" {
+			http.Error(w, "need ?agent=", http.StatusBadRequest)
+			return
+		}
+		tools, skills := caps(agent)
+		out := struct {
+			Tools  []map[string]string `json:"tools"`
+			Skills []map[string]string `json:"skills"`
+		}{}
+		for _, t := range tools {
+			out.Tools = append(out.Tools, map[string]string{"name": t.Name, "description": t.Description})
+		}
+		for _, s := range skills {
+			out.Skills = append(out.Skills, map[string]string{"name": s.Name, "description": s.Description})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}
 }
 
 // officeBindDenied 是綁定政策：非 loopback 且未顯式 insecure ＝ 拒開入口。抽成函式供單測釘住
