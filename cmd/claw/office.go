@@ -12,6 +12,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -24,7 +25,7 @@ import (
 // 出訊（審批卡/完成/失敗訊息）經 rawSend POST 回橋的 /office/chat，顯示在 Web 工作串。
 // hooks 是【必填參數】而非事後 setter：這個入口先前漏掛 postRun/postFailure，導致從辦公室派的工
 // 跑完不反思（同一 agent、同一 factory，行為卻依入口而異）。設成參數後，新入口漏接就編譯不過。
-func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbot.Hooks) {
+func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbot.Hooks, gw *mcp.Gateway) {
 	addr, token := os.Getenv("COGITO_HTTP_ADDR"), os.Getenv("COGITO_HTTP_TOKEN")
 	if addr == "" || token == "" {
 		return
@@ -64,7 +65,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch))
-	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities))
+	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities, gw))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
 	// Dispatch 本身很快（任務進背景 goroutine），但指令路徑會同步 POST 回橋，故 write 留寬一點。
 	srv := &http.Server{
@@ -86,7 +87,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 // officeCapsHandler 回報某頻道實際掛上的工具與技能（唯讀）。像素辦公室的名冊用它顯示
 // 「這位員工有哪些能力」——清單來自引擎本人，不是寫死的表，否則工具增減就會失真。
 // 同樣要 token：它會透露這台機器上掛了哪些 MCP 工具與內部技能名稱。
-func officeCapsHandler(token string, caps func(string) ([]schema.ToolDefinition, []ctxpkg.Skill)) http.HandlerFunc {
+func officeCapsHandler(token string, caps func(string) ([]schema.ToolDefinition, []ctxpkg.Skill), gw *mcp.Gateway) http.HandlerFunc {
 	wantAuth := []byte("Bearer " + token)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), wantAuth) != 1 {
@@ -102,7 +103,13 @@ func officeCapsHandler(token string, caps func(string) ([]schema.ToolDefinition,
 		out := struct {
 			Tools  []map[string]string `json:"tools"`
 			Skills []map[string]string `json:"skills"`
+			// MCP 工具不個別註冊（漸進式暴露：模型只看到 mcp_call_tool／mcp_describe_tool），
+			// 所以要另外把 gateway 的目錄列出來，否則看板上完全看不出掛了哪些外部工具。
+			MCP []mcp.ToolInfo `json:"mcp"`
 		}{}
+		if gw != nil {
+			out.MCP = gw.Catalog()
+		}
 		for _, t := range tools {
 			out.Tools = append(out.Tools, map[string]string{"name": t.Name, "description": t.Description})
 		}

@@ -49,6 +49,23 @@ func (g *Gateway) Names() []string {
 	return out
 }
 
+// ToolInfo 是目錄裡一項外部工具的公開資訊（供 UI 檢視；模型走 catalog 那條）。
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// Catalog 回傳目錄全文（已排序）。與 catalog() 同一份資料，差別只在給誰看：
+// catalog() 塞進 mcp_call_tool 的 description 給模型，這個給人看（辦公室看板列 MCP 能力）。
+// 沒有它的話，外部只看得到 mcp_call_tool／mcp_describe_tool 兩個閘道，看不出實際掛了什麼。
+func (g *Gateway) Catalog() []ToolInfo {
+	out := make([]ToolInfo, 0, len(g.order))
+	for _, name := range g.order {
+		out = append(out, ToolInfo{Name: name, Description: oneLine(g.byName[name].description, 120)})
+	}
+	return out
+}
+
 // catalog 產生「- name: 短描述」的輕量目錄文字，放進 mcp_call_tool 的 description。
 func (g *Gateway) catalog() string {
 	var b strings.Builder

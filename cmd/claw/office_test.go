@@ -98,7 +98,7 @@ func TestOfficeCapsHandler(t *testing.T) {
 		called = agent
 		return []schema.ToolDefinition{{Name: "bash", Description: "跑指令"}},
 			[]ctxpkg.Skill{{Name: "git-workflow", Description: "提交流程"}}
-	})
+	}, nil) // gw=nil：沒接 MCP 時也要能回應（mcp 欄位為空）
 
 	for _, tc := range []struct {
 		name, auth, query string
