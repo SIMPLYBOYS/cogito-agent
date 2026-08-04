@@ -35,6 +35,7 @@ func main() {
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
 	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
 	skillAB := flag.Bool("skill-ab", false, "技能任務影響 A/B：同一任務在『無/有綁定技能』下各跑一次，量化技能的行為價值（需 ANTHROPIC_API_KEY）")
+	abN := flag.Int("ab-n", 1, "A/B 消融重複幾次配對（目前 -skill-ab 支援）；>1 時輸出 2×2 表與 Fisher 精確檢定 p 值。要下結論建議 n≥20")
 	predictions := flag.String("predictions", "", "SWE-bench 生成模式：對 -swebench 的實例跑 agent → 輸出官方 predictions JSONL 到此路徑（交給官方 harness 評測）")
 	flag.Parse()
 
@@ -87,7 +88,38 @@ func main() {
 			log.Fatal("技能 A/B 需 ANTHROPIC_API_KEY")
 		}
 		tc, doc, name := eval.SkillABScenario()
-		fmt.Print(eval.RunSkillAB(context.Background(), tc, doc, name, *model).Render())
+		if *abN <= 1 {
+			fmt.Print(eval.RunSkillAB(context.Background(), tc, doc, name, *model).Render())
+			return
+		}
+		// n>1：序列跑（不併發——併發會撞速率限制，也讓成本歸因變糊）。
+		var pairs []eval.ABPair
+		offPass, onPass := 0, 0
+		for i := range *abN {
+			r := eval.RunSkillAB(context.Background(), tc, doc, name, *model)
+			pairs = append(pairs, eval.ABPair{Off: r.Off, On: r.On})
+			if r.Off.Passed {
+				offPass++
+			}
+			if r.On.Passed {
+				onPass++
+			}
+			log.Printf("[skill-ab] %d/%d  off=%v on=%v  累計 off %d/%d · on %d/%d  本次花費 $%.4f",
+				i+1, *abN, r.Off.Passed, r.On.Passed, offPass, i+1, onPass, i+1,
+				r.Off.TotalCostUSD+r.On.TotalCostUSD)
+		}
+		agg := eval.Aggregate(*model, pairs)
+		fmt.Print(agg.Render("技能任務影響 A/B（Level 2）"))
+		// 逐次原始資料要留檔——eval-results.md 的判讀依賴它，不能只留聚合數字。
+		if *outDir != "" {
+			path := filepath.Join(*outDir, fmt.Sprintf("skill-ab-n%d-%d.json", agg.N, time.Now().Unix()))
+			data, _ := json.MarshalIndent(agg, "", "  ")
+			if err := os.WriteFile(path, data, 0o644); err != nil {
+				log.Printf("寫入原始資料失敗: %v", err)
+			} else {
+				log.Printf("逐次原始資料已寫入 %s", path)
+			}
+		}
 		return
 	}
 
