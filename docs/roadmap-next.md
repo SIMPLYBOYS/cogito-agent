@@ -267,8 +267,11 @@ Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與
 
 ## 🆕 對照 YC qm 的新增項（2026-08-04）
 
-qm（YC 內部 harness，2026-07-31 MIT 開源）盤點後有兩項進這份清單，細節在
-[qm-learnings.md](qm-learnings.md)：
+qm（YC 內部平台，2026-07-31 MIT 開源）盤點後有兩項進這份清單，細節在
+[qm-learnings.md](qm-learnings.md)。
+**先講清楚層級**：qm 自己不實作 agent loop——四個 runtime（Claude Agent SDK / Codex /
+OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組裡 harness 佔 1 個。
+它在 cogito【上面】一層，不是同層對照組（那是 Hermes）。所以可移植的東西全在治理層：
 
 - **🟢 SECURITY.md 彙整**（~1h、零風險）：內容已散在 README:36 與 incident-blacklist-bypass.md，
   缺的只是一頁能一次看完的「防什麼／**不防什麼**」。

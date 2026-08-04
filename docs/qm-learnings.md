@@ -7,9 +7,54 @@
 
 ## 一句話
 
-qm 是 cloud-first、要 Postgres 與平台工程師、甜蜜點 10~500 人公司——**不是競品，是第二個
-對照組**（第一個是 Hermes，見 POSITIONING.md）。但它有三處是**架構層可移植、與量級無關**的，
-那才是值得拿的。其餘多半是「不同賽道」而非「我們落後」。
+**qm 不是 harness，它是託管 harness 的那一層。** 名字裡的 "harness" 指的是「裝 harness 的
+架子」，不是 agent 迴圈——所以它跟 cogito **不同層，不是對照組**。可移植的東西全部落在治理層，
+因為那是它唯一有自己程式碼的地方。
+
+## 先把層級搞清楚（否則整份文件會讀錯）
+
+**qm 自己不實作 agent loop。** 四個 runtime 是 npm 依賴：
+
+```json
+"@anthropic-ai/claude-agent-sdk": "0.3.211"
+"@openai/codex": "0.144.5"
+"@opencode-ai/sdk": "1.17.18"        // + "opencode-ai": "1.17.18"
+"@earendil-works/pi-ai": "0.82.0"    // + "pi-coding-agent": "0.82.0-security.2"
+```
+
+`src/harness/` 的 13 個檔案全是**轉接頭**——`claude-harness.ts`、`codex-harness.ts`、
+`opencode-harness.ts`、`pi-harness.ts`、`mock-harness.ts`，加 `harness-router.ts` 與
+`tape-fold.ts` / `replay.ts` / `context-compaction.ts` 這些週邊。沒有一個檔案是迴圈本體。
+
+`src/` 有 45 個模組，harness 佔 1 個：
+
+| 分類 | 數量 | 模組 |
+|---|---:|---|
+| 治理／身分／安全 | 13 | acl, admin, audit, auth, classify, credentials, directory, idempotency, identity, policy, ratelimit, resolution, security |
+| 平台／排程／運維 | 16 | api, core, cron, deploy, deployment, environments, insights, monitors, persistence, processes, runs, sandbox, tasks, triggers, util, wake |
+| 多人協作／投遞面 | 10 | connectors, delivery, onboarding, projects, reach, sessions, slack, surface-cache, surfaces, workspace |
+| agent 能力 | 4 | files, memory, skills, tools |
+| **模型／harness** | **2** | harness, model |
+
+`plugins/` 是 admin、auth、chassis、onboarding、portal、web-ui（**有獨立 admin 面板**）。
+基礎設施：Postgres + `pg-boss`（Postgres 工作佇列）+ Fastify + Slack Bolt。
+
+**結論**：qm 是企業級多人部署／治理／投遞平台，託管別人的 harness。
+
+| | 這一層做什麼 | 代表 |
+|---|---|---|
+| 上層 | 身分、政策、稽核、投遞、排程、部署 | **qm** |
+| 下層 | agent 迴圈本體（ReAct、工具、上下文） | **cogito**、Claude Agent SDK、Codex、OpenCode、Pi |
+
+**Hermes 才是 cogito 的同層對照組**（見 POSITIONING.md）。qm 不是競品——結構上正確的關係是
+**cogito 可以當 qm 的第五個 runtime**，跟 `claude-harness.ts` 並排。兩者互補，不重疊。
+
+> 副作用一則：qm 花得掉 Claude Pro/Max 訂閱額度，機制就是那行 `@anthropic-ai/claude-agent-sdk`
+> 依賴——它把整條迴圈交出去，額度從 Claude Code 那邊走。cogito 的接縫在 `LLMProvider`（換模型），
+> 不在 harness（換迴圈），所以走 Messages API 就只能用 API key。這是層級差異的直接後果，不是設定問題。
+
+**因此下面挑出來的四項全部落在治理層，這不是巧合而是必然**——那是 qm 唯一有自己程式碼的層，
+也剛好是「與量級無關、架構層可移植」的部分。其餘多半是「不同賽道」而非「我們落後」。
 
 ---
 
@@ -128,7 +173,8 @@ README:36 明寫「不依賴可被繞過的審批」，`docs/incident-blacklist-
 |---|---|
 | `taste` skill 的 22,069 token 負面提示詞 | HN 上被直接罵「a major skill issue」。我們技能走漸進式載入（索引常駐、正文按需 `read_skill`），這點做得比它好——那 22k 是每輪實打實的成本 |
 | `filterTapeForAudience` 分觀眾遮蔽 | 我們 `sanitizeDanglingToolUse` 已經在做同一件事的鏡像版（只清 `ToolCalls` 欄位、保留 thinking 文字）。qm 那支解的是「不同人看到不同視圖」，我們沒有那個場景——面板是單一 operator |
-| Postgres / 多 harness 適配層 | 不同量級。我們的賣點正是單 binary、近零依賴 |
+| Postgres + `pg-boss` 的持久層 | 不同量級。我們的賣點正是單 binary、近零依賴 |
+| **多 harness 適配層**（`src/harness/` 的五個轉接頭） | **層級不對**。適配 harness 是上層平台的工作；cogito **是** harness，不是託管 harness 的架子。真要做「多 harness」等於放棄自己的引擎（工具註冊表、Deny>Ask>Allow、死迴圈指紋、成本熔斷全繞過）——那是換賽道，不是補功能 |
 | "multiplayer" 這個命名 | HN 嫌得很兇：「there's nobody there」 |
 | `src/memory/policy.ts` 的記憶政策 | 它只有 scope-based 存取控制，**沒有** size cap、沒有注入/外洩內容檢查。這塊我們比它嚴 |
 
