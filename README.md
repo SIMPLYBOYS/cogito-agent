@@ -741,6 +741,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 | [office-protocol.md](docs/office-protocol.md) | **像素辦公室協定 v1**：三個 HTTP 端點、事件 `kind` 全集與欄位語意、傳遞保證（會掉幀、不反壓）、版本演進規則 |
 | [eval-results.md](docs/eval-results.md) | **三層評測結果**：檢索（keyword 0.50 → +KG 1.00）、記憶 A/B（步數 −66%）、技能 A/B（1/5→4/5，**p=0.206 未達顯著，照實記**）、SWE-bench |
 | [kg-spec.md](docs/kg-spec.md) | 知識圖譜規格：typed 關係、多跳檢索、提案邊的 gate |
+| [memory-stack-audit.md](docs/memory-stack-audit.md) | **記憶層自評**：對照流傳的「Agent Memory Stack」七層逐層攤開——六層有、shared memory 一層缺（含觸發條件），以及那套分類把放置策略/作用域混進內容種類的問題 |
 | [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
 | [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
 | [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：先釐清**它不是 harness 而是託管 harness 的上層平台**（45 個模組裡 harness 佔 1 個），再列抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
