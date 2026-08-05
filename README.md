@@ -56,7 +56,7 @@
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 - 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
 - ⏰ **內建 cron**：到點自動派任務給 agent，標準 cron 運算式 + 時區設定；結果推播 Slack／Telegram（含執行來源）。排程住常駐行程，bot 與面板各跑一個、靠檔案鎖仲裁不重複執行。
-- 📊 **三層評測（有實測數字，含負面結果）**：SWE-bench 測的是「模型 × harness」的乘積、分不開兩者的貢獻，故另有兩層評自己的機制——檢索 `hit@k` **完全不呼叫 LLM**（keyword 0.50 → 加 KG **1.00**）；A/B 消融固定模型、只切換一個功能（記憶讓任務 **8→3 回合、省 66%**；技能讓通過率 **1/5→4/5**，但 **p=0.206 未達顯著**，照實標註）。[結果與判讀 →](docs/eval-results.md)
+- 📊 **三層評測（有實測數字，含負面結果）**：SWE-bench 測的是「模型 × harness」的乘積、分不開兩者的貢獻，故另有兩層評自己的機制。**檢索** `hit@k` 完全不呼叫 LLM——keyword 0.50 → embedding 0.58 → **加 KG 1.00**（向量檢索補跑後只到 0.58，證明贏的是「沿關係擴張」而非更好的相似度函數）；**A/B 消融**固定模型、只切換一個功能——記憶讓任務 **8→3 回合、省 66%**，技能讓通過率 **7/20→15/20**（Fisher **p=0.0248 達顯著**，補到 n=20 才成立）；**SWE-bench** 5 題子集 opus resolved **4**、haiku 1——但 **n=5、p=0.206 未達顯著，照實標成觀察不寫成分數**。顯著性檢定**內建在工具裡**（`-ab-n`），且樣本門檻先於 p 值。[結果與判讀 →](docs/eval-results.md)
 
 **安全邊界**
 - 🛡️ **Deny > Ask > Allow 權限模型**：宣告式政策檔（`.claw/policy.json`）可讓某工具**永遠不准**；裁決與規則順序無關。**無人值守**（排程）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
@@ -183,7 +183,7 @@ cmd/
 ├── claw/                 伺服器端入口（生產用）：裝配 Provider/Registry/Engine + OTel，啟動 Slack Socket Mode（＋設了 token 則同時跑 Telegram 長輪詢）
 ├── claw-cli/             通用命令列入口（-prompt / -dir / -session / -plan）
 ├── claw-dashboard/       維運面板（綁 loopback）：執行樹回放、用量切片、技能/排程/MCP/金鑰/政策，內嵌 chat
-├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-dry-run）
+├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-ab-n 消融樣本數+Fisher、-dry-run）
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 ├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
 ├── ingest/               把 markdown 目錄結構式 ingest 成知識圖譜節點+邊（-src/-root，確定性不花錢）
@@ -226,7 +226,7 @@ internal/
 ├── observability/           可觀測性
 │   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
 │   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
-├── eval/                    評測框架（benchmark）：三段式 TestCase / RunSuite / Reflexion / swebench.go（SWE-bench 接入）
+├── eval/                    評測框架（benchmark）：三段式 TestCase / RunSuite / Reflexion / swebench.go（SWE-bench 接入）/ abstats.go（Fisher 精確檢定＋樣本門檻）
 ├── evolve/                  自我進化：SkillSynthesizer 技能自生成（寫提案技能、不自動啟用）
 └── schema/                 訊息與工具的通用資料結構
 ```
@@ -543,6 +543,8 @@ go build ./...     # 建置
 
 ```bash
 # ① 檢索評測（$0、十幾秒、完全不呼叫 LLM）
+#    embedding 那列需先建向量快取，否則該模式會整個跳過（顯示 N=0）
+go run ./cmd/ingest -root internal/eval/testdata/mem_multihop -embed   # 需 COGITO_EMBED_MODEL + 端點
 go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
   -eval internal/eval/testdata/mem_multihop/labels.jsonl -k 3 -hops 1
 
@@ -550,7 +552,14 @@ go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
 go run ./cmd/bench -mem-ab                          # 有／無相關記憶
 go run ./cmd/bench -skill-ab                        # 有／無綁定技能（單次）
 go run ./cmd/bench -skill-ab -ab-n 20 -out ./bench-reports   # n=20：2×2 表 + Fisher p 值 + 原始資料落檔
+
+# ③ SWE-bench：生成與評測【分離】——cogito 只產 patch，判定交給官方 harness + 官方映像
+go run ./cmd/bench -swebench .swebench/lite.jsonl -limit 5 -predictions preds.jsonl   # 生成（花 API 錢）
+python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
+  --predictions_path preds.jsonl --run_id my-run                                      # 判定（本地 Docker、免費）
 ```
+
+完整跑法見 **[docs/swebench-runbook.md](docs/swebench-runbook.md)**。
 
 多跳語料是刻意設計的：**答案節點與查詢字面零重疊**，純關鍵字撈不到，只有沿 `[[link]]` 擴張的
 知識圖譜撈得到。並附**防作弊護欄**——若有人把語料改到 keyword 也能滿分，測試會失敗
@@ -559,6 +568,19 @@ go run ./cmd/bench -skill-ab -ab-n 20 -out ./bench-reports   # n=20：2×2 表 +
 **向量檢索補跑後（bge-m3）只到 0.58**——離 KG 的 1.00 還很遠。多跳題的答案節點跟查詢在語意上
 也不像，它只是**被連到**像的那個；向量相似度走不了 A→B→C，那是圖的工作。所以贏的是
 「沿關係擴張」這個機制，不是「更好的相似度函數」。
+
+#### 同一把尺也量自己
+
+技能 A/B 補到 n=20 之後，**n=5 的三個幅度估計全部被推翻**：off 側通過率從 20% 回歸到 35%、
+「多花一個回合」的觀察直接消失、成本代價從 +35% 降到 +9.7%。效應方向撐住了，
+但沒有一個數字經得起原本的說法。
+
+於是同一把尺立刻回頭量到自己身上——**SWE-bench 的 opus 4/5 vs haiku 1/5，Fisher `p=0.206`，
+與技能 A/B 補樣本前是同一張 2×2 表。** 既然剛證明 n=5 不可信，就不能回頭把它寫成
+「pass@1 80%」。所以那條在上表裡標的是「未達顯著」，不是分數。
+
+工具因此把**樣本門檻放在 p 值之前**：`n < 10`（沿用 `evolve.MinVerifySamples`）一律印
+「樣本不足」，不管 p 多小——小樣本碰巧顯著給出的假安心，比沒有數字更危險。
 
 ### 跑分與儀表板
 
@@ -746,7 +768,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 |---|---|
 | [multi-tenancy.md](docs/multi-tenancy.md) | **多租戶架構**：硬租戶（一行程一租戶）vs 軟租戶（per-conversation）的兩層模型、逐維度隔離矩陣、`COGITO_MEMORY_SCOPE` 的記憶隔離 |
 | [office-protocol.md](docs/office-protocol.md) | **像素辦公室協定 v1**：三個 HTTP 端點、事件 `kind` 全集與欄位語意、傳遞保證（會掉幀、不反壓）、版本演進規則 |
-| [eval-results.md](docs/eval-results.md) | **三層評測結果**：檢索（keyword 0.50 → +KG 1.00）、記憶 A/B（步數 −66%）、技能 A/B（1/5→4/5，**p=0.206 未達顯著，照實記**）、SWE-bench |
+| [eval-results.md](docs/eval-results.md) | **三層評測結果**：檢索（0.50 → 0.58 → **1.00**）、記憶 A/B（步數 −66%）、技能 A/B（7/20→15/20，**p=0.0248 達顯著**，含 n=5 如何誤導的逐項對照）、SWE-bench（opus 4/5，**p=0.206 仍只當觀察**） |
 | [kg-spec.md](docs/kg-spec.md) | 知識圖譜規格：typed 關係、多跳檢索、提案邊的 gate |
 | [memory-stack-audit.md](docs/memory-stack-audit.md) | **記憶層自評**：對照流傳的「Agent Memory Stack」七層逐層攤開——六層有、shared memory 一層缺（含觸發條件），以及那套分類把放置策略/作用域混進內容種類的問題 |
 | [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
