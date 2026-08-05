@@ -32,17 +32,31 @@ go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
 
 語料：12 個互連服務節點（`testdata/mem_multihop/.claw/memory/`），12 題標註，半數多跳。
 
+> **2026-08-05 更新：embedding 模式補跑完成**（bge-m3 / Ollama）。先前那列 N=0 被整個跳過，
+> 「三模式對照」名不副實；現在三個模式都有數字了。
+
 ```
 模式                  N    hit@k      MRR
 keyword            12     0.50     0.50
-embedding           0      n/a      n/a     ← 未配置 embedder，整個模式跳過
+embedding          12     0.58     0.53     ← 補跑（bge-m3），先前 N=0
 keyword+kg         12     1.00     0.69
 ```
+
+前置：`go run ./cmd/ingest -root <語料> -embed` 建向量快取（需 `COGITO_EMBED_MODEL` + 端點）。
 
 **多跳題的答案節點與查詢字面零重疊**，keyword 在設計上就撈不到（Seeds 只回 score>0），
 只有沿 `[[link]]` 擴張的 KG 撈得到。
 
-> ⚠️ **報告時別說「三模式對照」**——`embedding` 那列 N=0，實際只有兩個模式有數字。
+**補跑 embedding 回答了一個原本無法反駁的質疑**：
+
+> 「你們的 KG 贏 keyword，但**換成向量檢索不就解決了嗎**？」
+
+**不能。** embedding 只到 **0.58**，離 keyword+kg 的 1.00 還很遠——它比 keyword（0.50）
+只好一點點。原因就是這份語料的設計：多跳題的答案節點**跟查詢在語意上也不像**，
+它只是【被連到】像的那個。向量相似度走不了 A→B→C 這條路，那是圖的工作。
+
+> 換句話說，**贏的是「沿關係擴張」這個機制本身，不是「比 keyword 更好的相似度函數」**。
+> 這是這輪補樣本最有價值的一條——先前 N=0 時，這個質疑完全無法回答。
 
 **防作弊護欄**（`memeval_test.go`）：
 
@@ -159,7 +173,7 @@ Fisher 雙尾 p = 0.206，未達顯著。當時的判讀「技能改善正確性
 
 ---
 
-## ④ SWE-bench：有成本數據，**沒有分數**
+## ④ SWE-bench：opus 5 題 resolved 4（n=5，未達顯著）
 
 ### 已完成：opus 生成 5 題 predictions（$1.21、9 分 45 秒）
 
@@ -174,13 +188,39 @@ Fisher 雙尾 p = 0.206，未達顯著。當時的判讀「技能改善正確性
 每題平均 **$0.243**、**117 秒**（其中約 67 秒是 clone repo）。
 → 推算 30 題約 **$7.3 / 1 小時**，成本與時間都不是障礙。
 
-### ❌ 官方 harness 評測**中途叫停**，故 **opus 沒有 resolved 數字**
+### ✅ 官方 harness 評測完成（2026-08-05）
 
-**不要在任何場合說「opus 跑了 5 題」然後說不出結果。** 目前唯一有官方判定的是先前的 haiku 那輪：
+先前這裡寫的是「評測中途叫停、opus 沒有 resolved 數字」。**已補跑完**——`preds.opus.jsonl`
+一直在 `.swebench/`，那 $1.21 沒白花；harness 是本地 Docker，補跑不花 API 錢（約 8 分鐘）。
 
 ```
-haiku：submitted 5、resolved 1（astropy-6938）、errors 0
+opus ：submitted 5、resolved 4、unresolved 1、errors 0、empty patches 0
+haiku：submitted 5、resolved 1、unresolved 4、errors 0、empty patches 0
 ```
+
+| instance | haiku | opus |
+|---|---|---|
+| astropy-6938 | ✅ | ✅ |
+| astropy-12907 | ✗ | ✅ |
+| astropy-14182 | ✗ | ✅ |
+| astropy-14995 | ✗ | ✅ |
+| astropy-14365 | ✗ | ✗ |
+
+**⚠️ 這是觀察，不是結論——而且理由正是我們這輪剛學到的。**
+
+`haiku 1/5 vs opus 4/5` 的 Fisher 雙尾 **p = 0.2063**，跟同一天被 n=20 推翻的舊技能 A/B
+是**同一張 2×2 表、同一個 p 值**。我們才剛證明 n=5 的幅度估計全部不可信，不能立刻回頭
+宣稱「opus pass@1 = 80%」。誠實的說法是：
+
+> SWE-bench Lite 的 5 題 astropy 子集上，haiku resolved 1、opus resolved 4。
+> **n=5、p=0.206，方向明確但未達顯著**；要當結論得跑到 n ≥ 20。
+
+**唯一比 p 值更強的一條線索**：opus 的 resolved 集合是 haiku 的**嚴格超集**——
+haiku 解掉的 astropy-6938 opus 也解掉，沒有任何一題是「haiku 過、opus 沒過」。
+沒有反轉，比隨機翻動更像真實能力差。但這是結構觀察，不是統計檢定。
+
+**成本對照**：opus $1.21 / 5 題（$0.243/題）；harness 評測本身免費（本地 Docker）。
+補到 n=20 的成本約 **$4.9**（opus 生成）+ 評測時間約 30 分鐘。
 
 ### 意外觀察：agent 提早收手
 

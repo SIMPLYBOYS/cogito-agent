@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
 )
 
 // A/B 消融跑一次只有 n=1，下不了結論——先前技能 A/B 的 p=0.206 是【手算】的，程式裡沒有。
@@ -16,12 +18,16 @@ import (
 
 // ABAggregate 是 n 次 A/B 配對跑的聚合結果。
 type ABAggregate struct {
-	Model   string   `json:"model"`
-	N       int      `json:"n"`
-	OffPass int      `json:"off_pass"`
-	OnPass  int      `json:"on_pass"`
-	PValue  float64  `json:"p_value"` // 雙尾 Fisher 精確檢定
-	Pairs   []ABPair `json:"pairs"`
+	Model   string  `json:"model"`
+	N       int     `json:"n"`
+	OffPass int     `json:"off_pass"`
+	OnPass  int     `json:"on_pass"`
+	PValue  float64 `json:"p_value"` // 雙尾 Fisher 精確檢定
+	// LowConfidence＝樣本數低於 evolve.MinVerifySamples。與 p 值【獨立】：小樣本下
+	// 就算碰巧 p<0.05 也不該當結論——通過率的粒度是 1/N，n=3 時一個案例翻掉就是 33% 落差，
+	// 而 LLM 本身有非確定性，分不出那是效應還是雜訊。沿用既有門檻，不另立一套。
+	LowConfidence bool     `json:"low_confidence"`
+	Pairs         []ABPair `json:"pairs"`
 }
 
 // ABPair 是一次配對（同任務、同模型，只切換受測功能）。
@@ -101,6 +107,7 @@ func Aggregate(model string, pairs []ABPair) *ABAggregate {
 		}
 	}
 	agg.PValue = fisherExact2x2(agg.OffPass, agg.N-agg.OffPass, agg.OnPass, agg.N-agg.OnPass)
+	agg.LowConfidence = agg.N < evolve.MinVerifySamples
 	return agg
 }
 
@@ -126,6 +133,10 @@ func (a *ABAggregate) Render(title string) string {
 
 	fmt.Fprintf(&b, "\nFisher 精確檢定（雙尾）p = %.4f", a.PValue)
 	switch {
+	case a.LowConfidence:
+		// 樣本門檻先於 p 值：n 太小時 p 值本身就不穩，"達顯著" 會給出假的安心感。
+		fmt.Fprintf(&b, " → **樣本不足**（n=%d < %d），無論 p 值多少都只能當觀察\n",
+			a.N, evolve.MinVerifySamples)
 	case a.PValue < 0.05:
 		fmt.Fprintf(&b, " → **達顯著**（α=0.05），可以當結論\n")
 	default:

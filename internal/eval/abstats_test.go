@@ -57,13 +57,21 @@ func TestAggregateRenderStatesSignificance(t *testing.T) {
 		return ps
 	}
 
+	// 計票正確性
 	weak := Aggregate("m", mk(1, 4, 5))
 	if weak.OffPass != 1 || weak.OnPass != 4 || weak.N != 5 {
 		t.Fatalf("計票錯了: %+v", weak)
 	}
-	out := weak.Render("技能 A/B")
+
+	// 樣本【夠】但效應不顯著 → 才會走「未達顯著」這條。n=5 那條走的是樣本不足，
+	// 見 TestLowConfidenceOverridesSignificance。
+	ns := Aggregate("m", mk(8, 11, 20))
+	if ns.LowConfidence {
+		t.Fatalf("n=20 不該標低信心")
+	}
+	out := ns.Render("技能 A/B")
 	if !strings.Contains(out, "未達顯著") || !strings.Contains(out, "不可寫成結論") {
-		t.Errorf("p=%.4f 應標為未達顯著:\n%s", weak.PValue, out)
+		t.Errorf("p=%.4f 應標為未達顯著:\n%s", ns.PValue, out)
 	}
 
 	strong := Aggregate("m", mk(4, 18, 20))
@@ -81,5 +89,42 @@ func TestMedian(t *testing.T) {
 	}
 	if got := median(nil); got != 0 {
 		t.Errorf("空: got %v want 0", got)
+	}
+}
+
+// 樣本門檻要【先於】p 值：n=3 碰巧 p<0.05 也不該印「達顯著」——通過率粒度是 1/N，
+// 小樣本下一個案例翻掉就是巨大落差，而 LLM 本身有非確定性。沿用 evolve.MinVerifySamples。
+func TestLowConfidenceOverridesSignificance(t *testing.T) {
+	mk := func(offPass, onPass, n int) []ABPair {
+		var ps []ABPair
+		for i := range n {
+			ps = append(ps, ABPair{
+				Off: ABRun{Passed: i < offPass},
+				On:  ABRun{Passed: i < onPass},
+			})
+		}
+		return ps
+	}
+
+	// n=3 完全分離：p 會很小，但樣本不足，必須擋在 p 值前面
+	tiny := Aggregate("m", mk(0, 3, 3))
+	if !tiny.LowConfidence {
+		t.Fatalf("n=3 應標低信心")
+	}
+	out := tiny.Render("t")
+	if !strings.Contains(out, "樣本不足") {
+		t.Errorf("n=3 p=%.4f 應印樣本不足:\n%s", tiny.PValue, out)
+	}
+	if strings.Contains(out, "可以當結論") {
+		t.Errorf("樣本不足時不可說可以當結論:\n%s", out)
+	}
+
+	// n=20 才允許出現「達顯著」
+	ok := Aggregate("m", mk(4, 18, 20))
+	if ok.LowConfidence {
+		t.Errorf("n=20 不該標低信心")
+	}
+	if o := ok.Render("t"); !strings.Contains(o, "達顯著") || strings.Contains(o, "樣本不足") {
+		t.Errorf("n=20 且 p=%.4f 應可下結論:\n%s", ok.PValue, o)
 	}
 }
