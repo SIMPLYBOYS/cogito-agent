@@ -284,14 +284,20 @@ Scout 下次記得上次查過什麼，而且記憶照樣要人放行——**與
 
 ---
 
-## 📌 面試後立刻做（零風險）——已清（07-24）
+## 📌 面試後立刻做（零風險）—— **已全清（2026-08-05）**
 
 - [x] `/cron` 兩個 job 已開回（cron.json 每輪 Tick 重讀，改檔即生效）
 - [x] `.env` 的 `COGITO_ALLOWED_USERS` 已確認是正常名單（無須 restore）
-- [ ] `workspace/.sessions-archive/`：**`retrospect-e2e-41fcdf39.json` 別刪**——它是
-      `delegate-and-verify-file` 提案來源的唯一 provenance 證據（agent 經 retrospect 技能
-      ＋write_file 寫入、非 SkillSynthesizer 管線，故無 generated_by 戳記）；其餘 5 檔
-      （accept／cron×3／subdepth-demo）確認不用可刪。提案本身已過 skillgate，晉升/丟棄待裁決。
+- [x] `workspace/.sessions-archive/` 已清（2026-08-05）：5 檔移出（移前全域 grep 確認無引用），
+      **`retrospect-e2e-41fcdf39.json` 保留**——它是 `delegate-and-verify-file` 提案來源的唯一
+      provenance 證據（agent 經 retrospect 技能＋write_file 寫入、非 SkillSynthesizer 管線，
+      故無 generated_by 戳記；已實際驗證該 session 內含寫入紀錄）。
+- [x] `delegate-and-verify-file` 已晉升（2026-08-05）：**先瘦身再放行**。原稿有一半在重複
+      `orchestrate` 已講的委派/並行機制（技能索引常駐，重複內容是每輪成本——這正是我們在
+      [qm-learnings.md](qm-learnings.md) 批評對方 22k token skill 的同一把尺）。刪掉重疊段、
+      改成明確 defer 給 `orchestrate`，只留獨有的那條紀律：**主 context 自己驗實際檔案、
+      不信子 agent 自陳**（`wc -c` 抓尾端空白是唯一可靠做法）。33→44 行但內容更聚焦，
+      經 `skillgate -promote` 重跑把關後生效。
 
 ---
 
@@ -319,9 +325,9 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
 
 **✅ ~~📌 sessions-archive~~ → ✅ ~~🟢 SECURITY.md~~ → 🔴 2. SWE-bench `-swe-env-setup` → 🔴 記憶整併動作清單**
 
-> 前兩項已於 2026-08-05 完成。sessions-archive 清掉 5 檔（`retrospect-e2e-*.json` 保留為
-> provenance 證據）；`delegate-and-verify-file` 提案的晉升/丟棄**仍待裁決**——與 `orchestrate`
-> 技能部分重疊（委派/並行機制），獨有價值是「主 context 自己驗檔案、不信子 agent 自陳」。
+> 前兩項已於 2026-08-05 **全部完成**。sessions-archive 清掉 5 檔並保留 provenance 證據；
+> `delegate-and-verify-file` **瘦身後晉升**（刪掉與 `orchestrate` 重疊的委派/並行段，
+> 只留「主 context 自己驗檔案、不信子 agent 自陳」）；[SECURITY.md](../SECURITY.md) 已建立。
 
 理由：
 
