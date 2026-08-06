@@ -312,9 +312,9 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
 - ✅ **SECURITY.md 彙整**（2026-08-05 完成）：[SECURITY.md](../SECURITY.md) 已建立——威脅模型 4 條假設、
   已實作防線分 5 組（逐條可查證，數字都對回程式碼）、**10 條明確不防**、host/docker 保證對照表、
   上線最低配置。內容全部來自既有事實，沒有新結論。
-- **🔴 記憶整併動作清單**：`MemorySynthesizer` 目前只 append，沒有任何路徑會 UPDATE/DELETE
-  既有記錄——矛盾的記憶會並存在索引裡。補 `Consolidate()` 回 `UPDATE <n>`/`DELETE <n>`/`ADD`/`NONE`，
-  產物走 P1 已做好的逐條審批；`DELETE` 走歸檔而非真刪。
+- ✅ **記憶整併動作清單**（2026-08-05 完成）：`Reconcile()` + 可 diff 的提案格式 + 三道護欄
+  （畫像不可刪／樂觀鎖／刪即歸檔）+ `memory reconcile` 指令。設計見
+  [memory-reconcile-format.md](memory-reconcile-format.md)（含實作後記的三處調整）。
 
 另兩項（模型核准清單、egress 中間態）掛在「多租戶/外部委託真的發生」的觸發條件上，
 未發生前做了也驗證不了——理由與更正過的前提見該文件。
@@ -323,7 +323,7 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
 
 ## 建議順序（2026-08-05 更新；🟢 評測補完四項全數結案）
 
-**✅ ~~📌 sessions-archive~~ → ✅ ~~🟢 SECURITY.md~~ → 🔴 2. SWE-bench `-swe-env-setup` → 🔴 記憶整併動作清單**
+**✅ ~~📌 sessions-archive~~ → ✅ ~~🟢 SECURITY.md~~ → ✅ ~~🔴 記憶整併~~ → 🔴 2. SWE-bench `-swe-env-setup`**
 
 > 前兩項已於 2026-08-05 **全部完成**。sessions-archive 清掉 5 檔並保留 provenance 證據；
 > `delegate-and-verify-file` **瘦身後晉升**（刪掉與 `orchestrate` 重疊的委派/並行段，

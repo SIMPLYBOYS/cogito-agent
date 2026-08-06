@@ -304,9 +304,19 @@ func main() {
 		return filepath.Base(filepath.Dir(path)), nil // <slug>/SKILL.md → slug
 	}
 
+	// `memory reconcile`：掃既有記憶找矛盾/過時的，產出【可 diff 的提案】。與 learn 同理——
+	// 手動觸發、便宜模型、產物只進提案通道。掛在 MEMORY_SYNTH 之下，因為它動的是同一份記憶庫。
+	// memDir 由 Core 依會話給（多租戶下每個會話的記憶根目錄可能不同）。
+	var reconcileHook chatbot.ReconcileHook
+	if os.Getenv("COGITO_MEMORY_SYNTH") == "1" {
+		reconcileHook = func(ctx context.Context, memDir string) ([]string, error) {
+			return evolve.NewMemorySynthesizer(reflectProv, memDir).Reconcile(ctx)
+		}
+	}
+
 	// 【入口平權】鉤子組一次、每個入口掛同一包——先前是三個 setter × 三個入口＝九處要記得接，
 	// office HTTP 就漏了兩個（那邊派的工跑完不反思）。整包傳遞讓漏接變成編譯期問題。
-	hooks := chatbot.Hooks{PostRun: postRun, PostFailure: postFailure, Learn: learnHook}
+	hooks := chatbot.Hooks{PostRun: postRun, PostFailure: postFailure, Learn: learnHook, Reconcile: reconcileHook}
 	bot.SetHooks(hooks)
 
 	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。

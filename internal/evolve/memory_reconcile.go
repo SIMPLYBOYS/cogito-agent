@@ -60,9 +60,15 @@ type reconcileAction struct {
 // 產物一律只進提案通道，須 `apply memory` 放行才生效——破壞性操作尤其不能自動套用。
 // 回傳實際寫入提案的條目描述（供回報）。無記錄或無事可做時回 nil, nil。
 func (m *MemorySynthesizer) Reconcile(ctx context.Context) ([]string, error) {
-	recs := ctxpkg.NewMemoryLoader(m.root).List()
+	loader := ctxpkg.NewMemoryLoader(m.root)
+	recs := loader.List()
 	if len(recs) < 2 {
 		return nil, nil // 少於兩筆無從矛盾
+	}
+	// 增量：上次整併之後沒有任何記錄變動過，就不必再花一次 LLM 呼叫。
+	// 用 usedAt（帳本優先、缺則 mtime）而非固定掃全部——這也讓「連跑兩次」是 no-op。
+	if last := loader.ReconciledAt(); !last.IsZero() && !anyRecordNewerThan(recs, last) {
+		return nil, nil
 	}
 	if len(recs) > maxReconcileRecords {
 		recs = recs[:maxReconcileRecords]
@@ -91,6 +97,10 @@ func (m *MemorySynthesizer) Reconcile(ctx context.Context) ([]string, error) {
 		// 與既有 evolve 管線一致：解析失敗就整批不動，不猜。
 		return nil, fmt.Errorf("記憶整併輸出非合法 JSON（%q）: %w", resp.Content, err)
 	}
+
+	// 標記在【模型有回應之後】、寫提案之前——即使這輪判定不用動，也算整併過了，
+	// 下次沒有新記錄就不必再花一次呼叫。
+	loader.MarkReconciled(time.Now())
 
 	entries := m.buildReconcileEntries(out.Actions, recs)
 	if len(entries) == 0 {
@@ -151,6 +161,21 @@ func (m *MemorySynthesizer) buildReconcileEntries(actions []reconcileAction, rec
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// anyRecordNewerThan 判斷上次整併後有沒有記錄新增或被改過。
+//
+// 刻意用檔案 mtime 而非使用帳本的 usedAt：帳本記的是「最近被 recall」，不是「最近被改」，
+// 這裡要的是後者。帳本之所以不信 mtime（見 seedMissing）是因為備份/rsync 會把 mtime 批次
+// 推成 now，而那會讓【淘汰決策】反掉——代價很高。這裡誤判的代價只是多跑一次 LLM 呼叫，
+// 而且方向是安全的（寧可多整併一次，不要漏掉矛盾）。
+func anyRecordNewerThan(recs []ctxpkg.MemoryRecord, t time.Time) bool {
+	for _, r := range recs {
+		if fi, err := os.Stat(r.Path); err == nil && fi.ModTime().After(t) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasUserTag(tags []string) bool {

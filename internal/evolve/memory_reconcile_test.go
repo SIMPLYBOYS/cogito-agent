@@ -1,13 +1,16 @@
 package evolve
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // 最要緊的一條：舊格式（純 bullet）的解析結果一個位元都不能變。整併是加法，不是改法。
@@ -481,5 +484,65 @@ func TestApply_MixedKeepsOrder(t *testing.T) {
 	// round-trip：留下來的仍是 UPDATE，附帶行沒掉——否則下次放行會變成憑空新增
 	if rest[0].Old == "" || rest[0].Why == "" {
 		t.Errorf("附帶行遺失: %+v", rest[0])
+	}
+}
+
+// 增量：連跑兩次、中間沒有新記錄，第二次應是 no-op（不再花一次 LLM 呼叫）。
+func TestReconcile_IncrementalNoOp(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"事實 A", "慣例"}, [2]string{"事實 B 推翻了 A", "慣例"})
+
+	resp := `{"actions":[{"op":"update","n":1,"fact":"事實 A 已被 B 取代","why":"矛盾"}]}`
+	first, err := NewMemorySynthesizer(&countingProvider{content: resp}, root).Reconcile(t.Context())
+	if err != nil || len(first) != 1 {
+		t.Fatalf("第一次應產出提案: %v %v", first, err)
+	}
+
+	cp := &countingProvider{content: resp}
+	second, err := NewMemorySynthesizer(cp, root).Reconcile(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 0 {
+		t.Errorf("第二次應是 no-op，卻產出 %v", second)
+	}
+	if cp.calls != 0 {
+		t.Errorf("第二次不該呼叫 LLM，calls=%d", cp.calls)
+	}
+
+	// 有新記錄進來就要重新整併
+	seedNewRecord(t, root, "mem-99", "又一條新事實")
+	cp2 := &countingProvider{content: `{"actions":[]}`}
+	if _, err := NewMemorySynthesizer(cp2, root).Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if cp2.calls != 1 {
+		t.Errorf("有新記錄應重跑，calls=%d", cp2.calls)
+	}
+}
+
+type countingProvider struct {
+	content string
+	calls   int
+}
+
+func (c *countingProvider) Generate(_ context.Context, _ []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
+	c.calls++
+	return &schema.Message{Role: schema.RoleAssistant, Content: c.content}, nil
+}
+func (c *countingProvider) MaxContextTokens() int { return 200000 }
+func (c *countingProvider) ModelName() string     { return "counting" }
+
+func seedNewRecord(t *testing.T, root, slug, desc string) {
+	t.Helper()
+	p := filepath.Join(root, ".claw", "memory", slug+".md")
+	body := fmt.Sprintf("---\nname: n\ndescription: %s\ntags: [慣例]\n---\n%s\n", desc, desc)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// mtime 要明確晚於剛才的整併標記，否則測試會依賴時鐘解析度
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
 	}
 }

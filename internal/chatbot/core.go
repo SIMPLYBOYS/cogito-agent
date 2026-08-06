@@ -53,6 +53,11 @@ type PostFailureHook func(ctx context.Context, session *ctxpkg.Session, taskProm
 // 回傳提案技能名（空＝不值得保存，非錯誤）。可為 nil（未接則 /learn 提示未啟用）。
 type LearnHook func(ctx context.Context, session *ctxpkg.Session) (skillName string, err error)
 
+// ReconcileHook 手動整併長期記憶（`memory reconcile` 指令）：掃既有記錄找矛盾/過時的，
+// 產出【可 diff 的提案】（UPDATE/DELETE/ADD），一律不自動生效。回傳提案摘要。
+// 可為 nil（未接則提示未啟用）。memDir 是該會話的記憶根目錄——多租戶下每個會話可能不同。
+type ReconcileHook func(ctx context.Context, memDir string) (proposals []string, err error)
+
 // senders：platform → 該平台的原生發送函式。讓 SendMessage 能用命名空間 convID 路由回正確傳輸層，
 // 使審批/提案通知在「同行程多平台」下也送對人。ponytail: 全域 sync.Map 足矣（傳輸層數量極少）。
 var senders sync.Map
@@ -113,6 +118,7 @@ type Core struct {
 	postRun     PostRunHook
 	postFailure PostFailureHook
 	learn       LearnHook
+	reconcile   ReconcileHook
 
 	autoResume bool // 暫時性中斷後自動續跑（COGITO_AUTO_RESUME=1 開）
 
@@ -251,11 +257,12 @@ type Hooks struct {
 	PostRun     PostRunHook
 	PostFailure PostFailureHook
 	Learn       LearnHook
+	Reconcile   ReconcileHook
 }
 
 // SetHooks 一次掛齊。零值欄位＝該鉤子不啟用（等同過去傳 nil）。
 func (c *Core) SetHooks(h Hooks) {
-	c.postRun, c.postFailure, c.learn = h.PostRun, h.PostFailure, h.Learn
+	c.postRun, c.postFailure, c.learn, c.reconcile = h.PostRun, h.PostFailure, h.Learn, h.Reconcile
 }
 
 // convID 把傳輸層的原生頻道 ID 加上平台前綴，成為全域唯一的會話標識。
@@ -883,12 +890,26 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
 			return true
 		}
-		var b strings.Builder
-		fmt.Fprintf(&b, "🧠 提案記憶 %d 條（`apply memory <編號>` 逐條放行／`apply memory` 全部）：\n", len(entries))
-		for _, e := range entries {
-			fmt.Fprintf(&b, "%d. [%s] %s\n", e.N, e.Kind, e.Learning)
+		SendMessage(convID, renderProposedList(entries))
+	case "reconcile":
+		if c.reconcile == nil {
+			SendMessage(convID, "ℹ️ 記憶整併未啟用（需開 `COGITO_MEMORY_SYNTH=1`）。")
+			return true
 		}
-		SendMessage(convID, b.String())
+		SendMessage(convID, "🧠 正在整併長期記憶（找矛盾與過時的）…產物只進提案，不會自動生效。")
+		go func() {
+			// 背景跑：整併要掃全部記錄 + 一次 LLM 呼叫，別把聊天執行緒卡住。
+			props, err := c.reconcile(context.Background(), dir)
+			switch {
+			case err != nil:
+				SendMessage(convID, fmt.Sprintf("❌ 整併失敗: %v", err))
+			case len(props) == 0:
+				SendMessage(convID, "✅ 整併完成：沒有發現矛盾或過時的記憶，不需要動。")
+			default:
+				SendMessage(convID, fmt.Sprintf("🧠 整併產出 %d 條提案（**尚未生效**）：\n・%s\n\n用 `memory list` 看完整 diff，再 `apply memory <編號>` 逐條放行。",
+					len(props), strings.Join(props, "\n・")))
+			}
+		}()
 	case "apply", "reject":
 		// 「根本沒提案」與「指定編號不存在」是兩件事，訊息要分開——後者多半是打錯編號。
 		if len(evolve.ListProposedMemory(dir)) == 0 {
@@ -935,6 +956,32 @@ func remainingHint(rest []evolve.ProposedMemoryEntry) string {
 	return fmt.Sprintf("尚有 %d 條待處置（`memory list`）。", len(rest))
 }
 
+// renderProposedList 把提案清單畫成聊天訊息。破壞性的那幾條要看得出【會動到什麼】——
+// 審的人得知道按下去會發生什麼，光看一句「新值」是審不出來的。
+func renderProposedList(entries []evolve.ProposedMemoryEntry) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🧠 提案記憶 %d 條（`apply memory <編號>` 逐條放行／`apply memory` 全部）：\n", len(entries))
+	destructive := 0
+	for _, e := range entries {
+		switch e.Op {
+		case evolve.OpUpdate:
+			destructive++
+			fmt.Fprintf(&b, "%d. [%s·改寫] %s\n     舊：%s\n     新：%s\n     因：%s\n",
+				e.N, e.Kind, e.Target, e.Old, e.Learning, e.Why)
+		case evolve.OpDelete:
+			destructive++
+			fmt.Fprintf(&b, "%d. [%s·刪除] %s ⚠️ 會歸檔（可復原）\n     值：%s\n     因：%s\n",
+				e.N, e.Kind, e.Target, e.Old, e.Why)
+		default:
+			fmt.Fprintf(&b, "%d. [%s] %s\n", e.N, e.Kind, e.Learning)
+		}
+	}
+	if destructive > 0 {
+		fmt.Fprintf(&b, "\n⚠️ 其中 %d 條會【動到既有記憶】。刪除是歸檔（`.claw/memory-archive/`，可復原）。\n", destructive)
+	}
+	return b.String()
+}
+
 // parseMemoryCommand 解析記憶審核口令：
 //
 //	memory list                    → ("list", nil)
@@ -954,6 +1001,11 @@ func parseMemoryCommand(text string) (verb string, nums []int, ok bool) {
 			return "", nil, false // "memory list ..." 帶尾綴：不消費
 		}
 		return "list", nil, true
+	case fields[0] == "memory" && fields[1] == "reconcile":
+		if len(fields) != 2 {
+			return "", nil, false
+		}
+		return "reconcile", nil, true
 	case (fields[0] == "apply" || fields[0] == "approve") && fields[1] == "memory":
 		verb = "apply"
 	case (fields[0] == "reject" || fields[0] == "discard") && fields[1] == "memory":

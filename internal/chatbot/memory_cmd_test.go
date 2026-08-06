@@ -1,6 +1,11 @@
 package chatbot
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
+)
 
 // 指令解析：逐條審核的入口。誤消費（把使用者的話當指令吃掉）比不認得更糟，故不認得的尾綴一律不消費。
 func TestParseMemoryCommand(t *testing.T) {
@@ -38,5 +43,45 @@ func TestParseMemoryCommand(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestParseMemoryCommand_Reconcile(t *testing.T) {
+	if v, _, ok := parseMemoryCommand("memory reconcile"); !ok || v != "reconcile" {
+		t.Errorf("memory reconcile → (%q,%v)", v, ok)
+	}
+	// 帶尾綴不消費——避免誤吃使用者的話
+	if _, _, ok := parseMemoryCommand("memory reconcile 一下記憶"); ok {
+		t.Error("帶尾綴不該被消費")
+	}
+}
+
+// 破壞性提案在清單裡要看得出【會動到什麼】——光一句「新值」是審不出來的。
+func TestRenderProposedList_ShowsDestructiveDiff(t *testing.T) {
+	out := renderProposedList([]evolve.ProposedMemoryEntry{
+		{N: 1, Kind: "慣例", Op: evolve.OpAdd, Learning: "一般事實"},
+		{N: 2, Kind: "整併", Op: evolve.OpUpdate, Target: "mem-aa", Old: "舊的說法", Learning: "新的說法", Why: "被推翻"},
+		{N: 3, Kind: "整併", Op: evolve.OpDelete, Target: "mem-bb", Old: "過時內容", Why: "不再適用"},
+	})
+	for _, want := range []string{
+		"1. [慣例] 一般事實",
+		"舊：舊的說法", "新：新的說法", "因：被推翻", // UPDATE 要看得到 diff
+		"mem-bb", "會歸檔（可復原）", "值：過時內容", // DELETE 要標明可復原
+		"其中 2 條會【動到既有記憶】",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("清單缺少 %q:\n%s", want, out)
+		}
+	}
+}
+
+// 純 ADD 的清單不該冒出破壞性警告——那會讓警示失去意義。
+func TestRenderProposedList_NoWarningWhenAllAdd(t *testing.T) {
+	out := renderProposedList([]evolve.ProposedMemoryEntry{
+		{N: 1, Kind: "慣例", Op: evolve.OpAdd, Learning: "甲"},
+		{N: 2, Kind: "慣例", Learning: "乙"}, // Op 空＝舊格式，等同 add
+	})
+	if strings.Contains(out, "動到既有記憶") || strings.Contains(out, "⚠️") {
+		t.Errorf("全是 ADD 不該有警告:\n%s", out)
 	}
 }

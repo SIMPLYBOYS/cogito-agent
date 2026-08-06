@@ -229,6 +229,32 @@ func (m *MemoryLoader) List() []MemoryRecord {
 	return recs
 }
 
+// reconciledAtKey 是使用帳本裡「上次整併時間」的 key。前綴 `_` 與記錄 basename 天然不衝突
+// （basename 一定含 `.md`）。
+//
+// 為何塞進既有帳本而不另開檔：qm 在單一筆記本尾端寫 `<!-- consolidated: DATE -->`，但我們
+// 是【一檔一記錄】，沒有那樣的單一落點；提案檔又會被放行消耗掉，也不能放那裡。帳本已經有
+// 原子寫與鎖，多一個 key 是最省的做法。
+const reconciledAtKey = "_reconciled_at"
+
+// ReconciledAt 回傳上次整併時間（零值＝從未整併）。
+func (m *MemoryLoader) ReconciledAt() time.Time {
+	memUsageMu.Lock()
+	defer memUsageMu.Unlock()
+	return m.loadUsage()[reconciledAtKey].LastUsed
+}
+
+// MarkReconciled 記下「剛整併過」。供呼叫端做增量：距上次整併沒有新記錄就不必再跑一次 LLM。
+func (m *MemoryLoader) MarkReconciled(at time.Time) {
+	memUsageMu.Lock()
+	defer memUsageMu.Unlock()
+	u := m.loadUsage()
+	e := u[reconciledAtKey]
+	e.LastUsed = at
+	u[reconciledAtKey] = e
+	m.saveUsage(u)
+}
+
 // UpdateRecordFact 改寫一筆記錄的事實內容（description + 正文），**保留 tags、recorded
 // 與檔名**。整併的 UPDATE 走這裡。
 //
