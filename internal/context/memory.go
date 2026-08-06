@@ -220,6 +220,15 @@ func (m *MemoryLoader) loadAll() []MemoryRecord {
 	return recs
 }
 
+// List 回傳目前所有記憶記錄（含 Path，可推出 slug）。供【整併】用——它要看得到全部記錄
+// 才能判斷哪些互相矛盾，這是 recall（按查詢取前 k 筆）給不了的視角。
+// 排序依 Path，讓編號在同一份記憶庫上穩定：整併提案裡的編號必須對得回同一筆記錄。
+func (m *MemoryLoader) List() []MemoryRecord {
+	recs := m.loadAll()
+	sort.Slice(recs, func(i, j int) bool { return recs[i].Path < recs[j].Path })
+	return recs
+}
+
 // LoadIndex 把記憶的【元資料】放進 System Prompt（漸進式）；正文不載入，模型需要時用 recall 取回。
 func (m *MemoryLoader) LoadIndex() string {
 	recs := m.loadAll()

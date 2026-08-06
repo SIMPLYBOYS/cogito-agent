@@ -1,0 +1,329 @@
+package evolve
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+)
+
+// 最要緊的一條：舊格式（純 bullet）的解析結果一個位元都不能變。整併是加法，不是改法。
+func TestParseProposedMemory_BackwardCompatible(t *testing.T) {
+	raw := `<!-- ⚠️ 自動生成 -->
+
+## [慣例] 來自任務「裝依賴」（2026-08-05T10:00:00+08:00）
+- 本專案用 pnpm 而非 npm 裝依賴
+- 測試前需設 DATABASE_URL
+
+## [失敗教訓] 來自任務「跑測試」（2026-08-05T11:00:00+08:00）
+- 埠被占時先 lsof 再起
+`
+	got := parseProposedMemory(raw)
+	if len(got) != 3 {
+		t.Fatalf("應解出 3 條，got %d", len(got))
+	}
+	for _, e := range got {
+		if e.Op != OpAdd {
+			t.Errorf("#%d 舊格式應為 add，got %q", e.N, e.Op)
+		}
+		if e.IsDestructive() {
+			t.Errorf("#%d 舊格式不該是破壞性", e.N)
+		}
+		if e.Target != "" || e.Old != "" || e.Why != "" {
+			t.Errorf("#%d 舊格式不該有動作欄位: %+v", e.N, e)
+		}
+	}
+	if got[0].Learning != "本專案用 pnpm 而非 npm 裝依賴" || got[0].Kind != "慣例" {
+		t.Errorf("第一條內容/分類錯: %+v", got[0])
+	}
+	if got[2].Kind != "失敗教訓" || got[2].N != 3 {
+		t.Errorf("第三條分組/編號錯: %+v", got[2])
+	}
+}
+
+func TestParseProposedMemory_Actions(t *testing.T) {
+	raw := `## [整併] 2026-08-05T14:30:00+08:00
+- UPDATE mem-1a2b3c4d — 本專案用 pnpm；CI 也是
+  舊：本專案用 pnpm 而非 npm 裝依賴
+  因：新事實推翻了原本的暗示
+- DELETE mem-5e6f7a8b
+  值：Node 14 需要 --experimental-modules
+  因：專案已升到 Node 22
+- 部署前先跑 make verify
+`
+	got := parseProposedMemory(raw)
+	if len(got) != 3 {
+		t.Fatalf("應解出 3 條，got %d", len(got))
+	}
+
+	u := got[0]
+	if u.Op != OpUpdate || u.Target != "mem-1a2b3c4d" {
+		t.Errorf("UPDATE 解析錯: %+v", u)
+	}
+	if u.Learning != "本專案用 pnpm；CI 也是" {
+		t.Errorf("UPDATE 新值錯: %q", u.Learning)
+	}
+	if u.Old != "本專案用 pnpm 而非 npm 裝依賴" || u.Why != "新事實推翻了原本的暗示" {
+		t.Errorf("UPDATE 附帶行錯: old=%q why=%q", u.Old, u.Why)
+	}
+
+	d := got[1]
+	if d.Op != OpDelete || d.Target != "mem-5e6f7a8b" {
+		t.Errorf("DELETE 解析錯: %+v", d)
+	}
+	if d.Old != "Node 14 需要 --experimental-modules" || d.Why == "" {
+		t.Errorf("DELETE 附帶行錯: %+v", d)
+	}
+
+	// 同一區塊裡混著純 ADD 仍要正常
+	if got[2].Op != OpAdd || got[2].Learning != "部署前先跑 make verify" {
+		t.Errorf("混排的 ADD 錯: %+v", got[2])
+	}
+	// 編號連續、不因附帶行位移
+	for i, e := range got {
+		if e.N != i+1 {
+			t.Errorf("編號位移：第 %d 條 N=%d", i, e.N)
+		}
+	}
+}
+
+// 分隔符要寬鬆：我們寫「— 」，模型可能吐 "-" 或 ":"。
+func TestParseAction_SeparatorTolerance(t *testing.T) {
+	for _, body := range []string{
+		"UPDATE mem-x — 新值",
+		"UPDATE mem-x - 新值",
+		"UPDATE mem-x: 新值",
+		"UPDATE mem-x 新值",
+	} {
+		var e ProposedMemoryEntry
+		parseAction(&e, body)
+		if e.Op != OpUpdate || e.Target != "mem-x" || e.Learning != "新值" {
+			t.Errorf("%q → %+v", body, e)
+		}
+	}
+}
+
+// 殘缺的動作不能被丟掉——丟掉會讓編號位移，使用者看到的清單與檔案對不上。
+// 留著讓放行路徑報明確原因。
+func TestParseProposedMemory_MalformedActionKeepsNumbering(t *testing.T) {
+	raw := `## [整併] ts
+- UPDATE mem-x
+- 正常的一條
+`
+	got := parseProposedMemory(raw)
+	if len(got) != 2 {
+		t.Fatalf("殘缺動作不該被丟棄，應有 2 條，got %d", len(got))
+	}
+	if got[0].Op != OpUpdate || got[0].Learning != "" {
+		t.Errorf("殘缺 UPDATE 應保留且新值為空: %+v", got[0])
+	}
+	if got[1].N != 2 {
+		t.Errorf("編號位移了: %+v", got[1])
+	}
+}
+
+// 純 ADD 底下碰巧的縮排文字不該被誤讀成欄位（舊檔可能有）。
+func TestParseProposedMemory_IndentUnderAddIgnored(t *testing.T) {
+	raw := `## [慣例] ts
+- 一般事實
+  因：這行不該被吃進去
+`
+	got := parseProposedMemory(raw)
+	if len(got) != 1 || got[0].Why != "" {
+		t.Errorf("ADD 底下的縮排應忽略: %+v", got)
+	}
+}
+
+// round-trip：逐條放行時未選中的條目原樣寫回。少了這層，一條 UPDATE 被跳過一次就會
+// 退化成純文字 ADD，下次放行等於憑空多一筆記憶。
+func TestRenderProposedBullet_RoundTrip(t *testing.T) {
+	orig := `## [整併] 2026-08-05T14:30:00+08:00
+- UPDATE mem-1a2b3c4d — 本專案用 pnpm；CI 也是
+  舊：本專案用 pnpm 而非 npm 裝依賴
+  因：新事實推翻了原本的暗示
+- DELETE mem-5e6f7a8b
+  值：Node 14 需要 --experimental-modules
+  因：專案已升到 Node 22
+- 部署前先跑 make verify
+`
+	first := parseProposedMemory(orig)
+
+	var b strings.Builder
+	b.WriteString(first[0].Header + "\n")
+	for _, e := range first {
+		b.WriteString(renderProposedBullet(e))
+	}
+	second := parseProposedMemory(b.String())
+
+	if len(second) != len(first) {
+		t.Fatalf("round-trip 條數不符: %d → %d", len(first), len(second))
+	}
+	for i := range first {
+		a, c := first[i], second[i]
+		if a.Op != c.Op || a.Target != c.Target || a.Learning != c.Learning ||
+			a.Old != c.Old || a.Why != c.Why {
+			t.Errorf("第 %d 條 round-trip 失真:\n  前 %+v\n  後 %+v", i+1, a, c)
+		}
+	}
+}
+
+// slug 內含 "-"（mem-1a2b3c4d），剝分隔符時不能咬到它。
+func TestParseAction_SlugKeepsHyphen(t *testing.T) {
+	for _, body := range []string{
+		"UPDATE mem-1a2b3c4d — 新值",
+		"UPDATE mem-1a2b3c4d: 新值",
+		"DELETE mem-1a2b3c4d",
+	} {
+		var e ProposedMemoryEntry
+		parseAction(&e, body)
+		if e.Target != "mem-1a2b3c4d" {
+			t.Errorf("%q → Target=%q（slug 被咬掉了）", body, e.Target)
+		}
+	}
+}
+
+// seedRecords 在 <root>/.claw/memory 造記錄。tags 空＝不加 tags 行。
+func seedRecords(t *testing.T, root string, specs ...[2]string) {
+	t.Helper()
+	dir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i, sp := range specs {
+		desc, tags := sp[0], sp[1]
+		tagLine := ""
+		if tags != "" {
+			tagLine = "tags: [" + tags + "]\n"
+		}
+		body := fmt.Sprintf("---\nname: r%02d\ndescription: %s\n%s---\n%s\n", i, desc, tagLine, desc)
+		// 檔名決定編號順序（List 依 Path 排序）
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("mem-%02d.md", i)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestReconcile_WritesDiffableProposal(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root,
+		[2]string{"本專案用 npm 裝依賴", "慣例"},
+		[2]string{"本專案改用 pnpm 裝依賴", "慣例"})
+
+	fp := &fakeProvider{content: `{"actions":[
+	  {"op":"update","n":1,"fact":"本專案用 pnpm 裝依賴（2026-07 起）","why":"第 2 條已推翻第 1 條"}
+	]}`}
+	got, err := NewMemorySynthesizer(fp, root).Reconcile(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("應產出 1 條提案，got %v", got)
+	}
+
+	entries := ListProposedMemory(root)
+	if len(entries) != 1 {
+		t.Fatalf("提案檔應有 1 條，got %d", len(entries))
+	}
+	e := entries[0]
+	if e.Op != OpUpdate || e.Target != "mem-00" {
+		t.Errorf("動作/目標錯: %+v", e)
+	}
+	// 人審要看得到 diff：舊值、新值、理由三者缺一不可
+	if e.Old != "本專案用 npm 裝依賴" || e.Learning == "" || e.Why == "" {
+		t.Errorf("提案缺 diff 資訊: old=%q new=%q why=%q", e.Old, e.Learning, e.Why)
+	}
+}
+
+// 護欄①（提案時）：tags:[user] 的記錄不可被提案刪除，但可被提案修改。
+func TestReconcile_UserProfileNotDeletable(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root,
+		[2]string{"使用者要繁體中文回覆", ctxpkg.UserProfileTag},
+		[2]string{"某條可刪的慣例", "慣例"})
+
+	fp := &fakeProvider{content: `{"actions":[
+	  {"op":"delete","n":1,"why":"我覺得不需要了"},
+	  {"op":"delete","n":2,"why":"確實過時"}
+	]}`}
+	if _, err := NewMemorySynthesizer(fp, root).Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entries := ListProposedMemory(root)
+	if len(entries) != 1 {
+		t.Fatalf("畫像那條應被擋掉，只剩 1 條，got %d: %+v", len(entries), entries)
+	}
+	if entries[0].Target != "mem-01" {
+		t.Errorf("擋錯條了: %+v", entries[0])
+	}
+
+	// UPDATE 畫像則放行（偏好會變，但要人看 diff）
+	root2 := t.TempDir()
+	seedRecords(t, root2, [2]string{"使用者要繁體中文", ctxpkg.UserProfileTag}, [2]string{"x", "慣例"})
+	fp2 := &fakeProvider{content: `{"actions":[{"op":"update","n":1,"fact":"使用者要繁體中文，且不要簡體","why":"使用者補充"}]}`}
+	if _, err := NewMemorySynthesizer(fp2, root2).Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if e := ListProposedMemory(root2); len(e) != 1 || e[0].Op != OpUpdate {
+		t.Errorf("畫像應可被 UPDATE 提案: %+v", e)
+	}
+}
+
+func TestReconcile_RejectsBadActions(t *testing.T) {
+	cases := []struct{ name, resp string }{
+		{"編號越界", `{"actions":[{"op":"delete","n":99,"why":"x"}]}`},
+		{"沒有理由", `{"actions":[{"op":"delete","n":1}]}`},
+		{"未知動作", `{"actions":[{"op":"merge","n":1,"why":"x"}]}`},
+		{"改了等於沒改", `{"actions":[{"op":"update","n":1,"fact":"事實 A","why":"x"}]}`},
+		{"危險內容", `{"actions":[{"op":"add","fact":"部署前先跑 sudo rm -rf / 清乾淨"}]}`},
+	}
+	for _, c := range cases {
+		root := t.TempDir()
+		seedRecords(t, root, [2]string{"事實 A", "慣例"}, [2]string{"事實 B", "慣例"})
+		got, err := NewMemorySynthesizer(&fakeProvider{content: c.resp}, root).Reconcile(t.Context())
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if len(got) != 0 || len(ListProposedMemory(root)) != 0 {
+			t.Errorf("%s: 應被擋下，卻產出 %v", c.name, got)
+		}
+	}
+}
+
+// 解析失敗整批不動，與既有 evolve 管線一致。
+func TestReconcile_BadJSONAbortsBatch(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"A", "慣例"}, [2]string{"B", "慣例"})
+	_, err := NewMemorySynthesizer(&fakeProvider{content: "我覺得不用改"}, root).Reconcile(t.Context())
+	if err == nil {
+		t.Error("非 JSON 應回錯")
+	}
+	if len(ListProposedMemory(root)) != 0 {
+		t.Error("解析失敗不該寫入任何提案")
+	}
+}
+
+// 整併提案與 Reflect 的產物共用同一份檔案與同一套編號——memory list / apply 完全不必知道有整併。
+func TestReconcile_SharesNumberingWithReflect(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"舊事實", "慣例"}, [2]string{"新事實", "慣例"})
+
+	addFP := &fakeProvider{content: `{"learnings":["一條普通慣例"],"user_facts":[]}`}
+	if _, err := NewMemorySynthesizer(addFP, root).Reflect(t.Context(), "某任務", nil); err != nil {
+		t.Fatal(err)
+	}
+	recFP := &fakeProvider{content: `{"actions":[{"op":"delete","n":1,"why":"已被第 2 條取代"}]}`}
+	if _, err := NewMemorySynthesizer(recFP, root).Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	entries := ListProposedMemory(root)
+	if len(entries) != 2 {
+		t.Fatalf("兩種來源應在同一份清單，got %d: %+v", len(entries), entries)
+	}
+	if entries[0].N != 1 || entries[0].Op != OpAdd || entries[1].N != 2 || entries[1].Op != OpDelete {
+		t.Errorf("編號/順序錯: %+v", entries)
+	}
+}

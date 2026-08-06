@@ -19,10 +19,16 @@ import (
 // 不直接動生效中的 AGENTS.md——同樣的安全鐵律：自我進化產物須人工 review 後才併入。
 const ProposedMemoryFileName = "AGENTS.proposed.md"
 
+// proposedFileHeader 是提案檔開頭的警語。抽成常數是因為它原本在 appendProposed 與
+// writeProposedRest 各寫一份【字面值】——逐條放行會重寫整份檔案，兩邊哪天不一致就會在
+// 放行後悄悄換掉警語。Reconcile 也共用同一份。
+const proposedFileHeader = "<!-- ⚠️ 自動生成的『提案記憶』。需人工 review 後放行（apply memory）為可檢索的長期記憶記錄才生效（不會自動套用）。 -->\n"
+
 // MemorySynthesizer 在任務成功後反思，萃取耐久的專案慣例/雷點，去重 + 安全掃描後追加到
 // 【提案記憶】暫存檔；apply 時放行為 .claw/memory/ 的可檢索記憶記錄（不自動套用）。
 type MemorySynthesizer struct {
 	provider     provider.LLMProvider
+	root         string // 記憶根目錄（Reconcile 要讀 .claw/memory/ 全集）
 	agentsPath   string // 生效中的 AGENTS.md（用於去重）
 	proposedPath string // 提案記憶暫存檔 <root>/.claw/AGENTS.proposed.md
 }
@@ -31,6 +37,7 @@ type MemorySynthesizer struct {
 func NewMemorySynthesizer(p provider.LLMProvider, root string) *MemorySynthesizer {
 	return &MemorySynthesizer{
 		provider:     p,
+		root:         root,
 		agentsPath:   filepath.Join(root, "AGENTS.md"),
 		proposedPath: filepath.Join(root, ".claw", ProposedMemoryFileName),
 	}
@@ -150,7 +157,7 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 	}
 	var b strings.Builder
 	if readFileIgnore(m.proposedPath) == "" {
-		b.WriteString("<!-- ⚠️ 自動生成的『提案記憶』。需人工 review 後放行（apply memory）為可檢索的長期記憶記錄才生效（不會自動套用）。 -->\n")
+		b.WriteString(proposedFileHeader)
 	}
 	fmt.Fprintf(&b, "\n## [%s] 來自任務「%s」（%s）\n", kind, oneLine(taskPrompt), time.Now().Format(time.RFC3339))
 	for _, l := range learnings {
@@ -179,7 +186,26 @@ type ProposedMemoryEntry struct {
 	Header   string
 	Kind     string
 	Task     string
-	Learning string
+	Learning string // add：新事實；update：改後的值；delete：空（原值在 Old）
+
+	// 以下供【整併】提案（Reconcile 產出）表達破壞性操作。Op 空字串等同 OpAdd——
+	// 舊格式的提案檔（純 bullet）解析出來就是這個狀態，向後相容不必特判。
+	Op     string // "" / OpAdd / OpUpdate / OpDelete
+	Target string // update/delete 的目標記錄 slug（.claw/memory/<slug>.md 去掉副檔名）
+	Old    string // update 的舊值 / delete 的原值——人審時看 diff 用，放行時當樂觀鎖比對
+	Why    string // 為何要動它。人審的依據，update/delete 必填
+}
+
+// 提案動作。設計與理由見 docs/memory-reconcile-format.md。
+const (
+	OpAdd    = "add"
+	OpUpdate = "update"
+	OpDelete = "delete"
+)
+
+// IsDestructive 回報這條會不會動到既有記錄——render 要據此加警示，放行要據此走護欄。
+func (e ProposedMemoryEntry) IsDestructive() bool {
+	return e.Op == OpUpdate || e.Op == OpDelete
 }
 
 // ListProposedMemory 把提案檔解析成逐條清單（無提案回空）。供 `memory list` 顯示編號，
@@ -188,22 +214,89 @@ func ListProposedMemory(root string) []ProposedMemoryEntry {
 	return parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName)))
 }
 
+// parseProposedMemory 解析提案檔。文法見 docs/memory-reconcile-format.md：
+//
+//	## [kind] 來自任務「…」（ts）     ← 分組標頭
+//	- 純文字                          ← ADD（舊格式，原樣支援）
+//	- UPDATE <slug> — <新值>          ← 改寫既有記錄
+//	  舊：<原值>                      ← 縮排附帶行，屬於上一條 bullet
+//	  因：<理由>
+//	- DELETE <slug>
+//	  值：<原值>
+//	  因：<理由>
+//
+// 【編號規則不動】一個 bullet 一條、按掃描順序給 N——`apply memory 1 3` 因此完全不必改。
+// 附帶行縮排且不以 "-" 開頭，舊解析器讀到會忽略，是安全的漸進升級。
 func parseProposedMemory(raw string) []ProposedMemoryEntry {
 	var out []ProposedMemoryEntry
 	header, kind, task := "", "記憶", ""
-	for _, line := range strings.Split(stripComments(raw), "\n") {
-		line = strings.TrimSpace(line)
+	for _, raw := range strings.Split(stripComments(raw), "\n") {
+		// 縮排判斷要在 TrimSpace 之前做：附帶行靠縮排歸屬上一條 bullet。
+		indented := raw != strings.TrimLeft(raw, " \t")
+		line := strings.TrimSpace(raw)
+
 		switch {
 		case strings.HasPrefix(line, "## "):
-			header, kind, task = line, "", ""
+			header = line
 			kind, task = parseProposedHeader(line)
+
 		case strings.HasPrefix(line, "- "):
-			if l := strings.TrimSpace(strings.TrimPrefix(line, "- ")); l != "" {
-				out = append(out, ProposedMemoryEntry{N: len(out) + 1, Header: header, Kind: kind, Task: task, Learning: l})
+			body := strings.TrimSpace(strings.TrimPrefix(line, "- "))
+			if body == "" {
+				continue
+			}
+			e := ProposedMemoryEntry{N: len(out) + 1, Header: header, Kind: kind, Task: task}
+			parseAction(&e, body)
+			out = append(out, e)
+
+		case indented && len(out) > 0:
+			// 附帶行只對【動作型】提案有意義；純 ADD 底下的縮排文字忽略，
+			// 免得舊檔裡碰巧的縮排被誤讀成欄位。
+			if e := &out[len(out)-1]; e.IsDestructive() {
+				attachMeta(e, line)
 			}
 		}
 	}
 	return out
+}
+
+// parseAction 認 bullet 的動作前綴。沒有前綴＝ADD（舊格式行為）。
+// 刻意不在這裡拒絕殘缺的動作（例如 UPDATE 沒帶新值）——留著讓放行路徑報明確原因，
+// 直接丟掉會讓編號位移、使用者看到的清單與檔案對不上。
+func parseAction(e *ProposedMemoryEntry, body string) {
+	for _, a := range []struct{ verb, op string }{{"UPDATE ", OpUpdate}, {"DELETE ", OpDelete}} {
+		if !strings.HasPrefix(body, a.verb) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(body, a.verb))
+		slug, tail, _ := strings.Cut(rest, " ")
+		// 分隔符寬鬆些：我們寫「— 」，但模型可能吐 "-" 或 ":"，且可能【黏在 slug 上】
+		// （"mem-x: 新值"）。slug 右側只剝 ":" 與 "—"——"-" 是 slug 內容的一部分
+		// （mem-1a2b3c4d），一併剝掉會咬到合法字元。
+		e.Op = a.op
+		e.Target = strings.TrimRight(strings.TrimSpace(slug), "—:")
+		e.Learning = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(tail), "—-:"))
+		return
+	}
+	e.Op, e.Learning = OpAdd, body
+}
+
+// attachMeta 把縮排附帶行填進上一條動作提案。未知前綴忽略（容忍模型多寫幾行）。
+func attachMeta(e *ProposedMemoryEntry, line string) {
+	for _, m := range []struct {
+		prefixes []string
+		dst      *string
+	}{
+		{[]string{"舊：", "舊:", "值：", "值:"}, &e.Old},
+		{[]string{"因：", "因:"}, &e.Why},
+	} {
+		for _, p := range m.prefixes {
+			if strings.HasPrefix(line, p) {
+				*m.dst = strings.TrimSpace(strings.TrimPrefix(line, p))
+				return
+			}
+		}
+	}
 }
 
 // pickProposed 依 only（1-based 編號；空＝全選）把條目切成「選中」與「留下」。編號超出範圍即忽略。
@@ -225,6 +318,33 @@ func pickProposed(all []ProposedMemoryEntry, only []int) (picked, rest []Propose
 	return picked, rest
 }
 
+// renderProposedBullet 把一條提案寫回檔案格式。**必須與 parseProposedMemory 對稱**——
+// 逐條放行時未選中的條目要原樣留在檔裡；少了這層，一條 UPDATE 提案只要被跳過一次就會
+// 退化成純文字 ADD，下次放行等於憑空多一筆記憶。
+func renderProposedBullet(e ProposedMemoryEntry) string {
+	var b strings.Builder
+	switch e.Op {
+	case OpUpdate:
+		fmt.Fprintf(&b, "- UPDATE %s — %s\n", e.Target, e.Learning)
+	case OpDelete:
+		fmt.Fprintf(&b, "- DELETE %s\n", e.Target)
+	default:
+		fmt.Fprintf(&b, "- %s\n", e.Learning)
+		return b.String() // ADD 沒有附帶行
+	}
+	if e.Old != "" {
+		label := "舊"
+		if e.Op == OpDelete {
+			label = "值"
+		}
+		fmt.Fprintf(&b, "  %s：%s\n", label, e.Old)
+	}
+	if e.Why != "" {
+		fmt.Fprintf(&b, "  因：%s\n", e.Why)
+	}
+	return b.String()
+}
+
 // writeProposedRest 把「留下」的條目寫回提案檔（保留原分組標頭）；沒有剩餘就刪檔。
 func writeProposedRest(path string, rest []ProposedMemoryEntry) error {
 	if len(rest) == 0 {
@@ -234,14 +354,14 @@ func writeProposedRest(path string, rest []ProposedMemoryEntry) error {
 		return nil
 	}
 	var b strings.Builder
-	b.WriteString("<!-- ⚠️ 自動生成的『提案記憶』。需人工 review 後放行（apply memory）為可檢索的長期記憶記錄才生效（不會自動套用）。 -->\n")
+	b.WriteString(proposedFileHeader)
 	last := ""
 	for _, e := range rest {
 		if e.Header != last {
-			b.WriteString("\n" + e.Header + "\n")
+			fmt.Fprintf(&b, "\n%s\n", e.Header)
 			last = e.Header
 		}
-		b.WriteString("- " + e.Learning + "\n")
+		b.WriteString(renderProposedBullet(e))
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
