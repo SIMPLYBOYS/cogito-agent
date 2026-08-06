@@ -252,6 +252,25 @@ Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@examp
 不與其他 agent 互見。**寫半邊（跑後反思→per-agent 提案→治理放行）仍延後**——淨新增子 agent 反思點
 + per-agent 治理面，等「orchestrator 實跑確認每次從零開始真的痛」再上。詳見 docs/multi-tenancy.md。
 
+> ### ⚠️ 2026-08-05：這條的【題目】可能設錯了
+>
+> 研究 Hermes v0.20.0 的 Kanban 後（[task-board-research.md](task-board-research.md)）：
+> 它對「同機多 agent 怎麼對齊」的答案**不是共享記憶，是共享一塊工作板**——不共享事實、
+> 不共享上下文，**只共享任務狀態且只有 kernel 能寫**，衝突解決因此塌縮成「原子認領」。
+>
+> 對應到這條：痛點若真的出現，解法可能不是「讓 agent 互看記憶」，而是
+> **「讓任務本身有持久狀態」**——agent 撿起一張卡，卡上已有 run 歷史與註解，
+> 它不需要記得上次，因為**上下文在卡上，不在 agent 腦裡**。
+>
+> | | 舊題目 | 可能的新題目 |
+> |---|---|---|
+> | 要解的 | 具名 agent 跨次任務記憶不互見 | 跨次任務的**工作狀態**沒有落點 |
+> | 做法 | per-agent 記憶寫半邊 + 治理放行 | 任務板：狀態機 + 持久 run 歷史 + per-task 認領 |
+>
+> **觸發條件不變**（orchestrator 實跑喊痛）。改的是「痛的時候要做什麼」，不是「現在就做」。
+> 順帶標記兩個既有結構差異：cron 是**整輪一把 flock**（只允許 1 個跑者，非 N worker）、
+> 子 agent 是同進程 goroutine（Hermes 刻意選行程隔離）。
+
 <details><summary>原始分析</summary>
 
 完整解是 inter-agent messaging（大，不做）。中間解：每個具名 agent 給自己的

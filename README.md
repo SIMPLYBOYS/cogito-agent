@@ -773,6 +773,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 | [memory-stack-audit.md](docs/memory-stack-audit.md) | **記憶層自評**：對照流傳的「Agent Memory Stack」七層逐層攤開——六層有、shared memory 一層缺（含觸發條件），以及那套分類把放置策略/作用域混進內容種類的問題 |
 | [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
 | [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
+| [task-board-research.md](docs/task-board-research.md) | **設計研究**：同機多 agent 怎麼對齊。拆解 Hermes Kanban（狀態機＋原子認領＋單一寫入者），結論是「共享工作板」比「共享記憶」聰明——並據此檢討我們自己那條待辦的**題目**設錯了 |
 | [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：先釐清**它不是 harness 而是託管 harness 的上層平台**（45 個模組裡 harness 佔 1 個），再列抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
 | [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
 | [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | demo 腳本：治理三幕 / 多 agent 並行 code review |
