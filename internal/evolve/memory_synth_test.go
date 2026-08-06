@@ -108,7 +108,7 @@ func TestApplyAndDiscardProposedMemory(t *testing.T) {
 	}
 
 	// apply → 落成 .claw/memory 的可檢索記錄、清掉提案檔（不再 append 進 AGENTS.md）
-	applied, err := ApplyProposedMemory(root)
+	applied, _, err := ApplyProposedMemory(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestApplyAndDiscardProposedMemory(t *testing.T) {
 	}
 
 	// 沒提案時 apply → 空、不報錯
-	if out, err := ApplyProposedMemory(root); err != nil || len(out) != 0 {
+	if out, _, err := ApplyProposedMemory(root); err != nil || len(out) != 0 {
 		t.Errorf("沒提案時應回空，got out=%q err=%v", out, err)
 	}
 }
@@ -207,7 +207,7 @@ func TestApplyProposedMemory_PerEntry(t *testing.T) {
 	}
 
 	// 只放行 1 和 3
-	applied, err := ApplyProposedMemory(root, 1, 3)
+	applied, _, err := ApplyProposedMemory(root, 1, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestApplyProposedMemory_UnknownIndexIsNoop(t *testing.T) {
 	fp := &fakeProvider{content: `{"learnings": ["只有一條"]}`}
 	_, _ = NewMemorySynthesizer(fp, root).Reflect(t.Context(), "t", nil)
 
-	applied, err := ApplyProposedMemory(root, 9)
+	applied, _, err := ApplyProposedMemory(root, 9)
 	if err != nil || len(applied) != 0 {
 		t.Errorf("編號不存在應為 no-op，got %v err=%v", applied, err)
 	}
@@ -284,7 +284,7 @@ func TestMemoryReflect_RoutesUserFacts(t *testing.T) {
 	}
 
 	// 放行後落地的記錄要帶 tags: [user]，否則 LoadIndex 認不出來、常駐待遇形同虛設。
-	if _, err := ApplyProposedMemory(root); err != nil {
+	if _, _, err := ApplyProposedMemory(root); err != nil {
 		t.Fatal(err)
 	}
 	files, _ := filepath.Glob(filepath.Join(root, ".claw", "memory", "mem-*.md"))

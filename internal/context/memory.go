@@ -229,6 +229,42 @@ func (m *MemoryLoader) List() []MemoryRecord {
 	return recs
 }
 
+// UpdateRecordFact 改寫一筆記錄的事實內容（description + 正文），**保留 tags、recorded
+// 與檔名**。整併的 UPDATE 走這裡。
+//
+// 為何不換檔名：檔名是內容雜湊（mem-%08x），改內容後「正確的」雜湊會變——但使用帳本
+// memory-usage.json 是【以 basename 為 key】的，改名等於把該筆的 LRU 時間與命中次數
+// 孤兒化，Prune 淘汰立刻失準。讓檔名退化成純 ID 是比較小的代價。
+//
+// name 由呼叫端給（短標題的截斷規則屬於 evolve，不在這裡複製一份）。note 是追加在正文
+// 末尾的來源標註，空字串則不加。
+func UpdateRecordFact(path, name, fact, note string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	old := parseMemoryMD(string(raw))
+	tags := ""
+	if len(old.Tags) > 0 {
+		tags = "tags: [" + strings.Join(old.Tags, ", ") + "]\n"
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\n%s---\n%s\n", name, fact, tags, fact)
+	if note != "" {
+		body += "\n" + note + "\n"
+	}
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// ArchiveRecord 把一筆記錄移到 .claw/memory-archive/——與 Prune 同一個落點。
+// **可復原，不是刪除**：記憶操作是新的失控控制面，刪錯無法從對話還原。
+func (m *MemoryLoader) ArchiveRecord(basename string) error {
+	archiveDir := filepath.Join(m.workDir, ".claw", "memory-archive")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		return err
+	}
+	return os.Rename(filepath.Join(m.dir(), basename), filepath.Join(archiveDir, basename))
+}
+
 // LoadIndex 把記憶的【元資料】放進 System Prompt（漸進式）；正文不載入，模型需要時用 recall 取回。
 func (m *MemoryLoader) LoadIndex() string {
 	recs := m.loadAll()

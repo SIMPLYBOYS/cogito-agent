@@ -895,21 +895,30 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
 			return true
 		}
-		var done []string
+		var done, skipped []string
 		var err error
 		if verb == "apply" {
-			done, err = evolve.ApplyProposedMemory(dir, nums...)
+			done, skipped, err = evolve.ApplyProposedMemory(dir, nums...)
 		} else {
 			done, err = evolve.DiscardProposedMemory(dir, nums...)
+		}
+		// 被護欄擋下的要講原因——按了 apply 卻沒動靜又沒解釋，比直接失敗更糟。
+		// 這些條目留在提案檔，所以下面的 remainingHint 會把它們算進去。
+		skipNote := ""
+		if len(skipped) > 0 {
+			skipNote = "\n⚠️ 有 " + strconv.Itoa(len(skipped)) + " 條未套用（仍留在提案）：\n・" +
+				strings.Join(skipped, "\n・")
 		}
 		switch {
 		case err != nil:
 			SendMessage(convID, fmt.Sprintf("❌ 處理失敗: %v", err))
+		case len(done) == 0 && len(skipped) > 0:
+			SendMessage(convID, "ℹ️ 選中的條目都沒有套用。"+skipNote)
 		case len(done) == 0:
 			SendMessage(convID, "ℹ️ 指定的編號不存在（用 `memory list` 查看目前有哪些）。")
 		case verb == "apply":
-			SendMessage(convID, fmt.Sprintf("✅ 已放行 %d 條提案記憶為可檢索的長期記憶（recall 可取），下次任務起生效。%s",
-				len(done), remainingHint(evolve.ListProposedMemory(dir))))
+			SendMessage(convID, fmt.Sprintf("✅ 已放行 %d 條提案記憶為可檢索的長期記憶（recall 可取），下次任務起生效。%s%s",
+				len(done), remainingHint(evolve.ListProposedMemory(dir)), skipNote))
 		default:
 			SendMessage(convID, fmt.Sprintf("🗑️ 已丟棄 %d 條提案記憶（未放行）。%s",
 				len(done), remainingHint(evolve.ListProposedMemory(dir))))

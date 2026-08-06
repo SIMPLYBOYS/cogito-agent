@@ -327,3 +327,159 @@ func TestReconcile_SharesNumberingWithReflect(t *testing.T) {
 		t.Errorf("編號/順序錯: %+v", entries)
 	}
 }
+
+// readRecord 讀出某 slug 的 description（護欄驗證用）。
+func readRecord(t *testing.T, root, slug string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, ".claw", "memory", slug+".md"))
+	if err != nil {
+		t.Fatalf("讀 %s: %v", slug, err)
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(l, "description:") {
+			return strings.TrimSpace(strings.TrimPrefix(l, "description:"))
+		}
+	}
+	return ""
+}
+
+func writeProposal(t *testing.T, root, body string) {
+	t.Helper()
+	dir := filepath.Join(root, ".claw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ProposedMemoryFileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApply_UpdateRewritesInPlace(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"本專案用 npm", "慣例"})
+	writeProposal(t, root, `## [整併] ts
+- UPDATE mem-00 — 本專案改用 pnpm
+  舊：本專案用 npm
+  因：已切換
+`)
+	applied, skipped, err := ApplyProposedMemory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 1 || len(skipped) != 0 {
+		t.Fatalf("應套用 1 條: applied=%v skipped=%v", applied, skipped)
+	}
+	if got := readRecord(t, root, "mem-00"); got != "本專案改用 pnpm" {
+		t.Errorf("內容沒改寫: %q", got)
+	}
+	// 檔名不變是刻意的——改名會讓 memory-usage.json 的使用歷史孤兒化
+	if _, err := os.Stat(filepath.Join(root, ".claw", "memory", "mem-00.md")); err != nil {
+		t.Errorf("檔名不該變: %v", err)
+	}
+}
+
+// 護欄③：DELETE 是歸檔不是刪除。
+func TestApply_DeleteArchivesNotRemoves(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"過時的事實", "慣例"})
+	writeProposal(t, root, `## [整併] ts
+- DELETE mem-00
+  值：過時的事實
+  因：已不適用
+`)
+	applied, skipped, err := ApplyProposedMemory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 1 || len(skipped) != 0 {
+		t.Fatalf("applied=%v skipped=%v", applied, skipped)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claw", "memory", "mem-00.md")); !os.IsNotExist(err) {
+		t.Error("記錄應已移出 memory/")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claw", "memory-archive", "mem-00.md")); err != nil {
+		t.Errorf("應歸檔到 memory-archive（可復原）: %v", err)
+	}
+}
+
+// 放行時的三道護欄。提案檔是純文字、人可以手改，所以真正動檔案的這步必須自己再驗一次。
+func TestApply_DestructiveGuards(t *testing.T) {
+	cases := []struct {
+		name, tags, proposal, wantNote string
+	}{
+		{
+			name: "畫像不可刪", tags: ctxpkg.UserProfileTag,
+			proposal: "- DELETE mem-00\n  值：使用者要繁體中文\n  因：手改混進來的\n",
+			wantNote: "使用者畫像記錄不可刪除",
+		},
+		{
+			name: "舊值對不上（樂觀鎖）", tags: "慣例",
+			proposal: "- UPDATE mem-00 — 新值\n  舊：這不是目前的內容\n  因：x\n",
+			wantNote: "記錄內容已變動",
+		},
+		{
+			name: "目標不存在", tags: "慣例",
+			proposal: "- DELETE mem-nonexistent\n  值：x\n  因：y\n",
+			wantNote: "記錄已不存在",
+		},
+		{
+			name: "提案殘缺（缺新值）", tags: "慣例",
+			proposal: "- UPDATE mem-00\n  舊：使用者要繁體中文\n  因：x\n",
+			wantNote: "提案殘缺",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedRecords(t, root, [2]string{"使用者要繁體中文", c.tags})
+			writeProposal(t, root, "## [整併] ts\n"+c.proposal)
+
+			applied, skipped, err := ApplyProposedMemory(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(applied) != 0 {
+				t.Fatalf("不該套用任何東西: %v", applied)
+			}
+			if len(skipped) != 1 || !strings.Contains(skipped[0], c.wantNote) {
+				t.Fatalf("原因應含 %q，got %v", c.wantNote, skipped)
+			}
+			// 記錄必須原封不動
+			if got := readRecord(t, root, "mem-00"); got != "使用者要繁體中文" {
+				t.Errorf("記錄被動到了: %q", got)
+			}
+			// 被擋下的要【留在提案檔】等重新整併，不能悄悄消失
+			if rest := ListProposedMemory(root); len(rest) != 1 {
+				t.Errorf("被擋下的應留在提案檔，got %d 條", len(rest))
+			}
+		})
+	}
+}
+
+// 混合放行：ADD 成功、破壞性被擋，兩者互不影響，且剩餘條目依原編號排回去。
+func TestApply_MixedKeepsOrder(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, [2]string{"目前內容", "慣例"})
+	writeProposal(t, root, `## [整併] ts
+- 一條普通新事實
+- UPDATE mem-00 — 新值
+  舊：對不上的舊值
+  因：x
+- 另一條普通新事實
+`)
+	applied, skipped, err := ApplyProposedMemory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 2 || len(skipped) != 1 {
+		t.Fatalf("applied=%v skipped=%v", applied, skipped)
+	}
+	rest := ListProposedMemory(root)
+	if len(rest) != 1 || rest[0].Op != OpUpdate {
+		t.Fatalf("只該剩那條被擋的 UPDATE: %+v", rest)
+	}
+	// round-trip：留下來的仍是 UPDATE，附帶行沒掉——否則下次放行會變成憑空新增
+	if rest[0].Old == "" || rest[0].Why == "" {
+		t.Errorf("附帶行遺失: %+v", rest[0])
+	}
+}

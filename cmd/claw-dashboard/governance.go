@@ -93,14 +93,22 @@ func (s *server) govApplyMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	applied, err := evolve.ApplyProposedMemory(s.workspace)
+	applied, skipped, err := evolve.ApplyProposedMemory(s.workspace)
+	// 被護欄擋下的（畫像不可刪、記錄已變動…）要講出來，否則面板按了沒反應。
+	skipNote := ""
+	if len(skipped) > 0 {
+		skipNote = fmt.Sprintf("；⚠️ %d 條未套用（仍留在提案）：%s",
+			len(skipped), strings.Join(skipped, "、"))
+	}
 	switch {
 	case err != nil:
 		s.setFlash("⚠️ 套用記憶失敗：" + err.Error())
+	case len(applied) == 0 && len(skipped) > 0:
+		s.setFlash("沒有條目被套用" + skipNote)
 	case len(applied) == 0:
 		s.setFlash("無記憶提案可套用。")
 	default:
-		s.setFlash(fmt.Sprintf("✓ 已放行 %d 條記憶提案。", len(applied)))
+		s.setFlash(fmt.Sprintf("✓ 已放行 %d 條記憶提案。%s", len(applied), skipNote))
 	}
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }

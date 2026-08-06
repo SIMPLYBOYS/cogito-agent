@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -372,39 +373,107 @@ func writeProposedRest(path string, rest []ProposedMemoryEntry) error {
 // only 為 1-based 編號（見 ListProposedMemory）；**留空＝全部放行**（保留原本的批次語意）。
 // 逐條放行的理由：先前是全有全無，一批裡有一條寫壞就得整批丟掉——而反思是批次產出的，
 // 「大致有用但夾一條爛的」才是常態。未選中的條目留在提案檔等後續處置。
-func ApplyProposedMemory(root string, only ...int) ([]string, error) {
+// skipped 回報「選中了但沒套用」的原因。破壞性操作一定要有這個——使用者按了
+// `apply memory 3` 卻沒動靜又沒解釋，比直接失敗更糟。被跳過的條目【留在提案檔】等重新整併。
+func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, err error) {
 	ctxpkg.LockKnowledge() // 整個 read-proposed→寫記錄→回寫剩餘→Prune 視為一個原子單元
 	defer ctxpkg.UnlockKnowledge()
 	proposedPath := filepath.Join(root, ".claw", ProposedMemoryFileName)
 	all := parseProposedMemory(readFileIgnore(proposedPath))
 	if len(all) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	picked, rest := pickProposed(all, only)
 	if len(picked) == 0 {
-		return nil, nil // 編號都不存在：不動任何東西
+		return nil, nil, nil // 編號都不存在：不動任何東西
 	}
 	memDir := filepath.Join(root, ".claw", "memory")
 	if err := os.MkdirAll(memDir, 0o755); err != nil {
-		return nil, fmt.Errorf("建立記憶目錄失敗: %w", err)
+		return nil, nil, fmt.Errorf("建立記憶目錄失敗: %w", err)
 	}
-	var applied []string
+	loader := ctxpkg.NewMemoryLoader(root)
 	for _, e := range picked {
-		if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning); err != nil {
-			return applied, err
+		if !e.IsDestructive() {
+			if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning); err != nil {
+				return applied, skipped, err
+			}
+			applied = append(applied, e.Learning)
+			continue
 		}
-		applied = append(applied, e.Learning)
+		note, err := applyDestructive(loader, memDir, e)
+		if err != nil {
+			return applied, skipped, err
+		}
+		if note != "" { // 護欄擋下：留在提案檔，回報原因
+			skipped = append(skipped, fmt.Sprintf("#%d %s：%s", e.N, e.Target, note))
+			rest = append(rest, e)
+			continue
+		}
+		applied = append(applied, describeEntry(e))
 	}
+	// 被跳過的塞回 rest，順序會亂掉——依原編號排回去，回寫的檔案才與使用者看過的清單一致。
+	sort.Slice(rest, func(i, j int) bool { return rest[i].N < rest[j].N })
 	if err := writeProposedRest(proposedPath, rest); err != nil {
-		return applied, err
+		return applied, skipped, err
 	}
 	// 放行後順手淘汰：超過上限的最久未用記錄歸檔（可復原），避免記憶庫無限長。
-	ctxpkg.NewMemoryLoader(root).Prune(maxMemoryRecords)
-	return applied, nil
+	loader.Prune(maxMemoryRecords)
+	return applied, skipped, nil
+}
+
+// applyDestructive 套用 UPDATE / DELETE。回傳非空字串＝被護欄擋下的原因（呼叫端據此把
+// 該條留回提案檔）；回傳空字串＝已套用。
+//
+// 這是【放行時】的第二層護欄。提案時已經擋過一輪，但提案檔是純文字、人可以手改，
+// 所以真正動檔案的這一步必須自己再驗一次，不能信提案內容。
+func applyDestructive(loader *ctxpkg.MemoryLoader, memDir string, e ProposedMemoryEntry) (string, error) {
+	if e.Target == "" {
+		return "提案殘缺（缺目標記錄）", nil
+	}
+	if e.Op == OpUpdate && e.Learning == "" {
+		return "提案殘缺（缺新值）", nil
+	}
+
+	var rec *ctxpkg.MemoryRecord
+	for _, r := range loader.List() {
+		if strings.TrimSuffix(filepath.Base(r.Path), ".md") == e.Target {
+			rec = &r
+			break
+		}
+	}
+	if rec == nil {
+		return "記錄已不存在（可能已被歸檔或放行過）", nil
+	}
+
+	// 護欄①：使用者本人明確要求記住的，不可刪。
+	if e.Op == OpDelete && hasUserTag(rec.Tags) {
+		return "使用者畫像記錄不可刪除", nil
+	}
+	// 護欄②：樂觀鎖。提案產生到放行之間記錄可能已被改過——舊值對不上就拒絕，
+	// 否則會拿一份過期的 diff 去覆蓋現況。
+	if e.Old != "" && normalize(rec.Description) != normalize(e.Old) {
+		return "記錄內容已變動，請重新整併", nil
+	}
+
+	if e.Op == OpDelete {
+		// 護欄③：歸檔而非刪除。
+		return "", loader.ArchiveRecord(filepath.Base(rec.Path))
+	}
+	title := e.Learning
+	if r := []rune(title); len(r) > memoryTitleRunes {
+		title = string(r[:memoryTitleRunes])
+	}
+	note := fmt.Sprintf("〔整併 provenance〕於 %s 由整併提案改寫；原內容：%s",
+		time.Now().Format(time.RFC3339), e.Old)
+	return "", ctxpkg.UpdateRecordFact(rec.Path, title, e.Learning, note)
 }
 
 // maxMemoryRecords 是長期記憶庫的記錄上限；超量時 Prune 把最久未用的歸檔到 .claw/memory-archive/。
 const maxMemoryRecords = 200
+
+// memoryTitleRunes 是記錄 frontmatter `name:` 的截斷長度。抽成常數是因為整併的 UPDATE
+// 也要套同一規則——兩處各寫一個 24 遲早會分岔。
+const memoryTitleRunes = 24
 
 // writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。
 func writeMemoryRecord(memDir, kind, task, learning string) error {
@@ -413,9 +482,9 @@ func writeMemoryRecord(memDir, kind, task, learning string) error {
 	_, _ = h.Write([]byte(learning))
 	slug := fmt.Sprintf("mem-%08x", h.Sum32())
 
-	title := learning // name 取短標題，過長截前 24 字（rune 安全）
-	if r := []rune(learning); len(r) > 24 {
-		title = string(r[:24])
+	title := learning // name 取短標題，過長截前 memoryTitleRunes 字（rune 安全）
+	if r := []rune(learning); len(r) > memoryTitleRunes {
+		title = string(r[:memoryTitleRunes])
 	}
 	// 來源標註（provenance，對抗幻覺記憶）：frontmatter 記時間戳、body 記完整來源；body 會在 recall
 	// 時渲染給模型看，讓「檢索到的真實記憶」自帶「由誰、何時、從哪個任務沉澱」——可溯源、可稽核、
