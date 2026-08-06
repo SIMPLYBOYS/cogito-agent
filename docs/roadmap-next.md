@@ -314,10 +314,24 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
 
 ---
 
-## 建議順序（07-24 更新；原順序的 get 與 caching 已結案）
+## 建議順序（2026-08-05 更新；🟢 評測補完四項全數結案）
 
-**🟢 評測補完 → 🔴 2. SWE-bench `-swe-env-setup` → 🟡 3b. Telegram thread（若走 orchestrator 路線）→ 🟡 4/5. 面板身分（tsnet 或反代標頭）**
+**📌 sessions-archive 裁決（5 分）→ 🟢 SECURITY.md（1h）→ 🔴 2. SWE-bench `-swe-env-setup` → 🔴 記憶整併動作清單**
 
-理由：綠的那組能把「p=0.206」升級成真結論，而那是**已經寫進 README 的數字**，僅剩的阻礙
-是一筆小成本（~$0.7）；#2 是「一個結論值 25 題」的驗證；3b 取決於產品方向（orchestrator
-常駐與否）；4/5 等部署形態明朗（上雲/反代）再選邊。
+理由：
+
+1. **📌 sessions-archive**——掛了兩週的零風險小事，順手清掉（保留 `retrospect-e2e-*.json`
+   當 provenance 證據，其餘 5 檔可刪；`delegate-and-verify-file` 提案的晉升/丟棄一併裁決）。
+2. **🟢 SECURITY.md**——內容全部現成（README:36 + incident-blacklist-bypass.md），只是散著。
+   對照 qm 後才發現：**我們比它誠實，卻沒有一頁能證明**。一小時補上唯一的敘事缺口。
+3. **🔴 #2 SWE-bench `-swe-env-setup`**——現在最高價值，因為它**擋著另一個決策**。
+   剛拿到 opus 4/5 的 baseline；若「提分的最大槓桿是備妥測試環境、不是換更強模型」成立，
+   那個結論比多跑 15 題有價值，而且直接決定**要不要花 $4.9 把 SWE-bench 補到 n=20**
+   ——如果 agent 是被環境卡住的，n=20 測的只是一個殘廢的 agent。成本：5 題重跑約 $1.2。
+4. **🔴 記憶整併動作清單**——唯一真正改變能力的項目（矛盾記憶並存、recall 到哪條看運氣），
+   但動 `.claw/memory/` 既有記錄、風險中等，排在三個零/低風險項之後。細節見
+   [qm-learnings.md](qm-learnings.md) §1。
+
+**其餘全部有觸發條件，不動**：tsnet 等部署形態、3b Telegram thread 等產品方向、
+模型核准清單與 egress 等多租戶真的發生、任務板／layer-07 等 orchestrator 實跑喊痛、
+SWE-bench n=20 等 #2 的結論。
