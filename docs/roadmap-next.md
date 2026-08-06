@@ -303,8 +303,9 @@ qm（YC 內部平台，2026-07-31 MIT 開源）盤點後有兩項進這份清單
 OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組裡 harness 佔 1 個。
 它在 cogito【上面】一層，不是同層對照組（那是 Hermes）。所以可移植的東西全在治理層：
 
-- **🟢 SECURITY.md 彙整**（~1h、零風險）：內容已散在 README:36 與 incident-blacklist-bypass.md，
-  缺的只是一頁能一次看完的「防什麼／**不防什麼**」。
+- ✅ **SECURITY.md 彙整**（2026-08-05 完成）：[SECURITY.md](../SECURITY.md) 已建立——威脅模型 4 條假設、
+  已實作防線分 5 組（逐條可查證，數字都對回程式碼）、**10 條明確不防**、host/docker 保證對照表、
+  上線最低配置。內容全部來自既有事實，沒有新結論。
 - **🔴 記憶整併動作清單**：`MemorySynthesizer` 目前只 append，沒有任何路徑會 UPDATE/DELETE
   既有記錄——矛盾的記憶會並存在索引裡。補 `Consolidate()` 回 `UPDATE <n>`/`DELETE <n>`/`ADD`/`NONE`，
   產物走 P1 已做好的逐條審批；`DELETE` 走歸檔而非真刪。
@@ -316,7 +317,11 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
 
 ## 建議順序（2026-08-05 更新；🟢 評測補完四項全數結案）
 
-**📌 sessions-archive 裁決（5 分）→ 🟢 SECURITY.md（1h）→ 🔴 2. SWE-bench `-swe-env-setup` → 🔴 記憶整併動作清單**
+**✅ ~~📌 sessions-archive~~ → ✅ ~~🟢 SECURITY.md~~ → 🔴 2. SWE-bench `-swe-env-setup` → 🔴 記憶整併動作清單**
+
+> 前兩項已於 2026-08-05 完成。sessions-archive 清掉 5 檔（`retrospect-e2e-*.json` 保留為
+> provenance 證據）；`delegate-and-verify-file` 提案的晉升/丟棄**仍待裁決**——與 `orchestrate`
+> 技能部分重疊（委派/並行機制），獨有價值是「主 context 自己驗檔案、不信子 agent 自陳」。
 
 理由：
 

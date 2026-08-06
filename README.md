@@ -32,6 +32,7 @@
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
 
 **駕馭工程（失控控制）**
+- 📄 **[SECURITY.md](SECURITY.md)——防什麼、更重要的是[不防什麼](SECURITY.md#-不防什麼)**：prompt injection 明確不防、命令黑名單可繞過（附實際事故記錄）、host 模式 bash ＝ 宿主機 RCE 路徑。上線前請照該文最後一節配置。
 - 🔒 **入口授權（fail-closed）**：Slack/Telegram 只有 `COGITO_ALLOWED_USERS` 名單內的 user id 能驅動 agent；不設＝拒絕所有人。高危審批限 `COGITO_ADMIN_USERS`，杜絕「發起者自我放行」。**上線前務必設白名單**（見 [.env.example](.env.example)）——bot 入口 + 工具執行不設限＝未授權者可 RCE。
 - 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的呼叫掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區——`..` 穿越、絕對路徑、**以及 symlink**（解析到最深的已存在祖先後重驗前綴），不依賴可被繞過的審批。
 - 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
@@ -775,6 +776,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 | [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
 | [task-board-research.md](docs/task-board-research.md) | **設計研究**：同機多 agent 怎麼對齊。拆解 Hermes Kanban（狀態機＋原子認領＋單一寫入者），結論是「共享工作板」比「共享記憶」聰明——並據此檢討我們自己那條待辦的**題目**設錯了 |
 | [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：先釐清**它不是 harness 而是託管 harness 的上層平台**（45 個模組裡 harness 佔 1 個），再列抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
+| [SECURITY.md](SECURITY.md) | **安全模型**：威脅模型假設、已實作的防線（逐條可查證）、以及 10 條**明確不防**的事——prompt injection、黑名單可繞過、host 模式 RCE 路徑、面板無遠端認證等 |
 | [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
 | [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | demo 腳本：治理三幕 / 多 agent 並行 code review |
 | [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | SWE-bench 官方 harness 跑法、Plan Mode 斷點續傳演示 |
