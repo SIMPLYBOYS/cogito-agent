@@ -116,10 +116,7 @@ func main() {
 	}
 	defer taskMgr.KillAll()
 
-	eng := engine.NewAgentEngine(trackedProvider, registry, false, *planPtr)
-	// 與 bot 對齊：對話式入口預設開滾動摘要（先前漏接使 CLI 一直走滑窗）。
-	// 這也是 caching 斷點③的前提（錨定式窗口，見 engine loop）。
-	eng.EnableSummary = os.Getenv("COGITO_SUMMARY") != "off"
+	eng := engine.NewConversationalEngine(trackedProvider, registry, *planPtr)
 	var reporter engine.Reporter = engine.NewTerminalReporter()
 	// -office：事件同時投影到像素辦公室（unity_demo 橋）。Begin/End 標記任務起訖，供橋掛起/釋放 NPC。
 	var office *engine.OfficeReporter

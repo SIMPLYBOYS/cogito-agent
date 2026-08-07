@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 
@@ -82,6 +83,19 @@ func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking boo
 		recovery:  ctxpkg.NewRecoveryManager(),
 		injector:  NewReminderInjector(),
 	}
+}
+
+// NewConversationalEngine 是【對話式入口】專用建構子（Slack/Telegram bot、CLI、dashboard chat）：
+// 在 NewAgentEngine 之上套用對話式預設——滾動摘要 + history 有界化（長對話跨逐出連貫、記憶體收斂，
+// 也是 caching 斷點③錨定式窗口的前提）；COGITO_SUMMARY=off 可關。
+//
+// 【入口平權】先前這行是三個入口各抄一次 `eng.EnableSummary = os.Getenv(...) != "off"`，claw-cli
+// 與 dashboard chat 都曾漏抄而一直走滑窗——各自修好、各自留一句「與 bot 對齊」的註解，卻沒有
+// 任何東西保證下一個新入口記得抄。收成建構子後，選對建構子就拿到整組對話式預設。
+func NewConversationalEngine(p provider.LLMProvider, r tools.Registry, planMode bool) *AgentEngine {
+	e := NewAgentEngine(p, r, false, planMode)
+	e.EnableSummary = os.Getenv("COGITO_SUMMARY") != "off"
+	return e
 }
 
 func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter Reporter) error {
