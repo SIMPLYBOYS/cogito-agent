@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -55,6 +56,10 @@ const memoryReflectSystemPrompt = `你是專案長期記憶的維護者。看完
 - 只保留對【未來任意任務】都有參考價值的；本次一次性的具體事實、與這次資料強綁定的內容【不要】。
 - 每條寫成一句簡潔的祈使句／陳述（不要把這次的具體檔名數值寫死）。
 - 兩者不重複：關於【專案】的放 learnings，關於【這個人】的放 user_facts。
+- 【repo 自己就寫著的東西不要記】：程式結構、README/設定檔查得到的、git 歷史看得出來的——
+  那不是記憶，是重複，而且會過時。要記的是「讀完程式碼也看不出來」的那部分：為什麼這樣選、
+  哪裡踩過坑、什麼做法被否決過。
+- 【寧缺勿濫】：沒有真正耐久的東西就兩個都給空陣列。少一條沒有損失，多一條錯的會誤導未來每一次任務。
 
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
 {"learnings": ["<一句話>"], "user_facts": ["<一句話>"]}；沒有的那項給空陣列。`
@@ -85,7 +90,11 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 	// 使用者偏好分流成 UserProfileTag——放行後正文【每輪常駐】，不像一般記憶要等 recall。
 	// 同一次 LLM 呼叫順手產出，不多花一次錢。
 	facts, err := m.proposeLearnings(taskPrompt, out.UserFacts, ctxpkg.UserProfileTag)
-	return append(added, facts...), err
+	all := append(added, facts...)
+	if err == nil {
+		_, err = AutoApplyAdditions(m.root) // 啟用時就地放行，不等人工 apply（見該函式說明）
+	}
+	return all, err
 }
 
 const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。一個 agent 在與使用者的互動中嘗試完成任務但【失敗了】
@@ -115,7 +124,11 @@ func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt strin
 	if strings.TrimSpace(out.Lesson) == "" {
 		return nil, nil
 	}
-	return m.proposeLearnings(taskPrompt, []string{out.Lesson}, "失敗教訓")
+	added, err := m.proposeLearnings(taskPrompt, []string{out.Lesson}, "失敗教訓")
+	if err == nil {
+		_, err = AutoApplyAdditions(m.root)
+	}
+	return added, err
 }
 
 // proposeLearnings 對候選學習做去重（vs AGENTS.md + 已暫存提案）+ 安全掃描，安全且不重複的追加到
@@ -419,6 +432,48 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 	// 放行後順手淘汰：超過上限的最久未用記錄歸檔（可復原），避免記憶庫無限長。
 	loader.Prune(maxMemoryRecords)
 	return applied, skipped, nil
+}
+
+// EnvAutoApply=1：反思產出的【新增】提案立刻放行成記錄，不等人工 `apply memory`。
+const EnvAutoApply = "COGITO_MEMORY_AUTOAPPLY"
+
+// AutoApplyAdditions 在 COGITO_MEMORY_AUTOAPPLY=1 時，把提案檔裡的【新增】立刻放行成記錄。
+// 破壞性提案（Reconcile 產出的 update/delete）**永遠不自動放行**——刪改是不可逆的，跟「多一條
+// 可被 recall 的記錄」不是同一個量級。
+//
+// 敢對新增不設閘，是因為記憶的爆炸半徑本來就小：一條一個檔（錯了刪一個檔，不必回滾合併）、
+// System Prompt 只放索引一行（正文要被 recall 才載入）、Prune 會把最久未用的歸檔。閘該守的是
+// 刪改，不是新增。索引那端另有一段措辭把記憶降級為「背景脈絡、可能過時」，見 MemoryLoader.LoadIndex。
+//
+// 回傳實際放行的條目（未啟用或沒有可放行的＝nil）。
+func AutoApplyAdditions(root string) ([]string, error) {
+	if os.Getenv(EnvAutoApply) != "1" {
+		return nil, nil
+	}
+	nums := additionNumbers(root)
+	if len(nums) == 0 {
+		return nil, nil
+	}
+	applied, _, err := ApplyProposedMemory(root, nums...)
+	if len(applied) > 0 {
+		log.Printf("[evolve] ⚡ 自動放行 %d 條記憶（%s=1；破壞性提案仍須人工 apply）", len(applied), EnvAutoApply)
+	}
+	return applied, err
+}
+
+// additionNumbers 取提案檔中【非破壞性】條目的編號。單獨鎖一小段而不與 ApplyProposedMemory
+// 共用同一次上鎖：knowledgeMu 不可重入，硬要合併就得把 Apply 的本體複製一份。提案檔是
+// append-only，既有條目的編號不會因為別人追加而位移，所以兩段之間的空窗是安全的。
+func additionNumbers(root string) []int {
+	ctxpkg.LockKnowledge()
+	defer ctxpkg.UnlockKnowledge()
+	var nums []int
+	for _, e := range parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName))) {
+		if !e.IsDestructive() {
+			nums = append(nums, e.N)
+		}
+	}
+	return nums
 }
 
 // applyDestructive 套用 UPDATE / DELETE。回傳非空字串＝被護欄擋下的原因（呼叫端據此把

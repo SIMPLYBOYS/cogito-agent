@@ -298,3 +298,55 @@ func TestMemoryReflect_RoutesUserFacts(t *testing.T) {
 		t.Errorf("放行後應有一筆 tags: [%s] 的記錄，got %v", ctxpkg.UserProfileTag, files)
 	}
 }
+
+// 自動放行只碰【新增】：破壞性提案（UPDATE/DELETE）必須原封不動留在提案檔等人審。
+// auto-apply 的整條安全論證都繫在這裡——新增的爆炸半徑是一個檔，刪改不是。
+func TestAutoApplyAdditions_SkipsDestructive(t *testing.T) {
+	root := t.TempDir()
+	proposed := filepath.Join(root, ".claw", ProposedMemoryFileName)
+	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `## [整併] 2026-08-05T14:30:00+08:00
+- UPDATE mem-1a2b3c4d — 本專案用 pnpm；CI 也是
+  舊：本專案用 pnpm 而非 npm 裝依賴
+  因：新事實推翻了原本的暗示
+- DELETE mem-5e6f7a8b
+  值：Node 14 需要 --experimental-modules
+  因：專案已升到 Node 22
+- 部署前先跑 make verify
+`
+	if err := os.WriteFile(proposed, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 未啟用：什麼都不該動。
+	t.Setenv(EnvAutoApply, "")
+	if applied, err := AutoApplyAdditions(root); err != nil || applied != nil {
+		t.Fatalf("未啟用時不該放行任何東西，got %v, %v", applied, err)
+	}
+
+	t.Setenv(EnvAutoApply, "1")
+	applied, err := AutoApplyAdditions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 1 || applied[0] != "部署前先跑 make verify" {
+		t.Fatalf("只該放行那條新增，got %v", applied)
+	}
+
+	if files, _ := filepath.Glob(filepath.Join(root, ".claw", "memory", "mem-*.md")); len(files) != 1 {
+		t.Fatalf("應寫出 1 筆記憶記錄，got %v", files)
+	}
+
+	// 破壞性的兩條原封不動留著；已放行的新增要從提案檔消失。
+	rest := readFileIgnore(proposed)
+	for _, want := range []string{"UPDATE mem-1a2b3c4d", "DELETE mem-5e6f7a8b"} {
+		if !strings.Contains(rest, want) {
+			t.Errorf("破壞性提案不該被自動放行，提案檔已無 %q：\n%s", want, rest)
+		}
+	}
+	if strings.Contains(rest, "部署前先跑 make verify") {
+		t.Errorf("已放行的新增不該留在提案檔：\n%s", rest)
+	}
+}
