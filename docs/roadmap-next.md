@@ -267,7 +267,23 @@ Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@examp
 > | 要解的 | 具名 agent 跨次任務記憶不互見 | 跨次任務的**工作狀態**沒有落點 |
 > | 做法 | per-agent 記憶寫半邊 + 治理放行 | 任務板：狀態機 + 持久 run 歷史 + per-task 認領 |
 >
-> **觸發條件不變**（orchestrator 實跑喊痛）。改的是「痛的時候要做什麼」，不是「現在就做」。
+> **觸發條件改成可量測的**（原本寫「等 orchestrator 實跑喊痛」——但沒寫「怎麼知道痛了」，
+> 那實質上是無限期延後包裝成紀律）：
+>
+> ```bash
+> python3 scripts/subagent_briefing_cost.py    # 量既有 session 的重新交代成本
+> ```
+>
+> 兩條線任一達標才重新考慮：**累計重新交代 ≥ 50k tokens**、或**單 session 重複派同型 agent ≥ 5 次**。
+>
+> **2026-08-05 首測：兩條都綠，結論是【還不痛】。** 30 次委派 / 9 個 session，中位數 687 字元、
+> 累計 ~13.5k tokens ≈ **$0.07（opus 計價）**。我原本假設「每次從零開始」很貴，實測是幾分錢——
+> 任務板要解的問題在目前用量下**不值那個工程量**。
+>
+> 量測反而揪出一個【不同的、可以現在就修的】問題：最貴的 4 次（>2000 字元）全是 orchestrator
+> 把**整份原始碼貼進 `task_prompt`**。那不是「記憶不互見」，是忘了子 agent 共用同一個工作區
+> ——已在 `orchestrate` 技能補上「給路徑，不要貼內容」。
+>
 > 順帶標記兩個既有結構差異：cron 是**整輪一把 flock**（只允許 1 個跑者，非 N worker）、
 > 子 agent 是同進程 goroutine（Hermes 刻意選行程隔離）。
 
@@ -344,5 +360,5 @@ OpenCode / Pi）是 npm 依賴，`src/harness/` 全是轉接頭，45 個模組�
    [qm-learnings.md](qm-learnings.md) §1。
 
 **其餘全部有觸發條件，不動**：tsnet 等部署形態、3b Telegram thread 等產品方向、
-模型核准清單與 egress 等多租戶真的發生、任務板／layer-07 等 orchestrator 實跑喊痛、
+模型核准清單與 egress 等多租戶真的發生、任務板／layer-07 等 `scripts/subagent_briefing_cost.py` 觸發線轉紅（2026-08-05 首測仍綠）、
 SWE-bench n=20 等 #2 的結論。

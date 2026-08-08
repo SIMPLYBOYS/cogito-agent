@@ -776,7 +776,7 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 | [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
 | [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
 | [memory-reconcile-format.md](docs/memory-reconcile-format.md) | **設計定案**：記憶整併的提案格式——提案通道怎麼表達 UPDATE/DELETE 這類破壞性操作，含三道護欄（畫像不可刪／舊值不符即拒／刪＝歸檔）。**未實作** |
-| [task-board-research.md](docs/task-board-research.md) | **設計研究**：同機多 agent 怎麼對齊。拆解 Hermes Kanban（狀態機＋原子認領＋單一寫入者），結論是「共享工作板」比「共享記憶」聰明——並據此檢討我們自己那條待辦的**題目**設錯了 |
+| [task-board-research.md](docs/task-board-research.md) | **設計研究**：同機多 agent 怎麼對齊。拆解 Hermes Kanban（狀態機＋原子認領＋單一寫入者），結論是「共享工作板」比「共享記憶」聰明。**觸發線已量測**（`scripts/subagent_briefing_cost.py`）：首測 $0.07、未達標 → 任務板先不做；但量測揪出「整份原始碼貼進 task_prompt」已修 |
 | [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：先釐清**它不是 harness 而是託管 harness 的上層平台**（45 個模組裡 harness 佔 1 個），再列抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
 | [SECURITY.md](SECURITY.md) | **安全模型**：威脅模型假設、已實作的防線（逐條可查證）、以及 10 條**明確不防**的事——prompt injection、黑名單可繞過、host 模式 RCE 路徑、面板無遠端認證等 |
 | [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
