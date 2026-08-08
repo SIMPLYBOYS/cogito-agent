@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
@@ -89,5 +90,30 @@ func TestSlug(t *testing.T) {
 		if got := slug(in); got != want {
 			t.Errorf("slug(%q)=%q，want %q", in, got, want)
 		}
+	}
+}
+
+// 軌跡過長時要保留【尾巴】：結論、修正、踩到的坑都在那裡。
+// 先前保留開頭，多 agent 會議的派工指令就把額度吃光，反思每次萃取出零條。
+func TestRenderTranscript_KeepsTail(t *testing.T) {
+	head := strings.Repeat("派工：請去做某件事。", 200) // 開頭一大段派工，撐爆額度
+	history := []schema.Message{
+		{Role: schema.RoleSystem, Content: "系統訊息不該出現"},
+		{Role: schema.RoleUser, Content: head},
+		{Role: schema.RoleAssistant, Content: "結論：部署前要先跑 make verify。"},
+	}
+	got := renderTranscript(history, 300)
+
+	if !strings.Contains(got, "結論：部署前要先跑 make verify。") {
+		t.Fatalf("尾巴的結論被截掉了：\n%s", got)
+	}
+	if !strings.Contains(got, "[前段軌跡已截斷]") {
+		t.Errorf("該標示前段被截斷，讓模型知道自己看的不是全貌：\n%s", got)
+	}
+	if strings.Contains(got, "系統訊息不該出現") {
+		t.Errorf("system 訊息不該進軌跡")
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("從中文字中間切開了，產生無效 UTF-8")
 	}
 }

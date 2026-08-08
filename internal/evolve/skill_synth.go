@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
@@ -136,7 +137,15 @@ func renderTranscript(history []schema.Message, maxChars int) string {
 	}
 	s := b.String()
 	if len(s) > maxChars {
-		return s[:maxChars] + "\n...[軌跡過長已截斷]"
+		// 截【頭】不截尾：一段軌跡的價值在尾巴——結論、修正、踩到的坑；開頭多半是派工與探索。
+		// 先前反過來，多 agent 會議的六段 spawn_subagent 指令（參數整包內嵌）就把額度吃光，
+		// 反思看到的是一疊派工單、看不到任何結論，於是每次都萃取出零條（實際踩到）。
+		// 開頭的脈絡不會遺失：任務描述本來就以 taskPrompt 另外傳進反思。
+		tail := s[len(s)-maxChars:]
+		for len(tail) > 0 && !utf8.RuneStart(tail[0]) { // 別從一個中文字中間切開
+			tail = tail[1:]
+		}
+		return "...[前段軌跡已截斷]\n" + tail
 	}
 	return s
 }
