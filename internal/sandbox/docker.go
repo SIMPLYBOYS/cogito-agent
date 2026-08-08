@@ -123,7 +123,9 @@ func (d *DockerExecutor) Run(ctx context.Context, command, workDir string) ([]by
 	if err != nil {
 		return nil, err
 	}
-	return cmd.CombinedOutput()
+	// 逾時殺掉的是 docker CLI；容器【裡面】那個行程可能還在跑（要 docker kill 才收得掉）。
+	// 但管線的寫入端隨 CLI 一起死，所以呼叫端不會再被卡住——那才是這裡要解的問題。
+	return runCombined(ctx, cmd)
 }
 
 // Close 移除本行程拉起的所有常駐容器（cmd 優雅關閉時呼叫）。

@@ -42,5 +42,5 @@ func (h HostExecutor) Run(ctx context.Context, command, workDir string) ([]byte,
 	if err != nil {
 		return nil, err
 	}
-	return cmd.CombinedOutput()
+	return runCombined(ctx, cmd) // 逾時要殺整個 process group，理由見 run.go
 }

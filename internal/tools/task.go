@@ -62,6 +62,7 @@ type taskState struct {
 	startedAt time.Time
 	buf       *syncBuffer
 	cancel    context.CancelFunc
+	cmd       *exec.Cmd // 供 Kill 收整棵子孫樹（cancel 只殺得掉直接子行程）
 
 	mu      sync.Mutex
 	done    bool
@@ -141,6 +142,9 @@ func (tm *TaskManager) Start(command string) (string, error) {
 		cancel()
 		return "", fmt.Errorf("建立背景命令失敗: %w", err)
 	}
+	// 自成 process group：task_kill 才收得掉【整棵】子孫樹。dev server 這類「bash 起一個真正的
+	// 行程」如果只殺 bash，本體會繼續佔著埠口跑下去，介面卻回報「已終止」。必須在 Start 之前設。
+	sandbox.Detach(cmd)
 	buf := newSyncBuffer(maxTaskOutputBytes)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
@@ -149,7 +153,7 @@ func (tm *TaskManager) Start(command string) (string, error) {
 		return "", fmt.Errorf("啟動背景任務失敗: %w", err)
 	}
 
-	ts := &taskState{id: id, command: command, startedAt: time.Now(), buf: buf, cancel: cancel}
+	ts := &taskState{id: id, command: command, startedAt: time.Now(), buf: buf, cancel: cancel, cmd: cmd}
 	tm.mu.Lock()
 	tm.tasks[id] = ts
 	tm.mu.Unlock()
@@ -208,6 +212,7 @@ func (tm *TaskManager) Kill(id string) error {
 	ts.killed = true
 	ts.mu.Unlock()
 	ts.cancel()
+	sandbox.KillTree(ts.cmd) // cancel 只殺 bash；真正在跑的（dev server / build）是孫行程
 	if already {
 		return fmt.Errorf("任務 %q 已結束，無需終止", id)
 	}
