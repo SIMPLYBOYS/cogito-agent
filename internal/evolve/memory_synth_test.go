@@ -301,6 +301,43 @@ func TestMemoryReflect_RoutesUserFacts(t *testing.T) {
 
 // 自動放行只碰【新增】：破壞性提案（UPDATE/DELETE）必須原封不動留在提案檔等人審。
 // auto-apply 的整條安全論證都繫在這裡——新增的爆炸半徑是一個檔，刪改不是。
+// 自動放行只吃「專案慣例」，不吃「使用者畫像」。
+//
+// 這條線是掃過 123 條實際記憶之後畫出來的：慣例類品質普遍好（能從軌跡驗證），
+// user 類卻是在猜「這個人是什麼樣的人」而樣本只有幾句一次性指令——於是「為了省錢
+// 說的那句『不開會不上板』」變成了他的偏好，跟另外六條「開工前一定要看板子」打架。
+// 錯的專案事實下次讀程式碼會被推翻；錯的人物畫像不會。
+func TestAutoApplyAdditions_KeepsUserProfileForReview(t *testing.T) {
+	root := t.TempDir()
+	proposed := filepath.Join(root, ".claw", ProposedMemoryFileName)
+	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(proposed, []byte(`## [慣例] 來自任務「A」（ts）
+- 部署前先跑 make verify
+
+## [`+ctxpkg.UserProfileTag+`] 來自任務「A」（ts）
+- 使用者偏好直接派工、不開會不上板
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvAutoApply, "1")
+	applied, err := AutoApplyAdditions(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 1 || !strings.Contains(applied[0], "make verify") {
+		t.Fatalf("只該自動放行慣例類，got %v", applied)
+	}
+	rest := readFileIgnore(proposed)
+	if !strings.Contains(rest, "不開會不上板") {
+		t.Errorf("使用者畫像該留在提案檔等人過目：\n%s", rest)
+	}
+	if n := PendingProposals(root); n != 1 {
+		t.Errorf("待放行條數應為 1（通知措辭靠它才不會謊稱全部生效），got %d", n)
+	}
+}
+
 func TestAutoApplyAdditions_SkipsDestructive(t *testing.T) {
 	root := t.TempDir()
 	proposed := filepath.Join(root, ".claw", ProposedMemoryFileName)

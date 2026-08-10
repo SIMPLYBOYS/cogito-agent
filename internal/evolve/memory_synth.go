@@ -469,11 +469,33 @@ func additionNumbers(root string) []int {
 	defer ctxpkg.UnlockKnowledge()
 	var nums []int
 	for _, e := range parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName))) {
-		if !e.IsDestructive() {
+		if !e.IsDestructive() && !isUserProfile(e.Kind) {
 			nums = append(nums, e.N)
 		}
 	}
 	return nums
+}
+
+// PendingProposals 回傳提案檔裡還沒放行的條數。供通知措辭判斷「是不是真的全部生效了」——
+// 自動放行只吃專案慣例，使用者畫像那類會留下來，一律說「已生效」就是在說謊。
+func PendingProposals(root string) int {
+	ctxpkg.LockKnowledge()
+	defer ctxpkg.UnlockKnowledge()
+	return len(parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName))))
+}
+
+// isUserProfile 判斷這條提案是不是「關於使用者本人」的畫像。
+//
+// 這類【不】自動放行，即使開了 AUTOAPPLY。理由是實測掃過 123 條之後看出來的：
+// 「慣例」類的品質普遍好（專案事實、踩過的坑、可複用的做法都能從軌跡驗證），
+// 但「user」類是在猜『這個人是什麼樣的人』——樣本卻只有幾句一次性的指令。
+// 於是「我為了省錢說的那句『不開會不上板』」被記成他的偏好，跟另外六條「開工前
+// 一定要看板子」直接打架；成本熔斷逼出來的行為也被當成他的習慣。
+//
+// 錯的專案事實下次讀程式碼就會被推翻；錯的【人物畫像】不會——它會一直影響
+// agent 怎麼跟人互動，而且沒有任何客觀證據能推翻它。所以這類一律留給人過目。
+func isUserProfile(kind string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), ctxpkg.UserProfileTag)
 }
 
 // applyDestructive 套用 UPDATE / DELETE。回傳非空字串＝被護欄擋下的原因（呼叫端據此把

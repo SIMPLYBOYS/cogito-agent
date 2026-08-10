@@ -255,7 +255,8 @@ func main() {
 					log.Printf("[evolve] 記憶反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 新增 %d 條提案記憶", len(added))
-					chatbot.SendMessage(session.ID, memoryProposalMsg("慣例", added))
+					chatbot.SendMessage(session.ID,
+						memoryProposalMsg("慣例", added, evolve.PendingProposals(memoryRootFor(session))))
 				}
 			}
 			if kgExtract != nil {
@@ -282,7 +283,8 @@ func main() {
 					log.Printf("[evolve] 失敗反思失敗（不影響任務）: %v", err)
 				} else if len(added) > 0 {
 					log.Printf("[evolve] 🧠 從失敗萃取 %d 條教訓", len(added))
-					chatbot.SendMessage(session.ID, memoryProposalMsg("失敗教訓", added))
+					chatbot.SendMessage(session.ID,
+						memoryProposalMsg("失敗教訓", added, evolve.PendingProposals(memoryRootFor(session))))
 				}
 			}
 		}
@@ -375,23 +377,31 @@ func firstUserContent(history []schema.Message) string {
 // 措辭要跟著 AUTOAPPLY 走。先前一律寫「（尚未生效）…回覆 apply memory 放行」，但開了自動放行
 // 之後它們【早就生效了】——提案檔根本不存在，叫使用者去 apply 只會讓他對著空氣打指令，
 // 更糟的是他會以為那些記憶還沒開始影響 agent。訊息說謊比訊息囉唆嚴重。
-func memoryProposalMsg(kind string, added []string) string {
+func memoryProposalMsg(kind string, added []string, pending int) string {
 	auto := os.Getenv(evolve.EnvAutoApply) == "1"
 	var b strings.Builder
-	if auto {
-		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（**已生效**，之後會被 recall 取用）：\n", len(added), kind)
-	} else {
+	switch {
+	case !auto:
 		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*提案%s*（尚未生效）：\n", len(added), kind)
+	case pending > 0:
+		// 自動放行只吃專案慣例，使用者畫像那類會留在提案檔。一律說「已生效」就是說謊。
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（專案慣例**已生效**；另有 %d 條關於你的偏好待你過目）：\n",
+			len(added), kind, pending)
+	default:
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（**已生效**，之後會被 recall 取用）：\n", len(added), kind)
 	}
 	for _, l := range added {
 		b.WriteString("• " + l + "\n")
 	}
-	if auto {
+	switch {
+	case !auto:
+		b.WriteString("回覆 `apply memory` 放行為可檢索的長期記憶（存成記憶節點、recall 取用），或 `reject memory` 丟棄。")
+	case pending > 0:
+		b.WriteString("用 `memory list` 看那幾條，`apply memory <編號>` 放行或 `reject memory` 丟棄。")
+	default:
 		// 刻意講「刪檔」而不是某個指令：memory list/apply 那組管的是【提案】，
 		// 已生效的記憶沒有對應的聊天指令。指一個不存在的操作比不指更糟。
 		b.WriteString("覺得哪條不該記？記憶是一條一個檔，到 `.claw/memory/` 刪掉那個檔即可。")
-	} else {
-		b.WriteString("回覆 `apply memory` 放行為可檢索的長期記憶（存成記憶節點、recall 取用），或 `reject memory` 丟棄。")
 	}
 	return b.String()
 }
