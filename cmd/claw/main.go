@@ -370,14 +370,29 @@ func firstUserContent(history []schema.Message) string {
 	return "（本次對話）"
 }
 
-// memoryProposalMsg 組裝「提案記憶」通知：直接列出內容 + 一鍵 apply/reject 指令（閘在 Slack 內，免去 cat 檔案）。
+// memoryProposalMsg 組裝反思通知：直接列出內容 + 後續動作（閘在聊天視窗內，免去 cat 檔案）。
+//
+// 措辭要跟著 AUTOAPPLY 走。先前一律寫「（尚未生效）…回覆 apply memory 放行」，但開了自動放行
+// 之後它們【早就生效了】——提案檔根本不存在，叫使用者去 apply 只會讓他對著空氣打指令，
+// 更糟的是他會以為那些記憶還沒開始影響 agent。訊息說謊比訊息囉唆嚴重。
 func memoryProposalMsg(kind string, added []string) string {
+	auto := os.Getenv(evolve.EnvAutoApply) == "1"
 	var b strings.Builder
-	fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*提案%s*（尚未生效）：\n", len(added), kind)
+	if auto {
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（**已生效**，之後會被 recall 取用）：\n", len(added), kind)
+	} else {
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*提案%s*（尚未生效）：\n", len(added), kind)
+	}
 	for _, l := range added {
 		b.WriteString("• " + l + "\n")
 	}
-	b.WriteString("回覆 `apply memory` 放行為可檢索的長期記憶（存成記憶節點、recall 取用），或 `reject memory` 丟棄。")
+	if auto {
+		// 刻意講「刪檔」而不是某個指令：memory list/apply 那組管的是【提案】，
+		// 已生效的記憶沒有對應的聊天指令。指一個不存在的操作比不指更糟。
+		b.WriteString("覺得哪條不該記？記憶是一條一個檔，到 `.claw/memory/` 刪掉那個檔即可。")
+	} else {
+		b.WriteString("回覆 `apply memory` 放行為可檢索的長期記憶（存成記憶節點、recall 取用），或 `reject memory` 丟棄。")
+	}
 	return b.String()
 }
 
