@@ -280,11 +280,11 @@ func (t *subagentAwaitTool) Definition() schema.ToolDefinition {
 					"description": "要等的背景子 agent ID（如 [\"bg-1\",\"bg-2\"]）；省略＝等目前所有執行中的。",
 				},
 				"wait_all": map[string]any{
-					"type": "boolean",
+					"type":        "boolean",
 					"description": "true＝全部結束才回來；預設 false＝任一結束就回來。",
 				},
 				"timeout_seconds": map[string]any{
-					"type": "number",
+					"type":        "number",
 					"description": "等待上限秒數（預設 300、上限 1800）。逾時不會殺掉子 agent，只是先回來。",
 				},
 			},
