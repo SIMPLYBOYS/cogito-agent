@@ -179,16 +179,20 @@ func TestSubagent_ModelAndEffort(t *testing.T) {
 	}
 }
 
-// 不存在的 agent_type → error-as-observation，不拉起子 agent。
+// 不存在的 agent_type → 回真錯誤（registry 標 IsError），且不拉起子 agent。
+//
+// 這條原本斷言「error-as-observation」——回 (errText, nil)。那個契約的理由是「不中斷主
+// ReAct 迴圈」，但前提是錯的：IsError 對控制流零影響，只有 Denied 會終止（loop.go:386）。
+// 回 nil error 反而讓失敗被當成功：救援指南不注入、office 投影畫成「✔ 回報」。
 func TestSubagent_UnknownAgent(t *testing.T) {
 	fr := &fakeRunner{}
 	st := NewSubagentTool(fr, NewRegistry(), nil, t.TempDir())
 	out, err := st.Execute(context.Background(), []byte(`{"task_prompt":"x","agent_type":"nope"}`))
-	if err != nil {
-		t.Fatalf("應為 error-as-observation: %v", err)
+	if err == nil {
+		t.Fatalf("未知 agent 應回 error 才會被標 IsError，實際回成功結果：%q", out)
 	}
-	if !strings.Contains(out, "載入 agent 失敗") || fr.called {
-		t.Errorf("未知 agent 應提示失敗且不拉起子 agent，got %q called=%v", out, fr.called)
+	if !strings.Contains(err.Error(), "載入 agent 失敗") || fr.called {
+		t.Errorf("未知 agent 應提示失敗且不拉起子 agent，got %v called=%v", err, fr.called)
 	}
 }
 
@@ -198,13 +202,13 @@ func TestSubagent_UnknownSkill(t *testing.T) {
 
 	fr := &fakeRunner{}
 	st := NewSubagentTool(fr, NewRegistry(), nil, dir)
-	// 綁定不存在的技能 → error-as-observation（無 Go error），且不應拉起子 agent
+	// 綁定不存在的技能 → 回真錯誤（同 TestSubagent_UnknownAgent 的理由），且不應拉起子 agent
 	out, err := st.Execute(context.Background(), []byte(`{"task_prompt":"做事","skill":"nope"}`))
-	if err != nil {
-		t.Fatalf("應為 error-as-observation，不回 Go error: %v", err)
+	if err == nil {
+		t.Fatalf("綁定失敗應回 error 才會被標 IsError，實際回成功結果：%q", out)
 	}
-	if !strings.Contains(out, "綁定技能失敗") {
-		t.Errorf("應提示綁定失敗，got %q", out)
+	if !strings.Contains(err.Error(), "綁定技能失敗") {
+		t.Errorf("應提示綁定失敗，got %v", err)
 	}
 	if fr.called {
 		t.Error("綁定技能失敗時不應呼叫 RunSub")

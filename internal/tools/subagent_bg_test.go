@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -124,8 +125,38 @@ func TestSubagentManager_ConcurrencyLimit(t *testing.T) {
 			t.Fatalf("第 %d 個應成功: %v", i, err)
 		}
 	}
-	if _, err := m.Spawn(SubTask{}, "x"); err == nil {
-		t.Errorf("超過並發上限 %d 應回錯", maxBackgroundSubagents)
+	_, err := m.Spawn(SubTask{}, "x")
+	if err == nil {
+		t.Fatalf("超過並發上限 %d 應回錯", maxBackgroundSubagents)
+	}
+	// 建議的動作必須真的能空出名額。runningCount 只數 !done，所以 subagent_result（取件）
+	// 一格也空不出來——模型照著做會呼叫一次、發現沒變、再重試 spawn，原地繞圈。
+	if msg := err.Error(); !strings.Contains(msg, "subagent_await") {
+		t.Errorf("錯誤訊息要指向能空出名額的動作（await），實際：%s", msg)
 	}
 	close(r.release) // 收尾，避免 goroutine 卡住
+}
+
+// 委派失敗要標成【錯誤】而不是成功結果。曾經這些路徑走「error-as-observation」——回
+// (errText, nil)，理由是「不中斷主迴圈」。但 IsError 對控制流零影響（只有 Denied 會終止），
+// 那個寫法沒買到任何東西，卻讓 office 投影把失敗畫成「✔ 回報」、也跳過了救援指南注入。
+func TestSubagentTool_SpawnFailureIsError(t *testing.T) {
+	r := &blockingRunner{release: make(chan struct{})}
+	defer close(r.release)
+	m := NewSubagentManager(r)
+	for i := 0; i < maxBackgroundSubagents; i++ {
+		if _, err := m.Spawn(SubTask{}, "x"); err != nil {
+			t.Fatalf("填滿名額時第 %d 個就失敗: %v", i, err)
+		}
+	}
+	tool := NewSubagentTool(r, NewRegistry(), nil, t.TempDir())
+	tool.subMgr = m
+	out, err := tool.Execute(context.Background(),
+		json.RawMessage(`{"task_prompt":"測試","background":true}`))
+	if err == nil {
+		t.Fatalf("並發滿載時委派應回 error（才會被標 IsError），實際回成功結果：%q", out)
+	}
+	if out != "" {
+		t.Errorf("回錯誤時不該同時給結果字串，實際：%q", out)
+	}
 }

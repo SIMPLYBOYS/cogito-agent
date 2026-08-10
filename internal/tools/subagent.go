@@ -150,13 +150,21 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("解析參數失敗: %w", err)
 	}
 
-	// 載入具名 agent（若有）：角色 prompt、工具子集、model/effort/isolation。載入失敗＝error-as-observation。
+	// 載入具名 agent（若有）：角色 prompt、工具子集、model/effort/isolation。
+	//
+	// 失敗一律 `return "", err`。這裡原本走「error-as-observation」——把錯誤字串當成功結果回，
+	// 理由寫的是「不中斷主 ReAct 迴圈」。那個前提是錯的：IsError 對控制流【零影響】，
+	// 只有 Denied 會終止（loop.go:386）。於是那個寫法沒買到任何東西，卻付了三筆代價：
+	//   1. 跳過 RecoveryManager.AnalyzeAndInject（loop.go:361）——模型拿不到救援指南
+	//   2. office 投影把失敗畫成「✔ 回報」——看板上是綠的，實際沒做成
+	//   3. 一切以 IsError 為準的統計都少算
+	// 政策拒絕仍是唯一例外（見下方 ErrPolicyDenied 分支），因為那個【真的】要終止。
 	var def ctxpkg.AgentDef
 	role := "探路者"
 	if input.AgentType != "" {
 		d, err := t.agentLoader.Load(input.AgentType)
 		if err != nil {
-			return fmt.Errorf("載入 agent 失敗: %v", err).Error(), nil
+			return "", fmt.Errorf("載入 agent 失敗: %w", err)
 		}
 		def = d
 		role = d.Name
@@ -185,7 +193,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	if input.Skill != "" {
 		body, err := t.skillLoader.ReadSkill(input.Skill)
 		if err != nil {
-			return fmt.Errorf("綁定技能失敗: %v", err).Error(), nil
+			return "", fmt.Errorf("綁定技能失敗: %w", err)
 		}
 		skillBody = body
 		log.Printf("[Subagent] 📎 綁定技能 [%s]（注入 %d 字元正文至子 context）\n", input.Skill, len(body))
@@ -194,7 +202,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 	// 背景模式：丟 SubagentManager 非同步跑（共享工作區、silent、不做 worktree 隔離），立即回 ID。
 	if input.Background {
 		if t.subMgr == nil {
-			return "背景子 agent 未啟用（本部署未接背景池）。", nil
+			return "", errors.New("背景子 agent 未啟用（本部署未接背景池）——改用前景委派，不要帶 background")
 		}
 		id, serr := t.subMgr.Spawn(SubTask{
 			Prompt:       input.TaskPrompt,
@@ -206,7 +214,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			Reporter:     nil, // 背景＝silent，用 subagent_result 取結果
 		}, role)
 		if serr != nil {
-			return serr.Error(), nil
+			return "", serr
 		}
 		log.Printf("[Subagent] 🌀 背景委派 [%s] → %s\n", role, id)
 		// 主動把「要等就用 await」講在回傳裡：模型多半照著上一則工具結果的指示走，
@@ -261,8 +269,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			// 終止整個目標——否則主 agent 會把「子 agent 被拒」當成可重試的觀察，換個方式再派。
 			return "", err
 		}
-		// error-as-observation：讓主 agent 看到失敗但不中斷主 ReAct 迴圈。
-		return fmt.Errorf("子 agent執行失敗: %v", err).Error(), nil
+		return "", fmt.Errorf("子 agent 執行失敗: %w", err)
 	}
 	if mergeBack != nil {
 		summary += mergeBack() // 把隔離回寫結果附在報告尾，讓主 agent 知道改動去向

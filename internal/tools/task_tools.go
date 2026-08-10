@@ -48,7 +48,9 @@ func (t *bashBackgroundTool) Execute(_ context.Context, args json.RawMessage) (s
 	}
 	id, err := t.tm.Start(in.Command)
 	if err != nil {
-		return fmt.Errorf("無法啟動背景任務: %v", err).Error(), nil // error-as-observation
+		// 回真錯誤：IsError 不會中斷主迴圈（只有 Denied 會），但會觸發救援指南注入，
+		// 也讓 office 投影不把「並發上限擋下」畫成「✔ 回報」。
+		return "", fmt.Errorf("無法啟動背景任務: %w", err)
 	}
 	return fmt.Sprintf("已在背景啟動任務 %s：%s\n用 task_output(\"%s\") 查看輸出、task_kill(\"%s\") 終止。", id, in.Command, id, id), nil
 }
@@ -82,7 +84,7 @@ func (t *taskOutputTool) Execute(_ context.Context, args json.RawMessage) (strin
 	}
 	out, err := t.tm.Output(in.TaskID)
 	if err != nil {
-		return err.Error(), nil // error-as-observation
+		return "", err
 	}
 	return out, nil
 }
@@ -115,7 +117,7 @@ func (t *taskKillTool) Execute(_ context.Context, args json.RawMessage) (string,
 		return "", fmt.Errorf("參數解析失敗: %w", err)
 	}
 	if err := t.tm.Kill(in.TaskID); err != nil {
-		return err.Error(), nil // error-as-observation
+		return "", err
 	}
 	return fmt.Sprintf("已終止背景任務 %s。", in.TaskID), nil
 }

@@ -84,7 +84,12 @@ func (m *SubagentManager) Spawn(task SubTask, label string) (string, error) {
 	m.pruneDoneLocked()
 	if m.runningCount() >= maxBackgroundSubagents {
 		m.mu.Unlock()
-		return "", fmt.Errorf("背景子 agent 已達並發上限 %d，請先用 subagent_result 收掉已完成的", maxBackgroundSubagents)
+		// 建議必須是【真的能空出名額】的動作。runningCount 只數 !done，所以「收結果」一格也空不出來
+		// ——已完成的本來就不佔位。叫模型去 subagent_result 只會讓它做一次無效呼叫、看到數字沒變、
+		// 再重試 spawn，原地繞圈。要空出名額只能等人跑完，那是 await。
+		return "", fmt.Errorf("背景子 agent 已達並發上限 %d（%d 個仍在跑）。"+
+			"先用 subagent_await 等一個交件再派——subagent_result 只是取件，不會空出名額",
+			maxBackgroundSubagents, m.runningCount())
 	}
 	m.seq++
 	id := fmt.Sprintf("bg-%d", m.seq)
