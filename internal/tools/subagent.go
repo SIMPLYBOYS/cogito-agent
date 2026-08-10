@@ -86,8 +86,8 @@ func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter int
 	}
 }
 
-// BackgroundTools 回傳查詢背景子 agent 的工具（subagent_result / subagent_list），與本工具共用同一
-// SubagentManager。cmd 端把它們一併註冊，模型才查得到 background=true 委派的結果。
+// BackgroundTools 回傳背景子 agent 的周邊工具（subagent_result / subagent_list / subagent_await），
+// 與本工具共用同一 SubagentManager。cmd 端把它們一併註冊，模型才查得到 background=true 委派的結果。
 func (t *SubagentTool) BackgroundTools() []BaseTool { return t.subMgr.Tools() }
 
 // WithWorktreeIsolation 開啟 worktree 隔離能力：baseWorkDir＝session 工作區，regFactory 依目錄建工具超集
@@ -107,7 +107,8 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 	if idx := t.agentLoader.Index(); idx != "" {
 		desc += "\n可用的 agent_type（不指定則為預設探路者，唯讀探索）：\n" + idx
 	}
-	desc += "可選 skill 參數：綁定技能後其完整正文只載入子 context。可選 background=true：丟背景非同步跑、立即回一個 ID，之後用 subagent_result 查結果（適合可先繼續、稍後再取的探索）。"
+	desc += "可選 skill 參數：綁定技能後其完整正文只載入子 context。可選 background=true：丟背景非同步跑、立即回一個 ID——" +
+		"要並行派好幾個就用它，之後用 subagent_await 一次等回來（等待期間不花錢）；不急著要結果則用 subagent_result 稍後查。"
 	return schema.ToolDefinition{
 		Name:        t.Name(),
 		Description: desc,
@@ -208,7 +209,10 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			return serr.Error(), nil
 		}
 		log.Printf("[Subagent] 🌀 背景委派 [%s] → %s\n", role, id)
-		return fmt.Sprintf("🌀 已在背景啟動子 agent [%s]（ID: %s）。之後用 `subagent_result`（id=%s）查結果，或 `subagent_list` 看全部。", role, id, id), nil
+		// 主動把「要等就用 await」講在回傳裡：模型多半照著上一則工具結果的指示走，
+		// 這裡寫 subagent_result 就會養成輪詢的習慣（每輪一次 API 呼叫）。
+		return fmt.Sprintf("🌀 已在背景啟動子 agent [%s]（ID: %s）。**要等它交件就用 `subagent_await`**"+
+			"（等待期間不花錢，不要反覆呼叫 subagent_result 輪詢）；先做別的事再回頭查則用 `subagent_result`（id=%s）。", role, id, id), nil
 	}
 
 	// worktree 隔離（可選）：isolation:worktree 且能力已裝配時，在 base 的 git worktree 裡跑，工具 rooted

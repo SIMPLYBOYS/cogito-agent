@@ -21,6 +21,7 @@ type bgSubState struct {
 	id        string
 	label     string // agent 角色（顯示用）
 	startedAt time.Time
+	finished  chan struct{} // 結束時 close：讓 subagent_await 能【阻塞】等，而不是靠模型輪詢
 
 	mu     sync.Mutex
 	done   bool
@@ -87,7 +88,7 @@ func (m *SubagentManager) Spawn(task SubTask, label string) (string, error) {
 	}
 	m.seq++
 	id := fmt.Sprintf("bg-%d", m.seq)
-	st := &bgSubState{id: id, label: label, startedAt: time.Now()}
+	st := &bgSubState{id: id, label: label, startedAt: time.Now(), finished: make(chan struct{})}
 	m.subs[id] = st
 	m.mu.Unlock()
 
@@ -96,6 +97,7 @@ func (m *SubagentManager) Spawn(task SubTask, label string) (string, error) {
 		st.mu.Lock()
 		st.done, st.result, st.err = true, result, err
 		st.mu.Unlock()
+		close(st.finished) // 一定要在設好狀態【之後】：醒來的人讀到的必須是完成後的值
 	}()
 	return id, nil
 }
@@ -155,9 +157,152 @@ func (m *SubagentManager) List() string {
 	return b.String()
 }
 
+const (
+	defaultAwaitTimeout = 5 * time.Minute
+	maxAwaitTimeout     = 30 * time.Minute
+)
+
+// Await 阻塞等到背景子 agent 結束，回傳已完成者的結果。
+//
+// 這是為了取代「模型迴圈裡輪詢 subagent_result」：輪詢的每一輪都是一次 API 呼叫，等十分鐘
+// 就是幾十次無意義的花費，而且中間那些回合什麼事都沒做。等待改成【一次阻塞的工具呼叫】之後，
+// 等待期間零 token——代價只是一個閒置的 goroutine。
+//
+// all=false（預設）：任何一個結束就回來。逐張推進用——一有人交件就去看還有誰的相依滿足了。
+// all=true：這批全部結束才回來。階段收斂用（六個人的意見收齊才動筆）。
+//
+// 呼叫端取消（/stop、任務逾時）會立刻回來；背景子 agent 本身不受影響，仍會跑完，
+// 結果之後照樣查得到——這是刻意的：等不下去不等於要把人家做到一半的工作丟掉。
+func (m *SubagentManager) Await(ctx context.Context, ids []string, all bool, timeout time.Duration) string {
+	if timeout <= 0 {
+		timeout = defaultAwaitTimeout
+	}
+	if timeout > maxAwaitTimeout {
+		timeout = maxAwaitTimeout
+	}
+	if len(ids) == 0 { // 沒指名＝等目前所有還在跑的
+		m.mu.Lock()
+		for id, s := range m.subs {
+			s.mu.Lock()
+			if !s.done {
+				ids = append(ids, id)
+			}
+			s.mu.Unlock()
+		}
+		m.mu.Unlock()
+		sort.Strings(ids)
+	}
+	if len(ids) == 0 {
+		return "目前沒有執行中的背景子 agent，不需要等待。"
+	}
+
+	var waiting []*bgSubState
+	for _, id := range ids {
+		st := m.get(id)
+		if st == nil {
+			return fmt.Sprintf("找不到背景子 agent %q（用 subagent_list 看現有的）", id)
+		}
+		waiting = append(waiting, st)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		pending := 0
+		for _, st := range waiting {
+			select {
+			case <-st.finished:
+			default:
+				pending++
+			}
+		}
+		if pending == 0 || (!all && pending < len(waiting)) {
+			return m.awaitReport(ids, "")
+		}
+		// 還沒達標：睡在「任何一個結束」上。all 模式下醒來會再繞一圈檢查剩下的。
+		cases := make([]<-chan struct{}, 0, len(waiting))
+		for _, st := range waiting {
+			cases = append(cases, st.finished)
+		}
+		select {
+		case <-ctx.Done():
+			return m.awaitReport(ids, "（等待被中止，背景子 agent 仍在跑，稍後可用 subagent_result 查）")
+		case <-timer.C:
+			return m.awaitReport(ids, fmt.Sprintf("（等了 %s 仍未達標，背景子 agent 仍在跑，可再 await 或改用 subagent_result）", timeout))
+		case <-anyOf(cases):
+		}
+	}
+}
+
+// anyOf 回傳一個「任一輸入 channel 關閉就關閉」的 channel。
+func anyOf(chans []<-chan struct{}) <-chan struct{} {
+	out := make(chan struct{})
+	var once sync.Once
+	for _, c := range chans {
+		go func(c <-chan struct{}) {
+			<-c
+			once.Do(func() { close(out) })
+		}(c)
+	}
+	return out
+}
+
+func (m *SubagentManager) awaitReport(ids []string, note string) string {
+	var b strings.Builder
+	if note != "" {
+		b.WriteString(note + "\n")
+	}
+	for _, id := range ids {
+		b.WriteString(m.Result(id) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // Tools 回傳背景子 agent 的查詢工具（與 spawn_subagent 共用同一 manager）。
 func (m *SubagentManager) Tools() []BaseTool {
-	return []BaseTool{&subagentResultTool{m: m}, &subagentListTool{m: m}}
+	return []BaseTool{&subagentResultTool{m: m}, &subagentListTool{m: m}, &subagentAwaitTool{m: m}}
+}
+
+type subagentAwaitTool struct{ m *SubagentManager }
+
+func (t *subagentAwaitTool) Name() string { return "subagent_await" }
+func (t *subagentAwaitTool) Definition() schema.ToolDefinition {
+	return schema.ToolDefinition{
+		Name: t.Name(),
+		Description: "【等】背景子 agent 做完並直接拿到結果。要等人交件時用這個，不要反覆呼叫 " +
+			"subagent_result 輪詢——那每一輪都是一次額外的花費，這個工具等待期間不花錢。" +
+			"預設任何一個結束就回來（適合一有人交件就繼續推進）；wait_all=true 則等這批全部結束。",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"ids": map[string]any{
+					"type": "array", "items": map[string]any{"type": "string"},
+					"description": "要等的背景子 agent ID（如 [\"bg-1\",\"bg-2\"]）；省略＝等目前所有執行中的。",
+				},
+				"wait_all": map[string]any{
+					"type": "boolean",
+					"description": "true＝全部結束才回來；預設 false＝任一結束就回來。",
+				},
+				"timeout_seconds": map[string]any{
+					"type": "number",
+					"description": "等待上限秒數（預設 300、上限 1800）。逾時不會殺掉子 agent，只是先回來。",
+				},
+			},
+		},
+	}
+}
+func (t *subagentAwaitTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var in struct {
+		IDs     []string `json:"ids"`
+		WaitAll bool     `json:"wait_all"`
+		Timeout float64  `json:"timeout_seconds"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", fmt.Errorf("參數解析失敗: %w", err)
+		}
+	}
+	return t.m.Await(ctx, in.IDs, in.WaitAll, time.Duration(in.Timeout*float64(time.Second))), nil
 }
 
 type subagentResultTool struct{ m *SubagentManager }
