@@ -36,7 +36,12 @@ type governanceData struct {
 	Flash     string              // 上次放行動作的結果（顯示一次）
 }
 
-type proposedSkill struct{ Dir, Name, Desc string } // Dir＝資料夾名（晉升用）；Name＝顯示名（frontmatter）
+// proposedSkill：Dir＝資料夾名（晉升用）；Name/Desc＝frontmatter；Body＝SKILL.md 全文。
+//
+// Body 一定要帶著。治理頁的整個意義是「人看過才放行」，只給名字和一句描述等於要人
+// 簽署自己沒讀過的東西——而這份技能是模型自己寫的、晉升後就會被載入執行。
+// 全文本來就已經讀進記憶體（readProposedSkills 讀完只留 frontmatter），純粹是丟掉了。
+type proposedSkill struct{ Dir, Name, Desc, Body string }
 
 func (s *server) governance(w http.ResponseWriter, r *http.Request) {
 	claw := filepath.Join(s.workspace, ".claw")
@@ -180,7 +185,7 @@ func readProposedSkills(dir string) []proposedSkill {
 		if name == "" {
 			name = e.Name()
 		}
-		out = append(out, proposedSkill{Dir: e.Name(), Name: name, Desc: desc})
+		out = append(out, proposedSkill{Dir: e.Name(), Name: name, Desc: desc, Body: string(md)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -235,9 +240,12 @@ var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct":
 <p class="muted">workspace：<code>{{.Workspace}}</code></p>
 
 <h3>技能提案 <span class="muted">skills-proposed/</span></h3>
-{{if .Skills}}<ul class="gitems">{{range .Skills}}<li>
-  <span><b>{{.Name}}</b>{{with .Desc}} — <span class="muted">{{.}}</span>{{end}}</span>
-  <form method="POST" action="/governance/promote-skill"><input type="hidden" name="name" value="{{.Dir}}"><button type="submit" class="gact">晉升</button></form>
+{{if .Skills}}<ul class="gitems">{{range .Skills}}<li class="col">
+  <div class="hd">
+    <span><b>{{.Name}}</b>{{with .Desc}} — <span class="muted">{{.}}</span>{{end}}</span>
+    <form method="POST" action="/governance/promote-skill"><input type="hidden" name="name" value="{{.Dir}}"><button type="submit" class="gact">晉升</button></form>
+  </div>
+  <details><summary class="muted">看全文（{{.Dir}}/SKILL.md）</summary><pre class="prev">{{.Body}}</pre></details>
 </li>{{end}}</ul>
 <p class="muted">晉升會先過確定性把關（結構＋安全），通過才移到 <code>.claw/skills/</code> 生效。</p>
 {{else}}<p class="muted">無。</p>{{end}}

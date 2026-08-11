@@ -470,7 +470,14 @@ var baseTmpl = template.Must(template.New("base").Parse(`<!doctype html>
   /* governance 放行動作 */
   ul.gitems { list-style:none; padding:0; }
   ul.gitems li { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:8px 0; }
-  ul.gitems form, .grow form { margin:0; }
+  /* 一列裡有「說明＋按鈕」時，按鈕不參與收縮。少了 flex:none，說明一換行就把按鈕擠窄，
+     「晉升」兩個字被折成兩行（隔壁 .acts 有這條，裸 <form> 沒有）。 */
+  ul.gitems form, .grow form { margin:0; flex:none; }
+  /* 帶全文預覽的項目改直排：標題列自己是一條 flex，<details> 佔滿整寬 */
+  ul.gitems li.col { display:block; }
+  ul.gitems li.col .hd { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+  ul.gitems li.col details { margin-top:6px; }
+  ul.gitems li.col summary { cursor:pointer; font-size:12px; }
   .grow { display:flex; align-items:center; gap:12px; margin:9px 0 2px; }
   .grow .hint { color:var(--mut); font-size:11.5px; }
   button.gact { font:inherit; font-size:12.5px; font-weight:600; letter-spacing:.02em; color:#fff; background:var(--acc); border:none; border-radius:6px; padding:4px 14px; cursor:pointer; }
