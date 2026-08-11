@@ -50,6 +50,7 @@ func newServer(store ctxpkg.SessionStore, dir, workspace string, chat *chatRunne
 	mux.HandleFunc("POST /governance/apply-memory", s.govApplyMemory)
 	mux.HandleFunc("POST /governance/discard-memory", s.govDiscardMemory)
 	mux.HandleFunc("POST /governance/promote-skill", s.govPromoteSkill)
+	mux.HandleFunc("POST /governance/discard-skill", s.govDiscardSkill)
 	mux.HandleFunc("POST /governance/authz-approve", s.authzApprove)
 	mux.HandleFunc("POST /governance/authz-reject", s.authzReject)
 	mux.HandleFunc("POST /governance/authz-revoke", s.authzRevoke)

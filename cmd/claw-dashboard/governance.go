@@ -135,25 +135,59 @@ func (s *server) govDiscardMemory(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/governance", http.StatusSeeOther)
 }
 
+// resolveProposedSkill 從表單取技能資料夾名，驗證後回傳絕對路徑。晉升與丟棄共用——
+// 丟棄會 RemoveAll，路徑守衛只要有一邊漏掉就是刪任意目錄，所以這裡只留一份。
+// 防路徑穿越：只收單層資料夾名（filepath.Base 過濾掉任何 / 或 ..）。
+func (s *server) resolveProposedSkill(r *http.Request) (name, dir string, ok bool) {
+	name = strings.TrimSpace(r.FormValue("name"))
+	if name == "" || filepath.Base(name) != name {
+		s.setFlash("⚠️ 無效的技能名。")
+		return "", "", false
+	}
+	dir = filepath.Join(s.workspace, ".claw", evolve.ProposedSkillsDirName, name)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		s.setFlash("⚠️ 找不到提案技能：" + name)
+		return "", "", false
+	}
+	return name, dir, true
+}
+
+// govDiscardSkill 丟掉一份技能提案。
+//
+// 沒有這個按鈕的話，skills-proposed/ 只進不出：不想要的提案沒有出口，每次開治理頁都要
+// 重新略過一次，久了就沒人認真看——「反正都在那」。只能說好的佇列不是佇列，是 backlog。
+//
+// 真的刪掉，不封存。這跟記憶【記錄】的 DELETE 走封存不同，但和記憶【提案】的丟棄一致：
+// 提案是還沒被接受的產物，本來就可以再沉澱一次；已接受的東西才值得留退路。
+func (s *server) govDiscardSkill(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
+		return
+	}
+	name, dir, ok := s.resolveProposedSkill(r)
+	if !ok {
+		http.Redirect(w, r, "/governance", http.StatusSeeOther)
+		return
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		s.setFlash("⚠️ 丟棄失敗（" + name + "）：" + err.Error())
+	} else {
+		s.setFlash("✓ 已丟棄技能提案：" + name)
+	}
+	http.Redirect(w, r, "/governance", http.StatusSeeOther)
+}
+
 func (s *server) govPromoteSkill(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
 		http.Error(w, "跨站請求被拒（CSRF 防護）", http.StatusForbidden)
 		return
 	}
-	name := strings.TrimSpace(r.FormValue("name"))
-	// 防路徑穿越：只收單層資料夾名（filepath.Base 過濾掉任何 / 或 ..）。
-	if name == "" || filepath.Base(name) != name {
-		s.setFlash("⚠️ 無效的技能名。")
+	name, proposedDir, ok := s.resolveProposedSkill(r)
+	if !ok {
 		http.Redirect(w, r, "/governance", http.StatusSeeOther)
 		return
 	}
 	claw := filepath.Join(s.workspace, ".claw")
-	proposedDir := filepath.Join(claw, evolve.ProposedSkillsDirName, name)
-	if fi, err := os.Stat(proposedDir); err != nil || !fi.IsDir() {
-		s.setFlash("⚠️ 找不到提案技能：" + name)
-		http.Redirect(w, r, "/governance", http.StatusSeeOther)
-		return
-	}
 	res, err := evolve.Promote(proposedDir, filepath.Join(claw, evolve.ActiveSkillsDirName), agentsDir(s.workspace))
 	switch {
 	case err != nil:
@@ -246,6 +280,12 @@ var govTmpl = template.Must(template.New("gov").Funcs(template.FuncMap{"mulPct":
     <form method="POST" action="/governance/promote-skill"><input type="hidden" name="name" value="{{.Dir}}"><button type="submit" class="gact">晉升</button></form>
   </div>
   <details><summary class="muted">看全文（{{.Dir}}/SKILL.md）</summary><pre class="prev">{{.Body}}</pre></details>
+  <details class="danger"><summary>丟棄</summary>
+    <div class="confirm">
+      <span>確定丟棄提案技能 <b>{{.Name}}</b>？<code>skills-proposed/{{.Dir}}/</code> 會被刪除，agent 反思出來的這份技能無法復原（下次要等它再次沉澱）。</span>
+      <form method="POST" action="/governance/discard-skill"><input type="hidden" name="name" value="{{.Dir}}"><button type="submit" class="gact">確定丟棄</button></form>
+    </div>
+  </details>
 </li>{{end}}</ul>
 <p class="muted">晉升會先過確定性把關（結構＋安全），通過才移到 <code>.claw/skills/</code> 生效。</p>
 {{else}}<p class="muted">無。</p>{{end}}
