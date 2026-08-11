@@ -188,7 +188,7 @@ cmd/
 ├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
 ├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
 ├── ingest/               把 markdown 目錄結構式 ingest 成知識圖譜節點+邊（-src/-root，確定性不花錢）
-└── claw-demo-*/          教學/診斷 harness（mcp 診斷、oom 壓縮、subagent 隔離）——詳見下方 cmd/ 導覽
+└── claw-demo-*/          教學/診斷 harness（mcp 診斷、oom 壓縮）——詳見下方 cmd/ 導覽
 internal/
 ├── engine/                  Agent 核心引擎
 │   ├── loop.go              主迴圈 + RunSub（子 agent）；回合/成本熔斷、併發限流、無窮迴圈探測接線
@@ -509,14 +509,17 @@ go build ./...     # 建置
 | **`skillgate`** | 技能把關／晉升的 CLI 版 | 想寫進腳本時（面板 `/governance` 是 UI 版） |
 | **`claw-demo-mcp`** | 不經 LLM 直接連 MCP、列工具、`-call` 打一個 | **MCP 壞掉時二分問題在哪** |
 | `claw-demo-oom` | 上下文壓縮眼見為憑（自帶巨型檔 fixture） | 想看懂 Compactor 在幹嘛 |
-| `claw-demo-subagent` | 子 agent 隔離眼見為憑（自帶尋寶 fixture） | 想看懂為何主 session 不被搜尋噪音汙染 |
 
-前七支是實用入口；後三支是**教學／診斷** harness，各自演示一個難用嘴講清楚的機制。
-它們演示的能力都另有測試在守（`context/compactor_test.go`、`engine/subagent_e2e_test.go`、`mcp/*_test.go`），
+前七支是實用入口；後兩支是**教學／診斷** harness，各自演示一個難用嘴講清楚的機制。
+它們演示的能力都另有測試在守（`context/compactor_test.go`、`mcp/*_test.go`），
 所以是**輔助理解**，不是驗收路徑。
 
-> 曾有 `claw-demo`（session 隔離）、`claw-demo-trace`（OTel span）、`claw-demo-observability`（成本追蹤）
-> 三支，已移除——面板的執行樹回放、Langfuse 的甘特圖、面板 Metrics 頁分別把同一件事呈現得更好。
+> 已移除的 demo：`claw-demo`（session 隔離）、`claw-demo-trace`（OTel span）、
+> `claw-demo-observability`（成本追蹤）、`claw-demo-subagent`（子 agent 隔離）。
+> 判準都是同一條——**有別的東西把同一件事呈現得更好**：面板的執行樹回放、Langfuse 的甘特圖、
+> 面板 Metrics 頁，以及（子 agent）執行樹的「subagent 協同」節點＋office 投影裡看得到
+> NPC 被徵用、回報、回座位。留下來的兩支則沒有替代品：壓縮在任何 UI 上都看不見，
+> MCP 診斷是唯一不經 LLM 的連線驗證路徑。
 
 ### 評測（eval）：分三層，因為它們測的不是同一件事
 
