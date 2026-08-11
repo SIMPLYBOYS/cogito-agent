@@ -62,9 +62,8 @@ func TestUserProfile_Bounded(t *testing.T) {
 	}
 	idx := NewMemoryLoader(root).LoadIndex()
 
-	if n := strings.Count(idx, body); n > maxProfileEntries {
-		t.Errorf("條數 %d 超過上限 %d", n, maxProfileEntries)
-	}
+	// 只封字數，不另設條數上限——條數先前才是真正卡住的那道閘（實測 12 條只用掉 672 字，
+	// 2000 字的預算浪費三分之二），而成本本來就按字算。
 	if n := len([]rune(idx)); n > maxProfileRunes+1000 { // +1000：標題/導言/省略行的餘裕
 		t.Errorf("畫像總長 %d runes 明顯超過額度 %d", n, maxProfileRunes)
 	}
@@ -76,17 +75,30 @@ func TestUserProfile_Bounded(t *testing.T) {
 	}
 }
 
-// 畫像是凍結的 prompt 前綴：順序每次都要一樣，否則 prefix cache 全打掉。
-func TestUserProfile_StableOrder(t *testing.T) {
+// 畫像是凍結的 prompt 前綴：順序每次都要一樣，否則 prefix cache 全打掉。排序鍵用 recorded
+// （寫進檔案後不再變動），不是 usedAt——後者會因為被 recall 而變，順序就不穩了。
+//
+// 為何不再依名稱：同樣穩定，但選出來的是【字典序前 N 名】，而 name 是 description 砍到前 24 字。
+// 實測 54 條畫像：「你…」開頭的全進、「使用者…」開頭的全滅，只因為「你」的碼位比「使」小。
+func TestUserProfile_NewestFirstAndStable(t *testing.T) {
 	root, memDir := profileDir(t)
-	for _, n := range []string{"c", "a", "b"} {
-		writeMem(t, memDir, "u-"+n,
-			fmt.Sprintf("---\nname: %s\ndescription: d\ntags: [user]\n---\nbody-%s", n, n))
+	// 刻意讓「寫入順序」「檔名順序」「時間順序」三者不一致，才驗得出排的是時間。
+	for _, c := range []struct{ slug, ts string }{
+		{"u-a", "2026-08-09T10:00:00+08:00"},
+		{"u-c", "2026-08-11T10:00:00+08:00"},
+		{"u-b", "2026-08-10T10:00:00+08:00"},
+	} {
+		writeMem(t, memDir, c.slug,
+			fmt.Sprintf("---\nname: %s\ndescription: d\ntags: [user]\nrecorded: %s\n---\nbody-%s",
+				c.slug, c.ts, c.slug))
 	}
 	idx := NewMemoryLoader(root).LoadIndex()
-	ia, ib, ic := strings.Index(idx, "body-a"), strings.Index(idx, "body-b"), strings.Index(idx, "body-c")
-	if !(ia < ib && ib < ic) {
-		t.Errorf("畫像應依名稱穩定排序，got a=%d b=%d c=%d", ia, ib, ic)
+	ia, ib, ic := strings.Index(idx, "body-u-a"), strings.Index(idx, "body-u-b"), strings.Index(idx, "body-u-c")
+	if !(ic < ib && ib < ia) {
+		t.Errorf("最近寫的該排最前，got c=%d b=%d a=%d\n%s", ic, ib, ia, idx)
+	}
+	if again := NewMemoryLoader(root).LoadIndex(); again != idx {
+		t.Error("同一份記憶庫兩次載入結果不同——前綴快取會被打掉")
 	}
 }
 

@@ -23,10 +23,10 @@ const maxIndexEntries = 30
 // 那時通常已經寫完了。其餘記憶維持漸進式（索引常駐、正文按需），這是刻意的兩級待遇。
 const UserProfileTag = "user"
 
-// 常駐即成本：畫像是每輪都送的固定開銷，故條數與長度都封頂。超出的部分照樣在索引裡、recall 得到。
+// 常駐即成本：畫像是每輪都送的固定開銷，故總長度封頂（只封字數——條數只是它的代理指標）。
+// 超出的部分照樣在索引裡、recall 得到。
 const (
-	maxProfileEntries = 12
-	maxProfileRunes   = 2000
+	maxProfileRunes = 2000
 )
 
 // MemoryRecord 是一筆離散的長期記憶（.claw/memory/<slug>.md）：frontmatter 帶 name/description/tags，
@@ -36,6 +36,10 @@ type MemoryRecord struct {
 	Description string
 	Tags        []string
 	Body        string
+
+	// Recorded 是寫入時間（frontmatter `recorded:`）。跟 usedAt 不同：這筆【不會】因為被
+	// recall 而變動，所以拿它排序的結果每輪都一樣——畫像要的正是這種穩定。
+	Recorded time.Time
 
 	Path   string    // 記錄檔路徑（recall 命中時記帳、Prune 歸檔用）
 	usedAt time.Time // 最近使用時間：優先取自使用帳本，帳本無則退回檔案 mtime——排序/淘汰依據
@@ -346,8 +350,18 @@ func splitUserProfile(recs []MemoryRecord) (profile, rest []MemoryRecord) {
 		}
 		rest = append(rest, r)
 	}
-	// 依名稱排序而非 LRU：畫像是【凍結的 prompt 前綴】，順序每輪都一樣才不會打掉 prefix cache。
-	sort.Slice(profile, func(i, j int) bool { return profile[i].Name < profile[j].Name })
+	// 依【寫入時間】新到舊，而非 LRU：畫像是凍結的 prompt 前綴，排序鍵不能因為被 recall 而變動；
+	// recorded 寫進檔案後就不會再動，所以順序每輪一樣，prefix cache 保住。
+	//
+	// 先前依名稱排序，同樣穩定但選出來的是【字典序前 12 名】——而 name 是 description 砍到前 24 字，
+	// 等於拿一段截斷句子的開頭當重要性。實測 54 條畫像：「你…」開頭的全進、「使用者…」開頭的全滅，
+	// 只因為「你」的碼位比「使」小。改成新到舊，至少「你最近說過的話」會贏過「你三天前說過的」。
+	sort.Slice(profile, func(i, j int) bool {
+		if !profile[i].Recorded.Equal(profile[j].Recorded) {
+			return profile[i].Recorded.After(profile[j].Recorded)
+		}
+		return profile[i].Name < profile[j].Name // 同秒寫入時的決勝，維持確定性
+	})
 	return profile, rest
 }
 
@@ -365,13 +379,23 @@ func renderUserProfile(recs []MemoryRecord) string {
 		if body == "" {
 			body = r.Description
 		}
+		// name 是 body 砍到前 24 字（見 evolve.writeMemoryRecord），照印就是「前 24 字 + 完整版」
+		// 的自我重複，還白吃 24 字預算。是前綴就只印正文——與 LoadIndex 同一套處理。
+		line := fmt.Sprintf("- %s\n", body)
+		if !strings.HasPrefix(body, r.Name) {
+			line = fmt.Sprintf("- **%s**：%s\n", r.Name, body)
+		}
+		// 算【整行】而不是只算 body：先前漏算 name 與符號，實際送出去的比帳面多。
 		// 超支就整條不放——寧可少一條完整的，也不要半截的偏好（截斷會把「不要 X」切成「要 X」）。
-		if shown >= maxProfileEntries || used+len([]rune(body)) > maxProfileRunes {
+		//
+		// 只用字數封頂，不再另設條數上限：條數才是先前真正卡住的那道閘（12 條只用掉 672 字，
+		// 2000 字的預算浪費了三分之二），而成本本來就按字算，條數只是它的代理指標。
+		if used+len([]rune(line)) > maxProfileRunes {
 			break
 		}
-		used += len([]rune(body))
+		used += len([]rune(line))
 		shown++
-		fmt.Fprintf(&b, "- **%s**：%s\n", r.Name, body)
+		b.WriteString(line)
 	}
 	if rest := len(recs) - shown; rest > 0 {
 		fmt.Fprintf(&b, "- …（另有 %d 條使用者相關記憶超出常駐額度，需要時用 `recall` 取回）\n", rest)
@@ -572,6 +596,8 @@ func parseMemoryMD(content string) MemoryRecord {
 					rec.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
 				case strings.HasPrefix(line, "tags:"):
 					rec.Tags = parseTags(strings.TrimPrefix(line, "tags:"))
+				case strings.HasPrefix(line, "recorded:"):
+					rec.Recorded, _ = time.Parse(time.RFC3339, strings.TrimSpace(strings.TrimPrefix(line, "recorded:")))
 				}
 			}
 		}
