@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -26,11 +28,12 @@ import (
 // ReconcileKind 是整併提案的分類標記，會寫進提案區塊標頭與放行後記錄的 tags。
 const ReconcileKind = "整併"
 
-// maxReconcileRecords 是一次整併最多看幾筆記錄。整份記憶庫要進 prompt，太多會既貴又降低品質；
-// 超量時只看「最近使用」的前 N 筆（Prune 的淘汰也是同一個訊號）。
+// maxReconcileRecords 是一次整併最多看幾筆記錄。整份記憶庫要進 prompt，太多會降低模型
+// 逐條比對的品質（成本反而不是問題：60 條描述對便宜模型不到一分錢）。挑哪幾條見 pickForReconcile。
 const maxReconcileRecords = 60
 
-const reconcileSystemPrompt = `你是專案長期記憶的整理者。下面是目前【全部】的長期記憶記錄，已編號。
+const reconcileSystemPrompt = `你是專案長期記憶的整理者。下面是目前的長期記憶記錄，已編號。
+（可能只是全部的一部分——沒列出來的不代表不存在，不要據此推論「某件事沒有被記過」。）
 你的工作是找出【互相矛盾】或【已經過時】的記錄，提出修正。
 
 判準（從嚴，寧可不動也不要亂動）：
@@ -70,8 +73,9 @@ func (m *MemorySynthesizer) Reconcile(ctx context.Context) ([]string, error) {
 	if last := loader.ReconciledAt(); !last.IsZero() && !anyRecordNewerThan(recs, last) {
 		return nil, nil
 	}
-	if len(recs) > maxReconcileRecords {
-		recs = recs[:maxReconcileRecords]
+	recs, dropped := pickForReconcile(recs, maxReconcileRecords)
+	if dropped > 0 {
+		log.Printf("記憶整併：畫像優先送審，另有 %d 條這次沒看到（窗口 %d）", dropped, maxReconcileRecords)
 	}
 
 	var listing strings.Builder
@@ -104,6 +108,8 @@ func (m *MemorySynthesizer) Reconcile(ctx context.Context) ([]string, error) {
 
 	entries := m.buildReconcileEntries(out.Actions, recs)
 	if len(entries) == 0 {
+		// 「模型沒提任何動作」與「提了但全被護欄擋掉」是兩件事，回報時不該長得一樣。
+		log.Printf("記憶整併：模型提了 %d 個動作，通過護欄 0 個", len(out.Actions))
 		return nil, nil
 	}
 	if err := m.appendReconciled(entries); err != nil {
@@ -133,19 +139,27 @@ func (m *MemorySynthesizer) buildReconcileEntries(actions []reconcileAction, rec
 			continue
 		}
 		if e.Op != OpUpdate && e.Op != OpDelete {
-			continue // 未知動作直接忽略
+			log.Printf("記憶整併：忽略未知動作 %q", a.Op)
+			continue
 		}
 		if a.N < 1 || a.N > len(recs) {
-			continue // 編號越界：模型幻覺，丟掉
+			log.Printf("記憶整併：編號 %d 越界（共 %d 條），視為幻覺丟棄", a.N, len(recs))
+			continue
 		}
 		r := recs[a.N-1]
 
 		// 護欄①：使用者本人要求記的絕不刪。UPDATE 放行（偏好會變），但要人看 diff 點頭。
+		//
+		// 擋下來要出聲。先前是靜默 continue，於是「模型抓到一堆矛盾但提議的全是刪畫像」會
+		// 一路變成回報「沒有發現矛盾」——那不是沒找到，是找到了卻被吃掉，兩者對使用者的
+		// 意義完全相反。
 		if e.Op == OpDelete && hasUserTag(r.Tags) {
+			log.Printf("記憶整併：擋下 DELETE %s（畫像不可刪）——理由「%s」", filepath.Base(r.Path), e.Why)
 			continue
 		}
 		if e.Why == "" {
-			continue // 沒有理由就無從審核，等同沒提案
+			log.Printf("記憶整併：忽略 %s %s（沒給理由，無從審核）", e.Op, filepath.Base(r.Path))
+			continue
 		}
 		e.Target = strings.TrimSuffix(filepath.Base(r.Path), ".md")
 		e.Old = oneLine(r.Description)
@@ -161,6 +175,54 @@ func (m *MemorySynthesizer) buildReconcileEntries(actions []reconcileAction, rec
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// pickForReconcile 決定哪些記錄送進 LLM，並回報有幾條沒送。
+//
+// 【為何不是直接切前 N 筆】呼叫端給的是 List() 的結果，依 Path 排序——而 Path 是
+// `mem-<內容雜湊>.md`。切前 60 筆等於在 135 條裡隨機抽 44%，抽到誰全看雜湊。實測踩過：
+// 「不開會不上板」三條裡只有一條落進窗口，對上十一條「要開會上板」，模型判成沒有矛盾——
+// 它看到的資料裡確實沒有。而 MarkReconciled 一蓋章，沒被看到的那 75 條就【再也不會】被看到。
+//
+// 改成：畫像（tags:[user]）優先，其餘依寫入時間新到舊。理由是矛盾的代價不均勻——畫像是唯一
+// 每輪全文常駐的一層，那裡的一條矛盾每回合都在生效；一般記憶要被 recall 命中才影響這一次，
+// 而且模型看得到正文可以自行判斷。
+func pickForReconcile(recs []ctxpkg.MemoryRecord, limit int) (picked []ctxpkg.MemoryRecord, dropped int) {
+	if len(recs) <= limit {
+		return recs, 0
+	}
+	var profile, rest []ctxpkg.MemoryRecord
+	for _, r := range recs {
+		if hasUserTag(r.Tags) {
+			profile = append(profile, r)
+		} else {
+			rest = append(rest, r)
+		}
+	}
+	// 兩組各自新到舊，同秒的用 Path 決勝——同一次呼叫裡編號要對得回記錄，排序不確定的話
+	// 模型指的 3 號跟我們解讀的 3 號會不是同一筆。
+	byRecent := func(s []ctxpkg.MemoryRecord) {
+		sort.SliceStable(s, func(i, j int) bool {
+			if !s[i].Recorded.Equal(s[j].Recorded) {
+				return s[i].Recorded.After(s[j].Recorded)
+			}
+			return s[i].Path < s[j].Path
+		})
+	}
+	byRecent(profile)
+	byRecent(rest)
+
+	picked = append(picked, profile...)
+	if len(picked) > limit {
+		picked = picked[:limit]
+	}
+	for _, r := range rest {
+		if len(picked) >= limit {
+			break
+		}
+		picked = append(picked, r)
+	}
+	return picked, len(recs) - len(picked)
 }
 
 // anyRecordNewerThan 判斷上次整併後有沒有記錄新增或被改過。

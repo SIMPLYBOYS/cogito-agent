@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +545,32 @@ func seedNewRecord(t *testing.T, root, slug, desc string) {
 	future := time.Now().Add(2 * time.Second)
 	if err := os.Chtimes(p, future, future); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 窗口只有 N，而呼叫端給的是【依 Path（內容雜湊）排序】的清單——直接切前 N 筆等於隨機抽樣。
+// 實測踩過：135 條裡「不開會不上板」三條只有一條落進窗口，對上十一條「要開會上板」，模型
+// 判成沒有矛盾。它看到的資料裡確實沒有；而 MarkReconciled 一蓋章，另外 75 條再也不會被看到。
+func TestPickForReconcile_ProfileFirstThenRecent(t *testing.T) {
+	at := func(d int) time.Time { return time.Date(2026, 8, d, 0, 0, 0, 0, time.UTC) }
+	recs := []ctxpkg.MemoryRecord{
+		{Path: "a.md", Description: "舊慣例", Recorded: at(1)},
+		{Path: "b.md", Description: "畫像·舊", Tags: []string{"user"}, Recorded: at(2)},
+		{Path: "c.md", Description: "新慣例", Recorded: at(9)},
+		{Path: "d.md", Description: "畫像·新", Tags: []string{"user"}, Recorded: at(8)},
+	}
+	picked, dropped := pickForReconcile(recs, 3)
+	got := []string{picked[0].Description, picked[1].Description, picked[2].Description}
+	want := []string{"畫像·新", "畫像·舊", "新慣例"} // 畫像優先（各自新到舊），額度剩下的給最近的慣例
+	if !slices.Equal(got, want) {
+		t.Errorf("挑錯了\n got %v\nwant %v", got, want)
+	}
+	if dropped != 1 {
+		t.Errorf("該回報漏掉 1 條，got %d", dropped)
+	}
+
+	// 沒超量就原封不動——編號與呼叫端的清單一致，不必多一層對映。
+	if p, d := pickForReconcile(recs, 10); len(p) != 4 || d != 0 {
+		t.Errorf("未超量不該重排或丟棄，got %d 條 / 漏 %d", len(p), d)
 	}
 }
