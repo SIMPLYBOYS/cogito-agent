@@ -322,6 +322,13 @@ func (m *MemoryLoader) LoadIndex() string {
 		if len(r.Tags) > 0 {
 			tag = " [" + strings.Join(r.Tags, ", ") + "]"
 		}
+		// 記憶的 name 是 description 砍到前 24 字（見 evolve.writeMemoryRecord），所以整條索引
+		// 大多是「前 24 字 + 同一句完整版」的自我重複。索引常駐每一輪都送，這是固定的白付。
+		// 在【渲染】這裡收掉而不是改寫檔案：既有記錄不必搬遷，name 對 recall 檢索仍然有用。
+		if strings.HasPrefix(r.Description, r.Name) {
+			fmt.Fprintf(&b, "- %s%s\n", r.Description, tag)
+			continue
+		}
 		fmt.Fprintf(&b, "- **%s**：%s%s\n", r.Name, r.Description, tag)
 	}
 	if hidden > 0 {

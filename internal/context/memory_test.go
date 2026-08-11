@@ -61,3 +61,30 @@ func TestMemoryLoader_RecallRanksAndMatchesCJK(t *testing.T) {
 		t.Errorf("不相關查詢應回空，got %+v", none)
 	}
 }
+
+// 記憶的 name 是 description 砍到前 24 字（evolve.writeMemoryRecord），所以索引整條都在自我重複：
+// 「- **實價登錄單價欄位為每平方公尺，換算每坪需乘以 3**：實價登錄單價欄位為每平方公尺，換算每坪需乘以 3.305785。」
+// 索引每一輪都常駐，這是固定的白付。name 不是前綴時仍要照印——那時它是真的標題。
+func TestMemoryLoader_IndexDropsNameWhenItPrefixesDescription(t *testing.T) {
+	root := t.TempDir()
+	memDir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(slug, name, desc string) {
+		writeMem(t, memDir, slug, "---\nname: "+name+"\ndescription: "+desc+"\n---\n正文")
+	}
+	write("mem-a", "實價登錄單價欄位為每平方公尺，換算每坪需乘以 3", "實價登錄單價欄位為每平方公尺，換算每坪需乘以 3.305785。")
+	write("mem-b", "部署流程", "上線前要先跑 make verify。")
+
+	idx := NewMemoryLoader(root).LoadIndex()
+	if strings.Contains(idx, "**實價登錄單價欄位為每平方公尺，換算每坪需乘以 3**") {
+		t.Errorf("name 是 description 的前綴，不該再印一次：\n%s", idx)
+	}
+	if !strings.Contains(idx, "換算每坪需乘以 3.305785。") {
+		t.Errorf("完整描述不可丟：\n%s", idx)
+	}
+	if !strings.Contains(idx, "**部署流程**：上線前要先跑 make verify。") {
+		t.Errorf("真的是標題的 name 要照印：\n%s", idx)
+	}
+}
