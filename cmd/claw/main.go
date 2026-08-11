@@ -241,7 +241,14 @@ func main() {
 					log.Printf("[evolve] 技能反思失敗（不影響任務）: %v", err)
 				} else if path != "" {
 					log.Printf("[evolve] 💡 提案技能：%s", path)
-					chatbot.SendMessage(session.ID, fmt.Sprintf("💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。", filepath.Base(path)))
+					// 名字取【資料夾】不是檔名：產物是 <slug>/SKILL.md，Base(path) 永遠回
+					// 「SKILL.md」，每個提案長得一模一樣、認不出是哪一個（實際回報）。
+					// learnHook 那條路徑本來就取對了（Base(Dir(path))），這裡漏抄。
+					slug := filepath.Base(filepath.Dir(path))
+					chatbot.SendMessage(session.ID, fmt.Sprintf(
+						"💡 我從這次任務萃取了一個*提案技能* `%s`，已存到暫存區，需你 review 後手動啟用（不會自動生效）。\n"+
+							"看把關報告：`go run ./cmd/skillgate`；要生效：`go run ./cmd/skillgate -promote %s`",
+						slug, slug))
 				}
 			}
 			if memSynth != nil {
