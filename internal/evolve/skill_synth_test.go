@@ -117,3 +117,52 @@ func TestRenderTranscript_KeepsTail(t *testing.T) {
 		t.Errorf("從中文字中間切開了，產生無效 UTF-8")
 	}
 }
+
+// capturingProvider 記下實際送出去的訊息，用來驗「反思看得到什麼」。
+type capturingProvider struct {
+	content string
+	msgs    []schema.Message
+}
+
+func (c *capturingProvider) Generate(_ context.Context, msgs []schema.Message, _ []schema.ToolDefinition) (*schema.Message, error) {
+	c.msgs = msgs
+	return &schema.Message{Role: schema.RoleAssistant, Content: c.content}, nil
+}
+func (c *capturingProvider) MaxContextTokens() int { return 200000 }
+func (c *capturingProvider) ModelName() string     { return "fake" }
+
+// 反思原本只看得到「任務 + 軌跡」，等於每輪都在真空裡想事情——同一個開會分工流程因此產了
+// 十份幾乎一樣的提案。清單要含【生效中】與【等審的提案】兩邊：漏掉提案的話，還沒被審掉的
+// 重複會一直被當成不存在，同一個 pattern 每輪再加一份。
+func TestReflect_PromptCarriesExistingSkills(t *testing.T) {
+	claw := t.TempDir()
+	writeSkill := func(base, dir, name, desc string) {
+		d := filepath.Join(base, dir)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: " + name + "\ndescription: " + desc + "\n---\n步驟一二三，正文要夠長才過得了把關。"
+		if err := os.WriteFile(filepath.Join(d, SkillFileName), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := filepath.Join(claw, ActiveSkillsDirName)
+	proposed := filepath.Join(claw, ProposedSkillsDirName)
+	writeSkill(active, "orchestrate", "orchestrate", "編排具名子 agent")
+	writeSkill(proposed, "parallel-expert-eval", "parallel-expert-eval", "並行派多角色評估")
+
+	cp := &capturingProvider{content: `{"worth_saving": false}`}
+	if _, err := NewSkillSynthesizer(cp, proposed).Reflect(context.Background(), "開會分工", nil); err != nil {
+		t.Fatal(err)
+	}
+	sent := cp.msgs[len(cp.msgs)-1].Content
+	for _, want := range []string{"orchestrate：編排具名子 agent", "parallel-expert-eval：並行派多角色評估"} {
+		if !strings.Contains(sent, want) {
+			t.Errorf("清單沒進 prompt，少了 %q：\n%s", want, sent)
+		}
+	}
+	// 清單要放 user 訊息——它每次都不一樣，塞進 system 會讓那段再也快取不到。
+	if strings.Contains(cp.msgs[0].Content, "orchestrate：") {
+		t.Error("清單跑進 system prompt 了，會打掉快取")
+	}
+}

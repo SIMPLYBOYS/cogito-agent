@@ -51,6 +51,11 @@ const reflectSystemPrompt = `你是一個負責「技能萃取」的反思者。
 判準（從嚴）：
 - 只有當流程【具體、可重複、跨任務有價值】時才保存；一次性瑣事、與本任務資料強綁定的步驟不要保存。
 - 技能正文寫「怎麼做」的步驟指南，不要把這次的具體檔名/數值寫死。
+- **已經有的不要再寫一次。** user 訊息會附上現有技能清單（含還在等審的提案）。這次的流程
+  若已被其中任何一條涵蓋——就算你覺得可以寫得更好——一律回 worth_saving:false。
+  重複的提案不會讓既有技能變好，只會讓人多審一份。要改進既有技能是人的決定，不是你的。
+- **記錄「這次決定了什麼」不是技能。** 技能是「下次遇到同類任務要怎麼做」。若你寫出來的
+  Examples 其實就是這次的答案本身（而不是示範），那它屬於記憶，不是技能——回 false。
 
 body 請依 agentskills.io 慣例分三段（markdown）：
 ## When to use
@@ -64,11 +69,49 @@ body 請依 agentskills.io 慣例分三段（markdown）：
 - 值得保存：{"worth_saving": true, "name": "<kebab-case 短名，限 a-z0-9._->", "description": "<一句話：做什麼 + 何時用>", "body": "<上述三段式 markdown>"}
 - 不值得：{"worth_saving": false}`
 
+// existingSkills 列出「已經有的」技能一句話索引：生效中的 + 還在等審的提案。
+//
+// 【為何需要】反思本來只看得到「任務 + 軌跡」，等於每一輪都在真空裡想事情。實測：同一個
+// 「開會分工→收斂→上板」流程被反覆跑了幾輪，它就產了【十份】幾乎一樣的提案（名字各不相同：
+// parallel-expert-eval-and-merge、multi-persona-consensus-design-review、
+// cross-functional-architecture-eval…）。那不是模型笨，是我們沒給它翻舊帳的機會。
+//
+// 提案也要列進去——不然還沒被審掉的重複會一直當成「不存在」，同一個 pattern 每輪再加一份。
+func existingSkills(proposedDir string) []string {
+	var out []string
+	// 生效中的技能是提案目錄的兄弟（<root>/.claw/{skills,skills-proposed}）。
+	for _, dir := range []string{filepath.Join(filepath.Dir(proposedDir), ActiveSkillsDirName), proposedDir} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, e.Name(), SkillFileName))
+			if err != nil {
+				continue
+			}
+			if name, desc, _, ok := parseFrontmatter(string(data)); ok {
+				out = append(out, fmt.Sprintf("- %s：%s", name, desc))
+			}
+		}
+	}
+	return out
+}
+
 // Reflect 反思一段軌跡。回傳寫出的提案技能檔路徑；空字串表示判定不值得保存（非錯誤）。
 func (s *SkillSynthesizer) Reflect(ctx context.Context, taskPrompt string, history []schema.Message) (string, error) {
+	// 現有技能清單放【user 訊息】不放 system prompt：它每次呼叫都不一樣，塞進 system
+	// 會讓那段再也快取不到。
+	user := fmt.Sprintf("任務：\n%s\n\n軌跡：\n%s", taskPrompt, renderTranscript(history, 6000))
+	if have := existingSkills(s.proposedDir); len(have) > 0 {
+		user += "\n\n已經有的技能（含等審的提案）——被涵蓋就回 worth_saving:false：\n" + strings.Join(have, "\n")
+	}
 	msgs := []schema.Message{
 		{Role: schema.RoleSystem, Content: reflectSystemPrompt},
-		{Role: schema.RoleUser, Content: fmt.Sprintf("任務：\n%s\n\n軌跡：\n%s", taskPrompt, renderTranscript(history, 6000))},
+		{Role: schema.RoleUser, Content: user},
 	}
 
 	resp, err := s.provider.Generate(ctx, msgs, nil)
