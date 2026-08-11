@@ -19,16 +19,17 @@ func main() {
 	proposed := flag.String("proposed", "./workspace/.claw/"+evolve.ProposedSkillsDirName, "提案技能目錄")
 	active := flag.String("active", "./workspace/.claw/"+evolve.ActiveSkillsDirName, "生效技能目錄（晉升目標）")
 	promote := flag.String("promote", "", "要晉升的提案技能【名稱】（資料夾名；把關通過才移到生效目錄）")
+	agents := flag.String("agents", "./workspace/.claw/agents", "具名 agent 目錄（用來驗技能寫的 agent_type 真的存在）")
 	flag.Parse()
 
 	if *promote != "" {
-		doPromote(filepath.Join(*proposed, *promote), *active)
+		doPromote(filepath.Join(*proposed, *promote), *active, *agents)
 		return
 	}
-	doReport(*proposed)
+	doReport(*proposed, *agents)
 }
 
-func doReport(proposedDir string) {
+func doReport(proposedDir, agentsDir string) {
 	entries, err := os.ReadDir(proposedDir)
 	if err != nil {
 		fmt.Printf("讀取提案技能目錄失敗：%v\n（尚無提案技能，或目錄不存在）\n", err)
@@ -46,7 +47,7 @@ func doReport(proposedDir string) {
 			continue // 沒有 SKILL.md 的資料夾略過
 		}
 		count++
-		res, err := evolve.Gate(skillMd)
+		res, err := evolve.Gate(skillMd, agentsDir)
 		if err != nil {
 			fmt.Printf("• %s  ⚠️ 讀取失敗: %v\n", e.Name(), err)
 			continue
@@ -65,8 +66,8 @@ func doReport(proposedDir string) {
 	}
 }
 
-func doPromote(path, activeDir string) {
-	res, err := evolve.Promote(path, activeDir)
+func doPromote(path, activeDir, agentsDir string) {
+	res, err := evolve.Promote(path, activeDir, agentsDir)
 	if err != nil {
 		fmt.Printf("晉升出錯：%v\n", err)
 		os.Exit(1)

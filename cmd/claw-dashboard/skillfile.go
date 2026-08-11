@@ -46,6 +46,11 @@ func activeSkillsDir(workspace string) string {
 	return filepath.Join(workspace, ".claw", evolve.ActiveSkillsDirName)
 }
 
+// agentsDir 是具名 agent 的所在，把關要靠它驗「技能寫的 agent_type 真的有那個檔」。
+func agentsDir(workspace string) string {
+	return filepath.Join(workspace, ".claw", "agents")
+}
+
 // buildSkillMD 把三個欄位組成 SKILL.md 全文（frontmatter + 正文）。
 func buildSkillMD(name, desc, body string) string {
 	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s\n",
@@ -70,7 +75,7 @@ func saveSkill(workspace, dir, name, desc, body string) error {
 	}
 
 	content := buildSkillMD(name, desc, body)
-	if res := evolve.GateContent(content); !res.Passed {
+	if res := evolve.GateContent(content, evolve.KnownAgents(agentsDir(workspace))); !res.Passed {
 		return fmt.Errorf("未通過安全把關：%s", strings.Join(res.Issues, "；"))
 	}
 

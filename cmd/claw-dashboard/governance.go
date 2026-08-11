@@ -154,7 +154,7 @@ func (s *server) govPromoteSkill(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/governance", http.StatusSeeOther)
 		return
 	}
-	res, err := evolve.Promote(proposedDir, filepath.Join(claw, evolve.ActiveSkillsDirName))
+	res, err := evolve.Promote(proposedDir, filepath.Join(claw, evolve.ActiveSkillsDirName), agentsDir(s.workspace))
 	switch {
 	case err != nil:
 		s.setFlash("⚠️ 晉升失敗（" + name + "）：" + err.Error())

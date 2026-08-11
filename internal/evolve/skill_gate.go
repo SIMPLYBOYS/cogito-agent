@@ -35,20 +35,68 @@ var dangerousSkillPatterns = []struct {
 	{regexp.MustCompile(`(?i)git\s+push\s+.*--force|push\s+-f\b`), "強制 push"},
 }
 
-// Gate 對一個提案技能檔做【確定性】把關（結構 + 安全），無 API 呼叫。這是晉升的必過關卡。
-func Gate(skillPath string) (GateResult, error) {
+// rolePlayPattern 抓「派一個通用專員，再在 task_prompt 裡叫它扮演某個具名角色」。
+//
+// 【為何要擋】人設檔（.claw/agents/<名字>.md）就是為了這件事存在的。用扮演取代，等於每一輪
+// 重新描述一次那個人（付費），而且會漂——這一輪的老王跟上一輪的老王不是同一個人。合成器會從
+// 逐字稿學到這個壞習慣：實測一份自生成技能寫著「並行啟動三個 implementer…你扮演老王（UI設計）」，
+// 結構與安全都乾淨，照樣通過把關，然後每一輪都重新教一次。
+//
+// 這不是「危險」，所以刻意【不】放進 dangerousSkillPatterns——那份黑名單只管安全，混進品質
+// 判準會讓它漂掉。
+var rolePlayPattern = regexp.MustCompile(`(?i)(扮演|假裝(你)?是|role-?play|pretend you)`)
+
+// negationPattern 讓「不要叫子 agent 扮演…」這種【警告句】不被當成犯行。逐行判斷，因為一份好
+// 技能本來就會把踩過的雷寫進去——擋掉它等於逼作者不准提這件事，那才是真的會漂。
+var negationPattern = regexp.MustCompile(`(?i)(不要|不該|別|勿|禁止|避免|don'?t|do not|avoid|never)`)
+
+// hasRolePlay 逐行找「叫子 agent 扮演某角色」，跳過談論它的否定句。
+func hasRolePlay(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		if rolePlayPattern.MatchString(line) && !negationPattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// agentTypePattern 抓技能正文裡指名的 agent_type（`agent_type=planner`、`"agent_type":"cto"`…）。
+var agentTypePattern = regexp.MustCompile(`agent_type["']?\s*[:=]\s*["']?([\p{Han}A-Za-z0-9_-]+)`)
+
+// KnownAgents 列出 .claw/agents/ 裡真實存在的 agent 名（去掉 .md）。目錄不存在就回 nil，
+// 呼叫端據此把「名稱存在性」檢查整個略過——寧可不檢查，也不要拿空清單把每個名字都判成錯的。
+func KnownAgents(agentsDir string) []string {
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if n := strings.TrimSuffix(e.Name(), ".md"); !e.IsDir() && n != e.Name() {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// Gate 對一個提案技能檔做【確定性】把關（結構 + 安全 + agent_type 存在性），無 API 呼叫。
+// 這是晉升的必過關卡。agentsDir 空字串＝不檢查名稱存在性。
+func Gate(skillPath, agentsDir string) (GateResult, error) {
 	data, err := os.ReadFile(skillPath)
 	if err != nil {
 		return GateResult{}, fmt.Errorf("讀取技能檔失敗: %w", err)
 	}
-	return GateContent(string(data)), nil
+	return GateContent(string(data), KnownAgents(agentsDir)), nil
 }
 
 // GateContent 是 Gate 的內容版：同一套判準，但不需要先落檔。
 //
 // 【為何需要】面板讓操作者手寫技能時，要在【寫入前】就驗——先寫再檢查等於中間存在一個
 // 未把關的技能檔，而技能是「未來行為的來源」，那個空窗期不該存在。
-func GateContent(content string) GateResult {
+//
+// knownAgents 是 .claw/agents/ 裡真實存在的名字（用 KnownAgents 取）。傳 nil＝略過名稱檢查。
+// 刻意做成【必填參數】而不是可變參數：漏傳會是編譯期錯誤，不是靜悄悄少檢查一項。
+func GateContent(content string, knownAgents []string) GateResult {
 	var issues []string
 
 	name, desc, body, ok := parseFrontmatter(content)
@@ -70,6 +118,27 @@ func GateContent(content string) GateResult {
 		issues = append(issues, "命中危險模式："+d)
 	}
 
+	if hasRolePlay(content) {
+		issues = append(issues, "叫子 agent「扮演」某個角色——該用 agent_type 指定具名 agent，人設檔已經寫好了，扮演會漂又要重複付費")
+	}
+
+	// agent_type 指到不存在的檔案是【靜默】失敗：載入不到就退回一個沒有人設的探路者，
+	// 技能照跑、報告照回，只是回答的人不是你以為的那個。實測一份自生成技能寫著
+	// agent_type:"cto"/"backend"/"devops"，而實際的檔案叫老徐/阿哲/阿海——三個都落空。
+	if len(knownAgents) > 0 {
+		known := make(map[string]bool, len(knownAgents))
+		for _, a := range knownAgents {
+			known[a] = true
+		}
+		seen := map[string]bool{}
+		for _, m := range agentTypePattern.FindAllStringSubmatch(content, -1) {
+			if t := m[1]; !known[t] && !seen[t] {
+				seen[t] = true
+				issues = append(issues, fmt.Sprintf("agent_type %q 在 .claw/agents/ 裡不存在——載入會失敗並靜默退回無人設的探路者", t))
+			}
+		}
+	}
+
 	return GateResult{Passed: len(issues) == 0, Issues: issues}
 }
 
@@ -86,8 +155,8 @@ func scanDangerous(text string) []string {
 
 // Promote 把一個提案技能【資料夾】晉升到生效目錄（folder-per-skill）：先 Gate 其中的 SKILL.md，
 // 通過才把整個 <proposedSkillDir> 移到 <activeBaseDir>/<資料夾名>。不過則不移、回傳原因。
-func Promote(proposedSkillDir, activeBaseDir string) (GateResult, error) {
-	res, err := Gate(filepath.Join(proposedSkillDir, SkillFileName))
+func Promote(proposedSkillDir, activeBaseDir, agentsDir string) (GateResult, error) {
+	res, err := Gate(filepath.Join(proposedSkillDir, SkillFileName), agentsDir)
 	if err != nil {
 		return res, err
 	}
