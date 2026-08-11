@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -26,6 +27,14 @@ const (
 	platform       = "telegram"
 	apiBase        = "https://api.telegram.org/bot"
 	pollTimeoutSec = 50 // 長輪詢秒數；client.Timeout 須略大於它
+
+	// Conflict（同一把 token 有第二個 getUpdates 在跑）的處理參數。
+	//
+	// 重啟時舊行程的長輪詢還沒斷，撞上一兩次是【正常的】，所以留一段寬限期照常退避重試；
+	// 超過就不是暫時現象，是真的有兩個實例——那時候繼續每 3 秒重試只有壞處：日誌洗版，
+	// 而且兩邊會互相把對方的長輪詢踢掉，訊息隨機落到其中一邊，行為看起來飄忽不定。
+	conflictGrace   = 5                // 連續幾次才算「真的有兩個」（約 15 秒，夠一次重啟收尾）
+	conflictBackoff = 30 * time.Second // 確認雙跑後改用這個間隔，別再洗版
 )
 
 type TelegramBot struct {
@@ -221,10 +230,15 @@ func telegramHTML(s string) string {
 	return s
 }
 
+// errConflict：Telegram 的 "Conflict: terminated by other getUpdates request"。
+// 獨立成 sentinel 而不是比對字串在呼叫端散落——判斷只留一處（parseUpdates）。
+var errConflict = errors.New("同一把 token 有第二個 getUpdates 在跑")
+
 // Start 阻塞跑長輪詢迴圈，直到 ctx 取消。網路出錯退避重試，不讓整個 bot 倒下。
 func (b *TelegramBot) Start(ctx context.Context) {
 	log.Printf("🚀 cogito-agent Telegram 服務已啟動（getUpdates 長輪詢）")
 	var offset int64
+	conflicts := 0 // 連續 Conflict 次數；收到任何正常回應就歸零
 	for {
 		select {
 		case <-ctx.Done():
@@ -236,10 +250,32 @@ func (b *TelegramBot) Start(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
+			if errors.Is(err, errConflict) {
+				conflicts++
+				if conflicts < conflictGrace {
+					// 寬限期內：當成一般錯誤退避，重啟收尾時的正常現象不需要驚動人。
+					time.Sleep(3 * time.Second)
+					continue
+				}
+				if conflicts == conflictGrace {
+					// 只喊一次，而且要能照著做。原本的「3 秒後重試」會讓人以為是暫時的網路問題。
+					log.Printf("[Telegram] ⛔ 有第二個實例拿同一把 token 在輪詢——重試不會好，"+
+						"而且兩邊會互相搶訊息（隨機落到其中一邊）。\n"+
+						"   找出來：ps ax | grep claw        關掉多的那個：kill <pid>\n"+
+						"   仍以 %s 間隔重試，關掉之後會自動恢復。", conflictBackoff)
+				}
+				time.Sleep(conflictBackoff)
+				continue
+			}
+			conflicts = 0
 			log.Printf("[Telegram] getUpdates 出錯，3 秒後重試: %s\n", b.scrubErr(err))
 			time.Sleep(3 * time.Second)
 			continue
 		}
+		if conflicts >= conflictGrace {
+			log.Printf("[Telegram] ✓ 只剩一個實例了，長輪詢恢復正常。")
+		}
+		conflicts = 0
 		for _, u := range updates {
 			offset = u.UpdateID + 1 // 確認到此，下次只取更新的
 			m := u.Message
@@ -333,6 +369,11 @@ func parseUpdates(r io.Reader) ([]update, error) {
 	// ok:false 是 Telegram API 的錯誤形式（如 token 失效、被限流）。原本靜默當空更新，
 	// 錯誤被吞掉；改回報 error → Start 記日誌並退避重試，而非誤以為「沒新訊息」。
 	if !body.OK {
+		// Conflict 要跟其他 ok=false（token 失效、限流）分開：它不是暫時的網路狀況，
+		// 是「有第二個實例拿同一把 token 在輪詢」，重試一萬次也不會好。Start 據此改變行為。
+		if strings.HasPrefix(body.Description, "Conflict") {
+			return nil, fmt.Errorf("%w: %s", errConflict, body.Description)
+		}
 		return nil, fmt.Errorf("Telegram API 回應 ok=false: %s", body.Description)
 	}
 	return body.Result, nil

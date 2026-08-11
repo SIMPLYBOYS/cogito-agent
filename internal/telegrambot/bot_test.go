@@ -1,6 +1,7 @@
 package telegrambot
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -77,5 +78,31 @@ func TestParseUpdates_NotOK(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Unauthorized") {
 		t.Errorf("error 應帶 API description，got %v", err)
+	}
+}
+
+// Conflict 必須跟其他 ok=false 分開辨識。
+//
+// 為什麼值得一條測試：這兩類的正確處置【相反】。限流／token 失效要照常快速退避重試；
+// Conflict 重試一萬次也不會好——而且重試期間兩個實例會互相把對方的長輪詢踢掉，
+// 訊息隨機落到其中一邊。分不出來，就只能用同一種（錯的）方式對待它們。
+func TestParseUpdates_ConflictIsDistinct(t *testing.T) {
+	const desc = "Conflict: terminated by other getUpdates request; " +
+		"make sure that only one bot instance is running"
+	_, err := parseUpdates(strings.NewReader(`{"ok":false,"description":"` + desc + `"}`))
+	if err == nil {
+		t.Fatal("ok=false 應回錯")
+	}
+	if !errors.Is(err, errConflict) {
+		t.Errorf("Conflict 應可用 errors.Is 認出來，實際：%v", err)
+	}
+	if !strings.Contains(err.Error(), "only one bot instance") {
+		t.Errorf("原始描述要保留（人要看得懂是什麼事），實際：%v", err)
+	}
+
+	// 其他 ok=false 不可被誤判成 Conflict，否則限流會被拖成 30 秒一次。
+	_, err = parseUpdates(strings.NewReader(`{"ok":false,"description":"Too Many Requests: retry after 5"}`))
+	if errors.Is(err, errConflict) {
+		t.Errorf("限流被誤判成 Conflict：%v", err)
 	}
 }
