@@ -1,6 +1,7 @@
 package evolve
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -423,5 +424,32 @@ func TestConflictHits(t *testing.T) {
 		if strings.Contains(string(u), `"hits": 1`) {
 			t.Error("衝突偵測記帳了——那會污染索引排序與淘汰決策")
 		}
+	}
+}
+
+// 反思要看得到【既有記憶】，否則每輪都在真空裡想事情。
+// 實測：31 條待審提案裡有 27 條落在重複叢集——同一個意思用不同的詞寫了九遍。
+// 字面去重擋不住（那 27 條裡只有 6 條字面夠像），得讓模型自己讀懂「這是同一件事」。
+func TestReflect_PromptCarriesExistingMemory(t *testing.T) {
+	root := t.TempDir()
+	memDir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: m1\ndescription: 派三人並行評審再收斂\n---\n正文"
+	if err := os.WriteFile(filepath.Join(memDir, "mem-1.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cp := &capturingProvider{content: `{"learnings": [], "user_facts": []}`}
+	if _, err := NewMemorySynthesizer(cp, root).Reflect(context.Background(), "任務", nil); err != nil {
+		t.Fatal(err)
+	}
+	sent := cp.msgs[len(cp.msgs)-1].Content
+	if !strings.Contains(sent, "派三人並行評審再收斂") {
+		t.Errorf("既有記憶沒進 prompt：\n%s", sent)
+	}
+	// 放 user 不放 system：記憶庫每次都不一樣，塞進 system 那段就再也快取不到
+	if strings.Contains(cp.msgs[0].Content, "派三人並行評審再收斂") {
+		t.Error("既有記憶跑進 system prompt 了，會打掉快取")
 	}
 }

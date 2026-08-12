@@ -60,15 +60,47 @@ const memoryReflectSystemPrompt = `你是專案長期記憶的維護者。看完
   那不是記憶，是重複，而且會過時。要記的是「讀完程式碼也看不出來」的那部分：為什麼這樣選、
   哪裡踩過坑、什麼做法被否決過。
 - 【寧缺勿濫】：沒有真正耐久的東西就兩個都給空陣列。少一條沒有損失，多一條錯的會誤導未來每一次任務。
+- 【已經記過的不要再記一次】：user 訊息會附上目前記憶庫的全部內容。同一件事換個說法寫第二遍
+  不會讓它更真，只會讓人多審一條、讓索引多佔一行。判準是【意思】不是字面——「派三人並行評審」
+  與「用三角視角收斂決策」是同一條。要補充既有那條缺的細節時，也不要新開一條。
 
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
 {"learnings": ["<一句話>"], "user_facts": ["<一句話>"]}；沒有的那項給空陣列。`
 
+// existingMemory 把目前記憶庫壓成一句一行，餵給反思當「已經知道的事」。
+//
+// 【為何需要】反思本來只看得到「任務 + 軌跡」，等於每一輪都在真空裡想事情。實測：31 條
+// 待審提案裡有 27 條落在重複叢集——同一個意思用不同的詞寫了九遍（「派三人並行評審」／
+// 「三角視角收斂」／「多角色非同步評審」…）。那不是模型笨，是我們沒給它翻舊帳的機會。
+//
+// 字面去重擋不住這個：那 27 條裡只有 6 條字面夠像。要靠模型自己讀懂「這是同一件事」，
+// 就得讓它看得到既有的內容。
+//
+// 長度是有界的——Prune 把記憶庫壓在 maxMemoryRecords 以內，200 條 ≈ 4500 token，
+// 用便宜模型跑一次任務不到一分錢。比事後一條條審便宜得多。
+func existingMemory(root string) string {
+	var b strings.Builder
+	for _, r := range ctxpkg.NewMemoryLoader(root).List() {
+		d := oneLine(r.Description)
+		if d == "" {
+			d = oneLine(r.Name)
+		}
+		if d != "" {
+			b.WriteString("- " + d + "\n")
+		}
+	}
+	return b.String()
+}
+
 // Reflect 反思一段軌跡，把新的耐久學習追加到提案記憶暫存檔。回傳實際追加的條目（去重/安全過濾後）。
 func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, history []schema.Message) ([]string, error) {
+	user := fmt.Sprintf("任務：\n%s\n\n軌跡：\n%s", taskPrompt, renderTranscript(history, 6000))
+	if have := existingMemory(m.root); have != "" {
+		user += "\n\n目前記憶庫已經有這些——同一件事不要再記一次：\n" + have
+	}
 	msgs := []schema.Message{
 		{Role: schema.RoleSystem, Content: memoryReflectSystemPrompt},
-		{Role: schema.RoleUser, Content: fmt.Sprintf("任務：\n%s\n\n軌跡：\n%s", taskPrompt, renderTranscript(history, 6000))},
+		{Role: schema.RoleUser, Content: user},
 	}
 
 	resp, err := m.provider.Generate(ctx, msgs, nil)
@@ -106,10 +138,15 @@ const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。�
 // ReflectFailure 在【真實互動失敗】後反思（live Reflexion）：萃取一條教訓，經同一去重+安全管道
 // 追加到提案記憶。回傳實際追加的（0 或 1 條）。教訓仍是提案，須 apply 放行為記憶記錄才生效。
 func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt string, history []schema.Message, failureMsg string) ([]string, error) {
+	// 失敗反思走同一條路：它也是往同一個記憶庫寫，不給它看既有的就會生出同義的第二條。
+	user := fmt.Sprintf("任務：\n%s\n\n執行軌跡：\n%s\n\n失敗原因：\n%s",
+		taskPrompt, renderTranscript(history, 6000), oneLine(failureMsg))
+	if have := existingMemory(m.root); have != "" {
+		user += "\n\n目前記憶庫已經有這些——同一件事不要再記一次：\n" + have
+	}
 	msgs := []schema.Message{
 		{Role: schema.RoleSystem, Content: failureReflectSystemPrompt},
-		{Role: schema.RoleUser, Content: fmt.Sprintf("任務：\n%s\n\n執行軌跡：\n%s\n\n失敗原因：\n%s",
-			taskPrompt, renderTranscript(history, 6000), oneLine(failureMsg))},
+		{Role: schema.RoleUser, Content: user},
 	}
 	resp, err := m.provider.Generate(ctx, msgs, nil)
 	if err != nil {
