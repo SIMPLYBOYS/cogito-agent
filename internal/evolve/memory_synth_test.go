@@ -387,3 +387,41 @@ func TestAutoApplyAdditions_SkipsDestructive(t *testing.T) {
 		t.Errorf("已放行的新增不該留在提案檔：\n%s", rest)
 	}
 }
+
+// 呈現提案前先跑衝突偵測：一條一條審的真正成本不在判斷，在【搜尋】——157 條的時候
+// 「有沒有相關的」根本想不起來，於是提案就堆著不審。
+func TestConflictHits(t *testing.T) {
+	root := t.TempDir()
+	memDir := filepath.Join(root, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(slug, desc string) {
+		body := "---\nname: " + slug + "\ndescription: " + desc + "\n---\n" + desc
+		if err := os.WriteFile(filepath.Join(memDir, slug+".md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("mem-pnpm", "本專案用 pnpm 而非 npm 裝依賴")
+	write("mem-port", "起本地 server 前先查埠是否被占")
+
+	hits := ConflictHits(root, ProposedMemoryEntry{Op: OpAdd, Learning: "裝依賴一律用 pnpm，不要用 npm"})
+	if len(hits) == 0 || hits[0].Name != "mem-pnpm" {
+		t.Fatalf("該標出 pnpm 那條，got %+v", hits)
+	}
+
+	// UPDATE/DELETE 不必猜：它們指名了 Target，那條就是受影響的條目
+	hits = ConflictHits(root, ProposedMemoryEntry{Op: OpUpdate, Target: "mem-port", Learning: "隨便"})
+	if len(hits) != 1 || hits[0].Name != "mem-port" {
+		t.Fatalf("指名 Target 時該直接回那一條，got %+v", hits)
+	}
+
+	// ⚠ 掃描【不是】使用：記進帳本會把一大批記憶標成「剛用過」，
+	// 而索引的 LRU 排序與 Prune 的淘汰都靠那個訊號——污染了會讓冷門記憶賴著不走。
+	if _, err := os.Stat(filepath.Join(root, ".claw", "memory-usage.json")); err == nil {
+		u, _ := os.ReadFile(filepath.Join(root, ".claw", "memory-usage.json"))
+		if strings.Contains(string(u), `"hits": 1`) {
+			t.Error("衝突偵測記帳了——那會污染索引排序與淘汰決策")
+		}
+	}
+}

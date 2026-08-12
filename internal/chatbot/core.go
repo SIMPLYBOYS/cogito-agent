@@ -890,7 +890,7 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
 			return true
 		}
-		SendMessage(convID, renderProposedList(entries))
+		SendMessage(convID, renderProposedList(dir, entries))
 	case "reconcile":
 		if c.reconcile == nil {
 			SendMessage(convID, "ℹ️ 記憶整併未啟用（需開 `COGITO_MEMORY_SYNTH=1`）。")
@@ -958,10 +958,10 @@ func remainingHint(rest []evolve.ProposedMemoryEntry) string {
 
 // renderProposedList 把提案清單畫成聊天訊息。破壞性的那幾條要看得出【會動到什麼】——
 // 審的人得知道按下去會發生什麼，光看一句「新值」是審不出來的。
-func renderProposedList(entries []evolve.ProposedMemoryEntry) string {
+func renderProposedList(root string, entries []evolve.ProposedMemoryEntry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "🧠 提案記憶 %d 條（`apply memory <編號>` 逐條放行／`apply memory` 全部）：\n", len(entries))
-	destructive := 0
+	destructive, flagged := 0, 0
 	for _, e := range entries {
 		switch e.Op {
 		case evolve.OpUpdate:
@@ -975,11 +975,32 @@ func renderProposedList(entries []evolve.ProposedMemoryEntry) string {
 		default:
 			fmt.Fprintf(&b, "%d. [%s] %s\n", e.N, e.Kind, e.Learning)
 		}
+		// 呈現前先跑衝突偵測：把疑似相關的既有記憶標出來。
+		// 一條一條審的真正成本不在判斷，在【搜尋】——157 條的時候「有沒有相關的」根本想不起來，
+		// 於是提案就堆著不審。這幾行把要看的從 157 條降到 2 條，人只做判斷。
+		for _, h := range evolve.ConflictHits(root, e) {
+			flagged++
+			fmt.Fprintf(&b, "     ⚠ 疑似相關：%s\n", oneLineHit(h.Description))
+		}
+	}
+	if flagged > 0 {
+		fmt.Fprintf(&b, "\n⚠ 標了 %d 處【疑似相關】的既有記憶——只是相似，不代表衝突；"+
+			"是重複、是矛盾、還是講不同面向，要你看了才知道。\n", flagged)
 	}
 	if destructive > 0 {
 		fmt.Fprintf(&b, "\n⚠️ 其中 %d 條會【動到既有記憶】。刪除是歸檔（`.claw/memory-archive/`，可復原）。\n", destructive)
 	}
 	return b.String()
+}
+
+// oneLineHit 把既有記憶壓成一行。標記的目的是「讓人知道去看哪幾條」，不是把原文搬過來——
+// 貼整段的話清單本身就變成要捲的東西，跟沒標一樣。
+func oneLineHit(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if r := []rune(s); len(r) > 46 {
+		return string(r[:46]) + "…"
+	}
+	return s
 }
 
 // parseMemoryCommand 解析記憶審核口令：

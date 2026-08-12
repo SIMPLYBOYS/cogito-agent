@@ -405,11 +405,48 @@ func renderUserProfile(recs []MemoryRecord) string {
 
 // Recall 依關鍵字/標籤對記憶評分，回傳最相關的前 k 筆。零依賴的關鍵字檢索。
 // ponytail: 關鍵字/CJK bigram 評分；若精度不夠再換 embedding 餘弦（介面不變、只動 score/tokenize）。
+// Related 找出跟這段文字最相關的記憶，但【不記帳】。
+//
+// 跟 Recall 的差別只有這個，而這個差別很重要：Recall 會 recordHits()，因為那代表
+// 「agent 真的用到了這條」。掃描類的用途（例如審核提案前先找出疑似衝突的條目）一次會
+// 碰一大批記憶，記進去等於把它們全標成「剛用過」——索引的 LRU 排序與 Prune 的淘汰
+// 都靠那個訊號，污染了會讓冷門記憶賴著不走、常用的反而被擠掉。
+// relatedFloor 是「疑似相關」的門檻：分數要除以查詢詞數（長句本來就會累積較高的原始分），
+// 高過這個值才算數。
+//
+// 值是量出來的，不是猜的。用真實資料（157 條記憶 × 31 條提案）跑分布：
+// 每條提案的最高分中位 0.88、最高 2.33，第二名中位 0.71。中文 bigram 在上百條裡幾乎
+// 總有重疊，所以不設門檻的話【每一條】提案都會被標紅——那跟沒標一樣，審核成本一點都沒降。
+// 1.2 明顯高於中位，留下的是真的看起來像同一件事的那些。
+const relatedFloor = 1.2
+
+// Related 找出跟這段文字最相關的記憶，但【不記帳】，且只回夠像的。
+func (m *MemoryLoader) Related(query string, k int) []MemoryRecord {
+	terms := tokenize(query)
+	if len(terms) == 0 {
+		return nil
+	}
+	out, _ := m.rank(query, k)
+	kept := out[:0]
+	for _, r := range out {
+		if float64(scoreRecord(r, terms))/float64(len(terms)) >= relatedFloor {
+			kept = append(kept, r)
+		}
+	}
+	return kept
+}
+
 func (m *MemoryLoader) Recall(query string, k int) []MemoryRecord {
+	out, paths := m.rank(query, k)
+	m.recordHits(paths) // 命中即記帳（最近使用 + 命中次數），讓常用記憶留在索引、冷門的被淘汰
+	return out
+}
+
+func (m *MemoryLoader) rank(query string, k int) ([]MemoryRecord, []string) {
 	recs := m.loadAll()
 	terms := tokenize(query)
 	if len(recs) == 0 || len(terms) == 0 {
-		return nil
+		return nil, nil
 	}
 	type scored struct {
 		rec   MemoryRecord
@@ -431,8 +468,7 @@ func (m *MemoryLoader) Recall(query string, k int) []MemoryRecord {
 		out[i] = s.rec
 		hits[i] = s.rec.Path
 	}
-	m.recordHits(hits) // 命中即記帳（最近使用 + 命中次數），讓常用記憶留在索引、冷門的被淘汰
-	return out
+	return out, hits
 }
 
 // Prune 把超過 keep 上限的「最久未用」記錄歸檔到 .claw/memory-archive/（可復原，非刪除——記憶操作

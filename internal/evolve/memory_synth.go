@@ -228,6 +228,33 @@ func ListProposedMemory(root string) []ProposedMemoryEntry {
 	return parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName)))
 }
 
+// maxConflictHits 是每條提案最多列幾條疑似相關的既有記憶。列太多等於沒標——
+// 審核的成本本來就是「要看幾條」，把它從 157 降到 2 才是重點。
+const maxConflictHits = 2
+
+// ConflictHits 找出跟這條提案【最可能相關】的既有記憶。
+//
+// 為什麼要有：一條一條審的真正成本不在判斷，在【搜尋】——要先想起記憶庫裡有沒有相關的、
+// 再去翻。157 條的時候那件事做不了，於是提案就堆著不審。呈現前先跑一次，人只做判斷。
+//
+// ⚠ 只標【疑似】。純文字相似度分不出「重複」與「矛盾」——那要讀懂兩句話的意思。
+// 但它分得出「這條跟哪幾條有關」，而那正是省下來的部分。
+//
+// UPDATE/DELETE 不必猜：它們本來就指名了 Target，那條就是受影響的條目。
+func ConflictHits(root string, e ProposedMemoryEntry) []ctxpkg.MemoryRecord {
+	loader := ctxpkg.NewMemoryLoader(root)
+	if e.Target != "" {
+		for _, r := range loader.List() {
+			if strings.TrimSuffix(filepath.Base(r.Path), ".md") == e.Target {
+				return []ctxpkg.MemoryRecord{r}
+			}
+		}
+		return nil
+	}
+	// Related 而非 Recall：掃描不是「用到」，記進帳本會污染索引排序與淘汰決策。
+	return loader.Related(e.Learning, maxConflictHits)
+}
+
 // parseProposedMemory 解析提案檔。文法見 docs/memory-reconcile-format.md：
 //
 //	## [kind] 來自任務「…」（ts）     ← 分組標頭

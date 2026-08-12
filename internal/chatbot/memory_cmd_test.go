@@ -58,7 +58,7 @@ func TestParseMemoryCommand_Reconcile(t *testing.T) {
 
 // 破壞性提案在清單裡要看得出【會動到什麼】——光一句「新值」是審不出來的。
 func TestRenderProposedList_ShowsDestructiveDiff(t *testing.T) {
-	out := renderProposedList([]evolve.ProposedMemoryEntry{
+	out := renderProposedList(t.TempDir(), []evolve.ProposedMemoryEntry{
 		{N: 1, Kind: "慣例", Op: evolve.OpAdd, Learning: "一般事實"},
 		{N: 2, Kind: "整併", Op: evolve.OpUpdate, Target: "mem-aa", Old: "舊的說法", Learning: "新的說法", Why: "被推翻"},
 		{N: 3, Kind: "整併", Op: evolve.OpDelete, Target: "mem-bb", Old: "過時內容", Why: "不再適用"},
@@ -77,7 +77,7 @@ func TestRenderProposedList_ShowsDestructiveDiff(t *testing.T) {
 
 // 純 ADD 的清單不該冒出破壞性警告——那會讓警示失去意義。
 func TestRenderProposedList_NoWarningWhenAllAdd(t *testing.T) {
-	out := renderProposedList([]evolve.ProposedMemoryEntry{
+	out := renderProposedList(t.TempDir(), []evolve.ProposedMemoryEntry{
 		{N: 1, Kind: "慣例", Op: evolve.OpAdd, Learning: "甲"},
 		{N: 2, Kind: "慣例", Learning: "乙"}, // Op 空＝舊格式，等同 add
 	})
