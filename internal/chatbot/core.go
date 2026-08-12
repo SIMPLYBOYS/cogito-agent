@@ -885,6 +885,12 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 	dir := c.memoryDir(convID)
 	switch verb {
 	case "list":
+		// 死線在這裡生效。沒有背景排程——列清單本來就是每次審核的第一步，
+		// 掛在這裡就不會有「忘了跑」的那種過期垃圾。
+		if gone := evolve.ExpireDeferred(dir); len(gone) > 0 {
+			SendMessage(convID, fmt.Sprintf("⏳ %d 條暫緩到期，已自動降為否決：\n・%s",
+				len(gone), strings.Join(gone, "\n・")))
+		}
 		entries := evolve.ListProposedMemory(dir)
 		if len(entries) == 0 {
 			SendMessage(convID, "ℹ️ 目前沒有提案記憶。")
@@ -910,6 +916,32 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 					len(props), strings.Join(props, "\n・")))
 			}
 		}()
+	case "defer":
+		entries := evolve.ListProposedMemory(dir)
+		var target *evolve.ProposedMemoryEntry
+		for i := range entries {
+			if entries[i].N == nums[0] {
+				target = &entries[i]
+			}
+		}
+		if target == nil {
+			SendMessage(convID, fmt.Sprintf("找不到第 %d 條提案。", nums[0]))
+			return true
+		}
+		days, why := evolve.DefaultDeferDays, ""
+		if f := strings.Fields(text); len(f) > 3 {
+			rest := f[3:]
+			if d, err := strconv.Atoi(strings.TrimSuffix(rest[0], "d")); err == nil && d > 0 {
+				days, rest = d, rest[1:]
+			}
+			why = strings.Join(rest, " ")
+		}
+		if err := evolve.DeferProposal(dir, *target, days, why); err != nil {
+			SendMessage(convID, "⚠️ "+err.Error())
+			return true
+		}
+		SendMessage(convID, fmt.Sprintf("⏳ 第 %d 條暫緩 %d 天，到期自動降為否決。原因：%s",
+			nums[0], days, why))
 	case "apply", "reject":
 		// 「根本沒提案」與「指定編號不存在」是兩件事，訊息要分開——後者多半是打錯編號。
 		if len(evolve.ListProposedMemory(dir)) == 0 {
@@ -978,6 +1010,9 @@ func renderProposedList(root string, entries []evolve.ProposedMemoryEntry) strin
 		// 呈現前先跑衝突偵測：把疑似相關的既有記憶標出來。
 		// 一條一條審的真正成本不在判斷，在【搜尋】——157 條的時候「有沒有相關的」根本想不起來，
 		// 於是提案就堆著不審。這幾行把要看的從 157 條降到 2 條，人只做判斷。
+		if note := evolve.DeferredNote(root, e); note != "" {
+			fmt.Fprintf(&b, "     ⏳ %s\n", note)
+		}
 		for _, h := range evolve.ConflictHits(root, e) {
 			flagged++
 			fmt.Fprintf(&b, "     ⚠ 疑似相關：%s\n", oneLineHit(h.Description))
@@ -1031,6 +1066,17 @@ func parseMemoryCommand(text string) (verb string, nums []int, ok bool) {
 		verb = "apply"
 	case (fields[0] == "reject" || fields[0] == "discard") && fields[1] == "memory":
 		verb = "reject"
+	case (fields[0] == "defer" || fields[0] == "暫緩") && fields[1] == "memory":
+		// 暫緩帶自由文字的原因，不能走下面「尾綴全是數字」那條路——那會把原因當成看不懂
+		// 的尾綴而整句不消費。這裡只認編號，原因交給呼叫端從原文取。
+		if len(fields) < 3 {
+			return "", nil, false
+		}
+		n, err := strconv.Atoi(fields[2])
+		if err != nil || n < 1 {
+			return "", nil, false
+		}
+		return "defer", []int{n}, true
 	default:
 		return "", nil, false
 	}
