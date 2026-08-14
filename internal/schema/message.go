@@ -16,6 +16,9 @@ type Usage struct {
 	CompletionTokens    int `json:"completion_tokens"`     // 輸出 Token 數
 	CacheReadTokens     int `json:"cache_read_tokens"`     // 命中 prompt cache 的輸入 Token（約 0.1x 計費）
 	CacheCreationTokens int `json:"cache_creation_tokens"` // 寫入 prompt cache 的輸入 Token（約 1.25x 計費）
+	// LatencyMS 是這次 API 呼叫的耗時。CostTracker 本來就量了它，但只印進 log 就丟掉——
+	// 於是「哪一輪突然變慢」在任何介面上都查不到。omitempty：舊 session 沒有這個欄位，讀得動。
+	LatencyMS int64 `json:"latency_ms,omitempty"`
 }
 
 type Message struct {
@@ -25,6 +28,13 @@ type Message struct {
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 	// 若這是 Assistant 回覆，存放本次呼叫的 Token 消耗（請求時不發送）
 	Usage *Usage `json:"usage,omitempty"`
+	// TS 是這則訊息進入歷史的時間（RFC3339）。沒有它就【做不出任何時間序列】——
+	// 成本趨勢、延遲分佈、「哪一輪開始變慢」全都要先有時間軸。由 Session.Append 統一蓋章。
+	//
+	// 加在這裡對 API 請求無影響：兩家 provider 都是把 schema.Message【轉換】成自己的型別
+	// （buildAnthropicMessages / toOpenAIMessages），不是直接序列化這個結構，所以
+	// prompt cache 的前綴不會因為多一個欄位而失效。
+	TS string `json:"ts,omitempty"`
 }
 
 type ToolCall struct {

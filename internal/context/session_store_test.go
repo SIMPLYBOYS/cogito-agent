@@ -164,3 +164,28 @@ func TestGetWorkingMemory_StripsLeadingOrphanToolResult_FullHistory(t *testing.T
 		t.Errorf("剝掉孤兒後首條應為『續下一步』，得到 %q", got[0].Content)
 	}
 }
+
+// Append 蓋時間戳，但【只蓋沒有的】。
+//
+// 覆寫既有 TS 會把整段從磁碟復原的歷史壓成「剛剛」——時間序列全毀，而且毀得很安靜：
+// 資料看起來完整，只是每一則都變成同一秒。這條測試守的就是那個 if。
+func TestSession_AppendStampsTSOnlyWhenMissing(t *testing.T) {
+	s := &Session{ID: "ts-test"}
+	const old = "2020-01-02T03:04:05Z"
+
+	s.Append(
+		schema.Message{Role: schema.RoleUser, Content: "新的"},
+		schema.Message{Role: schema.RoleAssistant, Content: "從磁碟來的", TS: old},
+	)
+
+	h := s.history
+	if len(h) != 2 {
+		t.Fatalf("應有 2 則，實際 %d", len(h))
+	}
+	if h[0].TS == "" {
+		t.Error("新訊息沒有被蓋時間戳——沒有它就做不出任何時間序列")
+	}
+	if h[1].TS != old {
+		t.Errorf("既有時間戳被覆寫成 %q（原本 %q）——復原的歷史會被壓成同一秒", h[1].TS, old)
+	}
+}

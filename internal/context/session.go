@@ -124,6 +124,13 @@ func (s *Session) persistLocked() {
 func (s *Session) Append(msgs ...schema.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now().Format(time.RFC3339)
+	for i := range msgs {
+		// 只蓋沒有的：從磁碟復原的歷史已經帶著原本的時間，重蓋會把整段歷史壓成「剛剛」。
+		if msgs[i].TS == "" {
+			msgs[i].TS = now
+		}
+	}
 	s.history = append(s.history, msgs...)
 	s.UpdatedAt = time.Now()
 	s.persistLocked()

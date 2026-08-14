@@ -131,6 +131,8 @@ func (t *CostTracker) GenerateStream(ctx context.Context, msgs []schema.Message,
 // account 對一次成功回應計價、記錄 log 與 session 用量。Generate 與 GenerateStream 共用。
 func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 	if respMsg.Usage != nil {
+		// 先把耗時寫進 Usage 再做其他事：它跟這則訊息一起落盤，log 印完就沒了。
+		respMsg.Usage.LatencyMS = latency.Milliseconds()
 		promptTokens := respMsg.Usage.PromptTokens
 		completionTokens := respMsg.Usage.CompletionTokens
 		cacheRead := respMsg.Usage.CacheReadTokens

@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"testing"
+	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
@@ -78,4 +79,27 @@ func TestCostTracker_UnknownModelUsesFallbackPrice(t *testing.T) {
 	if sess.TotalPromptTokens != 100 {
 		t.Errorf("token 仍應累計，got %d", sess.TotalPromptTokens)
 	}
+}
+
+// 耗時要跟著訊息落盤，不能只印進 log。
+//
+// 為什麼值得一條測試：CostTracker 一直都量了耗時，但只 log.Printf 就丟掉。於是
+// 「哪一輪突然變慢」在面板、replay、session 檔上全都查不到——資料量得到卻救不回來，
+// 是最容易長期沒人發現的那種缺失（沒有人會為「看不到的東西」開 bug）。
+func TestCostTracker_LatencyPersistedInUsage(t *testing.T) {
+	tr := &CostTracker{modelName: "claude-opus-4-8"} // session 為 nil：account 有防護
+	msg := &schema.Message{Role: schema.RoleAssistant,
+		Usage: &schema.Usage{PromptTokens: 10, CompletionTokens: 5}}
+
+	tr.account(msg, 1500*time.Millisecond)
+
+	if msg.Usage.LatencyMS != 1500 {
+		t.Errorf("耗時應寫進 Usage（1500ms），實際 %d", msg.Usage.LatencyMS)
+	}
+}
+
+// 沒有 Usage 的回應不能讓 account 崩掉（provider 沒回 usage 是既有的合法情況）。
+func TestCostTracker_NoUsageDoesNotPanic(t *testing.T) {
+	tr := &CostTracker{modelName: "claude-opus-4-8"}
+	tr.account(&schema.Message{Role: schema.RoleAssistant}, time.Second)
 }

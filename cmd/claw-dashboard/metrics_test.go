@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 func TestPlatformOf(t *testing.T) {
@@ -58,5 +59,47 @@ func TestMetrics_Aggregates(t *testing.T) {
 	// Slack 花費(1.5) > Telegram(0.25)，Slack 應排在前
 	if strings.Index(body, "Slack") > strings.Index(body, "Telegram") {
 		t.Error("平台應按花費新→舊排（Slack 在 Telegram 前）")
+	}
+}
+
+// 快取與耗時要從逐則 Usage 彙總，不是從 snapshot 的總計欄位。
+//
+// 這一條同時守著本次改動的價值主張：快取 token 一直都有落盤，只是沒人加總——所以它對
+// 【既有】session 就該立刻有數字，不需要等新資料。若哪天有人把這段迴圈「優化」成只讀
+// snapshot 總計，畫面會安靜地變成 0，而沒有任何東西會壞掉。
+func TestMetrics_AggregatesCacheAndLatencyFromHistory(t *testing.T) {
+	dir := t.TempDir()
+	st, err := ctxpkg.NewFileSessionStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = st.Save(&ctxpkg.SessionSnapshot{
+		ID: "telegram:1", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+		TotalPromptTokens: 100, TotalCompletionTokens: 20, TotalCostUSD: 0.5,
+		History: []schema.Message{
+			{Role: schema.RoleAssistant, Usage: &schema.Usage{
+				PromptTokens: 60, CacheReadTokens: 900, CacheCreationTokens: 40, LatencyMS: 1000}},
+			{Role: schema.RoleAssistant, Usage: &schema.Usage{
+				PromptTokens: 40, CacheReadTokens: 100, CacheCreationTokens: 10, LatencyMS: 3000}},
+			{Role: schema.RoleUser, Content: "沒有 usage 的訊息不能讓彙總崩掉"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newServer(st, dir, t.TempDir(), nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		"1000", // 快取讀總量 900+100
+		"50",   // 快取寫總量 40+10
+		"90%",  // 命中率 1000/(100+1000)
+		"3000", // p95 耗時
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics 頁少了 %q——快取/耗時沒有從 history 彙總", want)
+		}
 	}
 }
