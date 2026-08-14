@@ -134,7 +134,10 @@ func GateContent(content string, knownAgents []string) GateResult {
 		for _, m := range agentTypePattern.FindAllStringSubmatch(content, -1) {
 			if t := m[1]; !known[t] && !seen[t] {
 				seen[t] = true
-				issues = append(issues, fmt.Sprintf("agent_type %q 在 .claw/agents/ 裡不存在——載入會失敗並靜默退回無人設的探路者", t))
+				// 訊息要跟實際行為一致：subagent.go 現在對載入失敗回真錯誤（IsError），
+				// 不再靜默退回探路者。所以代價不是「換了個人回答」，是這一步直接失敗、
+				// orchestrator 收到錯誤觀察——晉升前擋下來仍然划算，但理由不同了。
+				issues = append(issues, fmt.Sprintf("agent_type %q 在 .claw/agents/ 裡不存在——委派會直接失敗（回 error），這一步的產出等於沒有", t))
 			}
 		}
 	}

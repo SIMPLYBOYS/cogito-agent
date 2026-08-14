@@ -74,7 +74,7 @@ func TestGate_RolePlayRejected(t *testing.T) {
 }
 
 // 也是真實案例（parallel-expert-eval-and-merge）：它派 cto/backend/devops，而實際的人設檔叫
-// 老徐/阿哲/阿海。三個都載入不到，會靜默退回無人設的探路者——報告照回，只是回答的人不是你以為的。
+// 老徐/阿哲/阿海。三個都載入不到，委派會直接失敗（subagent.go 對載入失敗回真錯誤），整批產出等於沒有。
 func TestGateContent_UnknownAgentTypeRejected(t *testing.T) {
 	body := "---\nname: panel\ndescription: 多方評估\n---\n" +
 		`spawn_subagent {"agent_type":"cto","background":true}` + "\n" +
