@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -573,6 +574,7 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"`memory list` — 列出提案記憶（含編號）\n" +
 	"`apply memory` / `reject memory` — 放行 / 丟棄提案的長期記憶（**全部**）\n" +
 	"`apply memory <編號>` / `reject memory <編號>` — 逐條放行 / 丟棄（可多個，如 `apply memory 1 3`）\n" +
+	"`undo memory [編號]` — 列出 / 撤回 72 小時窗內自動放行的記憶\n" +
 	"`apply edges` / `reject edges` — 放行 / 丟棄提案的知識圖譜關係\n" +
 	"`apply config` / `reject config` — 套用 / 丟棄調參提案\n\n" +
 	"**說明**\n" +
@@ -916,6 +918,32 @@ func (c *Core) tryMemoryCommand(convID, text string) bool {
 					len(props), strings.Join(props, "\n・")))
 			}
 		}()
+	case "undo":
+		live := evolve.AutopassPending(dir)
+		if len(nums) == 0 {
+			if len(live) == 0 {
+				SendMessage(convID, "ℹ️ 撤回窗內沒有自動放行的記憶（窗長 72 小時，過窗即定案）。")
+				return true
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "⚡ 撤回窗內的自動放行 %d 條（`undo memory <編號>` 撤回）：\n", len(live))
+			for i, e := range live {
+				left := (evolve.AutopassWindow - time.Since(e.At)).Round(time.Hour)
+				fmt.Fprintf(&b, "%d. %s（剩 %s）\n", i+1, e.Desc, left)
+			}
+			SendMessage(convID, b.String())
+			return true
+		}
+		// 由大到小撤：撤掉一筆後清單位移，照原編號從小撤起會撤錯人
+		sort.Sort(sort.Reverse(sort.IntSlice(nums)))
+		for _, n := range nums {
+			desc, err := evolve.RevokeAutopass(dir, n)
+			if err != nil {
+				SendMessage(convID, "⚠️ "+err.Error())
+				return true
+			}
+			SendMessage(convID, fmt.Sprintf("↩️ 已撤回：%s（歸檔到 .claw/memory-archive/，可復原）", desc))
+		}
 	case "defer":
 		entries := evolve.ListProposedMemory(dir)
 		var target *evolve.ProposedMemoryEntry
@@ -1066,6 +1094,8 @@ func parseMemoryCommand(text string) (verb string, nums []int, ok bool) {
 		verb = "apply"
 	case (fields[0] == "reject" || fields[0] == "discard") && fields[1] == "memory":
 		verb = "reject"
+	case (fields[0] == "undo" || fields[0] == "撤回") && fields[1] == "memory":
+		verb = "undo" // 撤回自動放行（72h 窗內）；無編號＝列清單，尾綴數字共用下面那條路
 	case (fields[0] == "defer" || fields[0] == "暫緩") && fields[1] == "memory":
 		// 暫緩帶自由文字的原因，不能走下面「尾綴全是數字」那條路——那會把原因當成看不懂
 		// 的尾綴而整句不消費。這裡只認編號，原因交給呼叫端從原文取。

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -124,9 +123,45 @@ func (m *MemorySynthesizer) Reflect(ctx context.Context, taskPrompt string, hist
 	facts, err := m.proposeLearnings(taskPrompt, out.UserFacts, ctxpkg.UserProfileTag)
 	all := append(added, facts...)
 	if err == nil {
-		_, err = AutoApplyAdditions(m.root) // 啟用時就地放行，不等人工 apply（見該函式說明）
+		_, err = AutoApplyAdditions(m.root, m.styleJudge(ctx)) // 四判準全中才就地放行（見 memory_autopass.go）
 	}
 	return all, err
+}
+
+// styleJudgeSystemPrompt：判準①的分級員。問的是「呈現方式 vs 決策行為」——
+// 語言、格式、命名風格、排版屬前者；任何會改變 agent 面對任務時的判斷、步驟、工具選擇的
+// 都屬後者。拿捏不準一律 false：自動放行的錯誤成本是「記了一條該人審的」，人審的成本只是
+// 多看一眼——不對稱，往嚴的那邊倒。
+const styleJudgeSystemPrompt = `你是記憶提案的分級員。對每一條提案回答：它是否【純風格/表達/格式偏好】——
+只影響輸出的呈現方式（語言、格式、命名風格、排版、稱呼），完全不改變 agent 面對任務時的判斷、
+步驟或工具選擇？會改變做事方式的（「先驗證再查」「部署前跑測試」「用某工具查某資料」）一律 false。
+拿捏不準就 false。
+只輸出一個 JSON 物件：{"style_only": [true/false, ...]}，陣列長度與提案數相同、順序一致。`
+
+// styleJudge 包一個給 AutoApplyAdditions 的判準①評審。任何錯誤（呼叫失敗、JSON 壞掉、
+// 長度不符）都回 nil＝全部不過——fail-closed，寧可留給人審。
+func (m *MemorySynthesizer) styleJudge(ctx context.Context) StyleJudge {
+	return func(learnings []string) []bool {
+		var b strings.Builder
+		for i, l := range learnings {
+			fmt.Fprintf(&b, "%d. %s\n", i+1, oneLine(l))
+		}
+		resp, err := m.provider.Generate(ctx, []schema.Message{
+			{Role: schema.RoleSystem, Content: styleJudgeSystemPrompt},
+			{Role: schema.RoleUser, Content: b.String()},
+		}, nil)
+		if err != nil {
+			return nil
+		}
+		var out struct {
+			StyleOnly []bool `json:"style_only"`
+		}
+		if json.Unmarshal([]byte(extractJSON(resp.Content)), &out) != nil ||
+			len(out.StyleOnly) != len(learnings) {
+			return nil
+		}
+		return out.StyleOnly
+	}
 }
 
 const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。一個 agent 在與使用者的互動中嘗試完成任務但【失敗了】
@@ -163,7 +198,7 @@ func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt strin
 	}
 	added, err := m.proposeLearnings(taskPrompt, []string{out.Lesson}, "失敗教訓")
 	if err == nil {
-		_, err = AutoApplyAdditions(m.root)
+		_, err = AutoApplyAdditions(m.root, m.styleJudge(ctx))
 	}
 	return added, err
 }
@@ -501,43 +536,20 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 // EnvAutoApply=1：反思產出的【新增】提案立刻放行成記錄，不等人工 `apply memory`。
 const EnvAutoApply = "COGITO_MEMORY_AUTOAPPLY"
 
-// AutoApplyAdditions 在 COGITO_MEMORY_AUTOAPPLY=1 時，把提案檔裡的【新增】立刻放行成記錄。
-// 破壞性提案（Reconcile 產出的 update/delete）**永遠不自動放行**——刪改是不可逆的，跟「多一條
-// 可被 recall 的記錄」不是同一個量級。
-//
-// 敢對新增不設閘，是因為記憶的爆炸半徑本來就小：一條一個檔（錯了刪一個檔，不必回滾合併）、
-// System Prompt 只放索引一行（正文要被 recall 才載入）、Prune 會把最久未用的歸檔。閘該守的是
-// 刪改，不是新增。索引那端另有一段措辭把記憶降級為「背景脈絡、可能過時」，見 MemoryLoader.LoadIndex。
-//
-// 回傳實際放行的條目（未啟用或沒有可放行的＝nil）。
-func AutoApplyAdditions(root string) ([]string, error) {
-	if os.Getenv(EnvAutoApply) != "1" {
-		return nil, nil
-	}
-	nums := additionNumbers(root)
-	if len(nums) == 0 {
-		return nil, nil
-	}
-	applied, _, err := ApplyProposedMemory(root, nums...)
-	if len(applied) > 0 {
-		log.Printf("[evolve] ⚡ 自動放行 %d 條記憶（%s=1；破壞性提案仍須人工 apply）", len(applied), EnvAutoApply)
-	}
-	return applied, err
-}
-
-// additionNumbers 取提案檔中【非破壞性】條目的編號。單獨鎖一小段而不與 ApplyProposedMemory
-// 共用同一次上鎖：knowledgeMu 不可重入，硬要合併就得把 Apply 的本體複製一份。提案檔是
-// append-only，既有條目的編號不會因為別人追加而位移，所以兩段之間的空窗是安全的。
-func additionNumbers(root string) []int {
+// additionCandidates 取提案檔中可考慮自動放行的條目：非破壞性（判準②——刪改是不可逆的，
+// 永遠人審）、非使用者畫像（畫像是在猜人，錯的畫像不會被下次讀碼推翻）。四條判準的其餘
+// 三條在 AutoApplyAdditions（memory_autopass.go）。單獨鎖一小段而不與 ApplyProposedMemory
+// 共用同一次上鎖：knowledgeMu 不可重入。提案檔是 append-only，編號不會位移，空窗安全。
+func additionCandidates(root string) []ProposedMemoryEntry {
 	ctxpkg.LockKnowledge()
 	defer ctxpkg.UnlockKnowledge()
-	var nums []int
+	var out []ProposedMemoryEntry
 	for _, e := range parseProposedMemory(readFileIgnore(filepath.Join(root, ".claw", ProposedMemoryFileName))) {
 		if !e.IsDestructive() && !isUserProfile(e.Kind) {
-			nums = append(nums, e.N)
+			out = append(out, e)
 		}
 	}
-	return nums
+	return out
 }
 
 // PendingProposals 回傳提案檔裡還沒放行的條數。供通知措辭判斷「是不是真的全部生效了」——
@@ -617,11 +629,18 @@ const maxMemoryRecords = 200
 const memoryTitleRunes = 24
 
 // writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。
+
+// memSlug 由內容算記錄檔名（不含副檔名）。內容定址是撤回窗能「事後對回檔案」的前提：
+// 帳上只記內容，檔名永遠重算得出來。
+func memSlug(learning string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(oneLine(learning)))
+	return fmt.Sprintf("mem-%08x", h.Sum32())
+}
+
 func writeMemoryRecord(memDir, kind, task, learning string) error {
 	learning = oneLine(learning)
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(learning))
-	slug := fmt.Sprintf("mem-%08x", h.Sum32())
+	slug := memSlug(learning)
 
 	title := learning // name 取短標題，過長截前 memoryTitleRunes 字（rune 安全）
 	if r := []rune(learning); len(r) > memoryTitleRunes {

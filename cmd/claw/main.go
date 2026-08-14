@@ -391,11 +391,12 @@ func memoryProposalMsg(kind string, added []string, pending int) string {
 	case !auto:
 		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*提案%s*（尚未生效）：\n", len(added), kind)
 	case pending > 0:
-		// 自動放行只吃專案慣例，使用者畫像那類會留在提案檔。一律說「已生效」就是說謊。
-		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（專案慣例**已生效**；另有 %d 條關於你的偏好待你過目）：\n",
+		// 自動放行有判準（四條全中：純風格、可逆、範圍窄、零衝突——見 memory_autopass.go），
+		// 沒過的慣例與使用者畫像都會留在提案檔。一律說「已生效」就是說謊。
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（通過自動放行判準的**已生效**、72 小時內可 `undo memory` 撤回；另有 %d 條待你過目）：\n",
 			len(added), kind, pending)
 	default:
-		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（**已生效**，之後會被 recall 取用）：\n", len(added), kind)
+		fmt.Fprintf(&b, "🧠 我從這次任務學到 %d 條*%s*（**已生效**、72 小時內可 `undo memory` 撤回）：\n", len(added), kind)
 	}
 	for _, l := range added {
 		b.WriteString("• " + l + "\n")
@@ -406,9 +407,7 @@ func memoryProposalMsg(kind string, added []string, pending int) string {
 	case pending > 0:
 		b.WriteString("用 `memory list` 看那幾條，`apply memory <編號>` 放行或 `reject memory` 丟棄。")
 	default:
-		// 刻意講「刪檔」而不是某個指令：memory list/apply 那組管的是【提案】，
-		// 已生效的記憶沒有對應的聊天指令。指一個不存在的操作比不指更糟。
-		b.WriteString("覺得哪條不該記？記憶是一條一個檔，到 `.claw/memory/` 刪掉那個檔即可。")
+		b.WriteString("覺得哪條不該記？`undo memory` 列出撤回窗內的，`undo memory <編號>` 一鍵撤回。")
 	}
 	return b.String()
 }

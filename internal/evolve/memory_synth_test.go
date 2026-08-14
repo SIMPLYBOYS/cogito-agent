@@ -323,7 +323,7 @@ func TestAutoApplyAdditions_KeepsUserProfileForReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(EnvAutoApply, "1")
-	applied, err := AutoApplyAdditions(root)
+	applied, err := AutoApplyAdditions(root, passAll)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,12 +360,12 @@ func TestAutoApplyAdditions_SkipsDestructive(t *testing.T) {
 
 	// 未啟用：什麼都不該動。
 	t.Setenv(EnvAutoApply, "")
-	if applied, err := AutoApplyAdditions(root); err != nil || applied != nil {
+	if applied, err := AutoApplyAdditions(root, passAll); err != nil || applied != nil {
 		t.Fatalf("未啟用時不該放行任何東西，got %v, %v", applied, err)
 	}
 
 	t.Setenv(EnvAutoApply, "1")
-	applied, err := AutoApplyAdditions(root)
+	applied, err := AutoApplyAdditions(root, passAll)
 	if err != nil {
 		t.Fatal(err)
 	}
