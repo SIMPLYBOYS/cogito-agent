@@ -122,9 +122,9 @@ func GateContent(content string, knownAgents []string) GateResult {
 		issues = append(issues, "叫子 agent「扮演」某個角色——該用 agent_type 指定具名 agent，人設檔已經寫好了，扮演會漂又要重複付費")
 	}
 
-	// agent_type 指到不存在的檔案是【靜默】失敗：載入不到就退回一個沒有人設的探路者，
-	// 技能照跑、報告照回，只是回答的人不是你以為的那個。實測一份自生成技能寫著
-	// agent_type:"cto"/"backend"/"devops"，而實際的檔案叫老徐/阿哲/阿海——三個都落空。
+	// agent_type 指到不存在的檔案，那一步的委派會直接失敗（subagent.go 對載入失敗回真錯誤）。
+	// 實測一份自生成技能寫著 agent_type:"cto"/"backend"/"devops"，而實際的檔案叫
+	// 老徐/阿哲/阿海——三個都落空，整批產出等於沒有。晉升前擋下來比執行時才炸便宜得多。
 	if len(knownAgents) > 0 {
 		known := make(map[string]bool, len(knownAgents))
 		for _, a := range knownAgents {
