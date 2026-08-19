@@ -58,8 +58,11 @@ func TestAgentLoader_NotFoundAndEmpty(t *testing.T) {
 	if _, err := l.Load("nope"); err == nil {
 		t.Error("找不到的 agent 應回錯")
 	}
-	if l.Index() != "" {
-		t.Error("無 .claw/agents 時 Index 應為空（退回預設探路者）")
+	// 契約已變更：功能型 agent 改成隨 binary 出貨（見 agent_defaults.go），所以沒有
+	// .claw/agents/ 時 Index 【不再是空的】——出貨技能引用的那七個必須永遠列得出來，
+	// 否則剛 clone 的機器上 orchestrate 叫模型派 spec，而索引裡查無此人。
+	if idx := l.Index(); !strings.Contains(idx, "spec") {
+		t.Errorf("無 .claw/agents 時 Index 仍應列出內建 agent，實際：%q", idx)
 	}
 	// 防路徑穿越：Load 只取檔名片段
 	if _, err := l.Load("../../etc/passwd"); err == nil {

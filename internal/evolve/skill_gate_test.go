@@ -145,3 +145,35 @@ func TestPromote_RefusesOnFail(t *testing.T) {
 		t.Error("把關不過時不該出現在 active")
 	}
 }
+
+// 內建 agent 不可被把關誤判成「不存在」。
+//
+// 這條守的是一個實際發生過的誤判：功能型 agent 改成隨 binary 出貨（AgentLoader 磁碟找不到
+// 就退回內建）之後，一台只放了人設的機器上，agent_type=spec 明明派得動，把關卻擋下它——
+// 於是引用內建 agent 的技能永遠晉升不了。
+//
+// 同時守反向：退回機制不能把「打錯字」變成靜默成功。
+func TestKnownAgents_IncludesBuiltins(t *testing.T) {
+	dir := t.TempDir() // 完全沒有 agent 檔
+	known := KnownAgents(dir)
+	if len(known) == 0 {
+		t.Fatal("內建 agent 一定在，名單不該是空的")
+	}
+	has := map[string]bool{}
+	for _, n := range known {
+		has[n] = true
+	}
+	if !has["spec"] {
+		t.Errorf("內建的 spec 不在可派名單裡：%v", known)
+	}
+
+	const usesSpec = "---\nname: t\ndescription: d\n---\n派審查 agent_type=spec 完成後回報結果給主幹"
+	if res := GateContent(usesSpec, known); !res.Passed {
+		t.Errorf("引用內建 agent 應通過，實際：%v", res.Issues)
+	}
+
+	const typo = "---\nname: t\ndescription: d\n---\n派審查 agent_type=speeec 完成後回報結果給主幹"
+	if res := GateContent(typo, known); res.Passed {
+		t.Error("打錯的 agent_type 仍要被擋——退回機制不能把錯字變成靜默成功")
+	}
+}

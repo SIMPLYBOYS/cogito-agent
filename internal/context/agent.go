@@ -33,11 +33,18 @@ func (l *AgentLoader) dir() string { return filepath.Join(l.workDir, ".claw", "a
 // Load 讀取並解析指定名稱的 agent 定義。防路徑穿越（只取檔名片段）；找不到回錯。
 func (l *AgentLoader) Load(name string) (AgentDef, error) {
 	safe := filepath.Base(strings.TrimSpace(name))
-	data, err := os.ReadFile(filepath.Join(l.dir(), safe+".md"))
+	raw, err := os.ReadFile(filepath.Join(l.dir(), safe+".md"))
+	content := string(raw)
 	if err != nil {
-		return AgentDef{}, fmt.Errorf("找不到 agent 定義 %q（應為 .claw/agents/%s.md）", name, safe)
+		// 磁碟沒有就退回內建（見 agent_defaults.go）。磁碟優先＝使用者放同名檔就能覆蓋，
+		// 不需要任何開關；找不到又不是內建的才是真的錯。
+		builtin, ok := readDefaultAgent(safe)
+		if !ok {
+			return AgentDef{}, fmt.Errorf("找不到 agent 定義 %q（應為 .claw/agents/%s.md，且非內建）", name, safe)
+		}
+		content = builtin
 	}
-	def := parseAgentMD(string(data))
+	def := parseAgentMD(content)
 	if def.Name == "" {
 		def.Name = safe
 	}
@@ -47,26 +54,41 @@ func (l *AgentLoader) Load(name string) (AgentDef, error) {
 // Index 列出可用的 agent（名稱 + 描述），放進 spawn_subagent 的說明，讓模型知道有哪些角色可派。
 // 無 .claw/agents 或空目錄則回空字串（此時 spawn_subagent 沿用預設探路者，行為與過去一致）。
 func (l *AgentLoader) Index() string {
-	entries, err := os.ReadDir(l.dir())
-	if err != nil {
-		return ""
-	}
 	type row struct{ name, desc string }
 	var rows []row
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+	// 檔名（非 frontmatter 的 name）才是 agent_type 的實際取用鍵，用它去重：磁碟上有同名檔
+	// 就蓋掉內建那一份，跟 Load 的優先序一致。兩邊不一致的話，索引會列出模型派不到的名字。
+	seen := map[string]bool{}
+
+	add := func(key, content string) {
+		if seen[key] {
+			return
 		}
-		data, rerr := os.ReadFile(filepath.Join(l.dir(), e.Name()))
-		if rerr != nil {
-			continue
-		}
-		d := parseAgentMD(string(data))
+		seen[key] = true
+		d := parseAgentMD(content)
 		name := d.Name
 		if name == "" {
-			name = strings.TrimSuffix(e.Name(), ".md")
+			name = key
 		}
 		rows = append(rows, row{name, d.Description})
+	}
+
+	if entries, err := os.ReadDir(l.dir()); err == nil {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+				continue
+			}
+			if data, rerr := os.ReadFile(filepath.Join(l.dir(), e.Name())); rerr == nil {
+				add(strings.TrimSuffix(e.Name(), ".md"), string(data))
+			}
+		}
+	}
+	// 內建的補在後面：沒有 .claw/agents/ 的機器（剛 clone）也要看得到這七個，
+	// 否則出貨技能叫模型派 spec，而索引裡沒有它。
+	for _, n := range defaultAgentNames() {
+		if c, ok := readDefaultAgent(n); ok {
+			add(n, c)
+		}
 	}
 	if len(rows) == 0 {
 		return ""

@@ -2,6 +2,7 @@ package evolve
 
 import (
 	"fmt"
+	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,18 +64,32 @@ func hasRolePlay(content string) bool {
 // agentTypePattern 抓技能正文裡指名的 agent_type（`agent_type=planner`、`"agent_type":"cto"`…）。
 var agentTypePattern = regexp.MustCompile(`agent_type["']?\s*[:=]\s*["']?([\p{Han}A-Za-z0-9_-]+)`)
 
-// KnownAgents 列出 .claw/agents/ 裡真實存在的 agent 名（去掉 .md）。目錄不存在就回 nil，
-// 呼叫端據此把「名稱存在性」檢查整個略過——寧可不檢查，也不要拿空清單把每個名字都判成錯的。
+// KnownAgents 列出可派的 agent 名：磁碟上的 .claw/agents/*.md ⊕【隨 binary 出貨的內建】。
+//
+// 內建那批一定要算進來，否則把關會誤判：一台只放了人設、沒放功能型 agent 的機器上，
+// agent_type=spec 明明載得到（AgentLoader 會退回內建），把關卻擋下它。實測過這個誤判。
+//
+// 目錄不存在【不再】回 nil：內建的永遠在，所以名單永遠非空，檢查也就永遠有效。
+// （原本回 nil 是為了「寧可不檢查，也不要拿空清單把每個名字都判成錯的」——那個顧慮
+// 在有內建之後消失了。）
 func KnownAgents(agentsDir string) []string {
-	entries, err := os.ReadDir(agentsDir)
-	if err != nil {
-		return nil
-	}
+	seen := map[string]bool{}
 	var names []string
-	for _, e := range entries {
-		if n := strings.TrimSuffix(e.Name(), ".md"); !e.IsDir() && n != e.Name() {
+	add := func(n string) {
+		if n != "" && !seen[n] {
+			seen[n] = true
 			names = append(names, n)
 		}
+	}
+	if entries, err := os.ReadDir(agentsDir); err == nil {
+		for _, e := range entries {
+			if n := strings.TrimSuffix(e.Name(), ".md"); !e.IsDir() && n != e.Name() {
+				add(n)
+			}
+		}
+	}
+	for _, n := range ctxpkg.DefaultAgentNames() {
+		add(n)
 	}
 	return names
 }
