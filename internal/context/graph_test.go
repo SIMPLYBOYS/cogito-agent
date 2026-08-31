@@ -106,3 +106,51 @@ func TestRecallGraph_RendersSubgraphWithRelations(t *testing.T) {
 		t.Error("無命中應回空字串")
 	}
 }
+
+// 圖也要認【檔名 slug】當節點鍵——那才是這筆記錄的正典識別。
+//
+// 【為何】整併的 UPDATE/DELETE 用檔名比對、撤回窗靠它事後對回檔案（內容定址）。
+// name 只是顯示標題，卻同時被當成 [[link]] 目標——標題一旦不好寫或被改寫，連結就配不到。
+// 認 slug 讓「指得到」不依賴標題品質，也給自動推導的邊一個永遠穩定的鍵。
+func TestGraph_NodesAddressableByFileSlug(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(slug, name, body string) {
+		md := "---\nname: " + name + "\ndescription: d\n---\n" + body
+		if err := os.WriteFile(filepath.Join(memDir, slug+".md"), []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// B 的標題很難當連結目標（正是實庫的情況），但 A 可以用它的檔名 slug 指過去。
+	write("mem-aaaa1111", "起點", "從這裡連到 [[mem-bbbb2222]]")
+	write("mem-bbbb2222", "外部工具（MCP/API）查不到或未掛載時", "被指向的記錄")
+
+	g := NewMemoryLoader(dir).Graph()
+
+	// 斷言【真的記錄】，不是 dangling stub——沒有 slug 索引時 addEdge 也會建一個同名 stub，
+	// 只檢查「節點存在」會綠得毫無意義（實際踩過這個假綠）。
+	n, ok := g.nodes["mem-bbbb2222"]
+	if !ok {
+		t.Fatal("檔名 slug 不是節點鍵——自動推導的邊會沒有穩定的鍵可用")
+	}
+	if n.Path == "" || n.Description == "" {
+		t.Fatalf("slug 指到的是空殼 stub 而非真記錄：%+v", n)
+	}
+	if !strings.Contains(n.Body, "被指向的記錄") {
+		t.Errorf("slug 指到的節點內容不對：%q", n.Body)
+	}
+	nodes, edges := g.Subgraph([]string{"起點"}, 1, 8)
+	if len(nodes) != 2 {
+		t.Errorf("應沿 slug 連結擴張到 2 個節點，實際 %d", len(nodes))
+	}
+	if len(edges) != 1 {
+		t.Errorf("應有 1 條邊，實際 %d", len(edges))
+	}
+	// 標題仍然可以當鍵，兩種都通。
+	if _, ok := g.nodes["外部工具（MCP/API）查不到或未掛載時"]; !ok {
+		t.Error("name 也應該還是節點鍵（不能只認 slug）")
+	}
+}

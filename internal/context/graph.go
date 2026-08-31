@@ -59,6 +59,15 @@ func (m *MemoryLoader) Graph() *Graph {
 	}
 	for _, r := range recs {
 		g.nodes[r.Name] = r
+		// 檔名 slug（mem-xxxxxxxx）也當節點鍵。
+		//
+		// 【為何】那才是這筆記錄的【正典識別】：整併的 UPDATE/DELETE 用它比對、撤回窗靠它
+		// 事後對回檔案（內容定址）。name 只是顯示標題，恰好也被當成 [[link]] 目標——一旦
+		// 標題不好寫（或被改寫），連結就配不到。認 slug 讓「指得到」不依賴標題品質，
+		// 也讓自動推導的邊有一個永遠穩定的鍵可用。
+		if slug := recordSlug(r); slug != "" && slug != r.Name {
+			g.nodes[slug] = r
+		}
 	}
 	for _, r := range recs {
 		for _, e := range parseLinks(r.Body) {
@@ -71,6 +80,14 @@ func (m *MemoryLoader) Graph() *Graph {
 		g.addEdge(e)
 	}
 	return g
+}
+
+// recordSlug 回一筆記錄的檔名（去掉 .md）——內容定址的正典 ID。無 Path（stub 節點）回空字串。
+func recordSlug(r MemoryRecord) string {
+	if r.Path == "" {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(r.Path), ".md")
 }
 
 // addEdge 加一條邊到鄰接表；自環略過、指向不存在節點則建 dangling stub。

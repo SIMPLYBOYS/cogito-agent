@@ -612,10 +612,7 @@ func applyDestructive(loader *ctxpkg.MemoryLoader, memDir string, e ProposedMemo
 		// 護欄③：歸檔而非刪除。
 		return "", loader.ArchiveRecord(filepath.Base(rec.Path))
 	}
-	title := e.Learning
-	if r := []rune(title); len(r) > memoryTitleRunes {
-		title = string(r[:memoryTitleRunes])
-	}
+	title := memoryTitle(e.Learning)
 	note := fmt.Sprintf("〔整併 provenance〕於 %s 由整併提案改寫；原內容：%s",
 		time.Now().Format(time.RFC3339), e.Old)
 	return "", ctxpkg.UpdateRecordFact(rec.Path, title, e.Learning, note)
@@ -624,9 +621,70 @@ func applyDestructive(loader *ctxpkg.MemoryLoader, memDir string, e ProposedMemo
 // maxMemoryRecords 是長期記憶庫的記錄上限；超量時 Prune 把最久未用的歸檔到 .claw/memory-archive/。
 const maxMemoryRecords = 200
 
-// memoryTitleRunes 是記錄 frontmatter `name:` 的截斷長度。抽成常數是因為整併的 UPDATE
+// memoryTitleRunes 是記錄 frontmatter `name:` 的長度上限。抽成常數是因為整併的 UPDATE
 // 也要套同一規則——兩處各寫一個 24 遲早會分岔。
 const memoryTitleRunes = 24
+
+// memoryTitle 從一條學習取短標題，且【切在句讀邊界】而不是硬切第 24 個字。
+//
+// 【為何重要】name 同時是知識圖譜的節點 ID 與 [[link]] 的指向目標。硬切會產出
+// 「外部工具（MCP/API）查不到或未掛載時，**」這種字串——沒有人（或 LLM）寫得出
+// [[外部工具（MCP/API）查不到或未掛載時，**]]，於是圖永遠長不出人工邊（實測 14 個節點 0 條邊）。
+//
+// 做法：在上限內找最後一個句讀，切在那裡；找不到才退回硬切。切完再剝掉尾端殘留的
+// markdown 記號與孤立的開引號——那些是「斷在標記中間」的痕跡，留著同樣不能當連結目標。
+func memoryTitle(learning string) string {
+	r := []rune(oneLine(learning))
+	if len(r) <= memoryTitleRunes {
+		return strings.TrimSpace(trimTitleEdge(string(r)))
+	}
+	head := r[:memoryTitleRunes]
+	// 由後往前找句讀；太靠前的不採用（切到剩三個字等於沒有標題）。
+	const minTitleRunes = 8
+	for i := len(head) - 1; i >= minTitleRunes; i-- {
+		if isTitleBreak(head[i]) {
+			return strings.TrimSpace(trimTitleEdge(string(head[:i])))
+		}
+	}
+	return strings.TrimSpace(trimTitleEdge(string(head)))
+}
+
+// isTitleBreak 判斷一個字元是不是可以切標題的句讀（中英標點皆收）。
+func isTitleBreak(c rune) bool {
+	return strings.ContainsRune("，。、；：！？（）「」『』〔〕【】,.;:!?()[]— ", c)
+}
+
+// trimTitleEdge 剝掉標題尾端的 markdown 記號與孤立開引號，再砍掉未閉合的括號段。
+//
+// 兩步都必要：TrimRight 處理「結尾就是開括號」，balanceBrackets 處理「括號開了但沒關」
+// ——後者長這樣：涉及數值區間的過濾（如「年薪≥140萬」遇到  ← （ 一直沒閉合。
+// 留著它當 [[link]] 目標一樣是廢的。
+func trimTitleEdge(s string) string {
+	s = balanceBrackets(s)
+	return strings.TrimRight(s, "*_`~#（(「『〔【[<，、；：-— ")
+}
+
+// titleBrackets 是要配對的括號（開→閉）。只收成對的標點，引號類也算。
+var titleBrackets = map[rune]rune{'（': '）', '(': ')', '「': '」', '『': '』', '〔': '〕', '【': '】', '[': ']'}
+
+// balanceBrackets 砍到第一個未閉合的開括號之前。已全數閉合則原樣回傳。
+func balanceBrackets(s string) string {
+	var stack []int // 未閉合開括號的 rune 索引
+	r := []rune(s)
+	for i, c := range r {
+		if _, ok := titleBrackets[c]; ok {
+			stack = append(stack, i)
+			continue
+		}
+		if len(stack) > 0 && c == titleBrackets[r[stack[len(stack)-1]]] {
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if len(stack) == 0 {
+		return s
+	}
+	return string(r[:stack[0]])
+}
 
 // writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。
 
@@ -642,10 +700,7 @@ func writeMemoryRecord(memDir, kind, task, learning string) error {
 	learning = oneLine(learning)
 	slug := memSlug(learning)
 
-	title := learning // name 取短標題，過長截前 memoryTitleRunes 字（rune 安全）
-	if r := []rune(learning); len(r) > memoryTitleRunes {
-		title = string(r[:memoryTitleRunes])
-	}
+	title := memoryTitle(learning) // name 是節點 ID＋[[link]] 目標，切在句讀邊界
 	// 來源標註（provenance，對抗幻覺記憶）：frontmatter 記時間戳、body 記完整來源；body 會在 recall
 	// 時渲染給模型看，讓「檢索到的真實記憶」自帶「由誰、何時、從哪個任務沉澱」——可溯源、可稽核、
 	// 和模型自產內容區分。時間戳同時作為 last-recorded（同一條學習重複放行＝重新確認）。

@@ -453,3 +453,43 @@ func TestReflect_PromptCarriesExistingMemory(t *testing.T) {
 		t.Error("既有記憶跑進 system prompt 了，會打掉快取")
 	}
 }
+
+// name 是知識圖譜的節點 ID 兼 [[link]] 目標，所以不能硬切在標點/標記中間。
+//
+// 實測背景：正式記憶庫 14 個節點、0 條邊，因為 name 全是斷句
+// （「外部工具（MCP/API）查不到或未掛載時，**」——沒有人寫得出指向它的連結）。
+// 見 docs/kg-status.md §4。
+func TestMemoryTitle_CutsAtClauseBoundary(t *testing.T) {
+	cases := []struct {
+		name     string
+		learning string
+		reject   string // 標題結尾不該出現的殘渣
+	}{
+		{"斷在粗體標記", "外部工具（MCP/API）查不到或未掛載時，**先確認工具名稱是否正確**", "*"},
+		{"斷在開引號", "涉及數值區間的過濾（如「年薪≥140萬」遇到「130~180萬」的區間職缺）該取下限", "「"},
+		{"斷在逗號", "處理地址或路名查詢時，先用 GROUP BY 行政區彙總，再逐筆比對門牌", "，"},
+		{"未閉合的括號", "涉及數值區間的過濾（如「年薪≥140萬」遇到「130~180萬」的職缺）取下限", "遇到"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := memoryTitle(c.learning)
+			if got == "" {
+				t.Fatal("標題不該是空的")
+			}
+			if len([]rune(got)) > memoryTitleRunes {
+				t.Errorf("標題超過上限 %d：%q", memoryTitleRunes, got)
+			}
+			if strings.HasSuffix(got, c.reject) {
+				t.Errorf("標題結尾殘留 %q（切在標記/標點中間，當不了連結目標）：%q", c.reject, got)
+			}
+		})
+	}
+}
+
+// 短學習原樣保留，不該被動到。
+func TestMemoryTitle_ShortLearningUnchanged(t *testing.T) {
+	const short = "查開放資料前先取一筆看欄位"
+	if got := memoryTitle(short); got != short {
+		t.Errorf("短學習不該被改寫：%q → %q", short, got)
+	}
+}
