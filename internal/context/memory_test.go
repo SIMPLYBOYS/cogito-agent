@@ -88,3 +88,43 @@ func TestMemoryLoader_IndexDropsNameWhenItPrefixesDescription(t *testing.T) {
 		t.Errorf("真的是標題的 name 要照印：\n%s", idx)
 	}
 }
+
+// trigger 欄位：「什麼情況該想起我」與內容分離（devin-actions #1）。
+//
+// 為什麼需要：實庫 14 筆記憶 11 筆 hits:0。「換算每坪乘 3.305785」的觸發時機是
+// 「使用者問房價/坪數」，但那幾個字【不在內容裡】——關鍵字比對天生撈不到。
+// 技能索引早就是這個原則（description = 何時用），記憶層一直缺。
+func TestRecall_TriggerFieldMatchesWhenContentDoesNot(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMem(t, memDir, "mem-pyeong",
+		"---\nname: 單價換算\ndescription: 每平方公尺乘 3.305785\ntrigger: 房價 坪數 實價登錄\n---\n每平方公尺單價乘 3.305785 得每坪單價")
+	writeMem(t, memDir, "mem-other",
+		"---\nname: 無關記錄\ndescription: 別的事\n---\n完全無關的內容")
+
+	out := NewMemoryLoader(dir).RecallGraph("坪數", 1, nil)
+	if !strings.Contains(out, "3.305785") {
+		t.Errorf("查詢詞只出現在 trigger、不在內容——應該撈得到。輸出：%q", out)
+	}
+	if strings.Contains(out, "無關記錄") {
+		t.Errorf("無關記錄不該被撈出來：%q", out)
+	}
+}
+
+// 沒有 trigger 的舊記錄行為完全不變（向後相容是完成條件之一）。
+func TestRecall_NoTriggerUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMem(t, memDir, "mem-plain",
+		"---\nname: 一般記錄\ndescription: 講編碼\n---\n遇到編碼錯先設 UTF-8")
+	out := NewMemoryLoader(dir).RecallGraph("編碼", 1, nil)
+	if !strings.Contains(out, "UTF-8") {
+		t.Errorf("舊格式記錄應照常撈到：%q", out)
+	}
+}

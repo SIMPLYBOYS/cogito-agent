@@ -13,7 +13,7 @@ import (
 // 放行的記憶記錄要自帶來源標註（provenance）：時間戳 + 由誰/從哪個任務沉澱——對抗幻覺記憶、可溯源。
 func TestWriteMemoryRecord_StampsProvenance(t *testing.T) {
 	dir := t.TempDir()
-	if err := writeMemoryRecord(dir, "教訓", "把 CSV 轉月報表", "遇到編碼錯先設 UTF-8"); err != nil {
+	if err := writeMemoryRecord(dir, "教訓", "把 CSV 轉月報表", "遇到編碼錯先設 UTF-8", ""); err != nil {
 		t.Fatal(err)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "mem-*.md"))
@@ -491,5 +491,45 @@ func TestMemoryTitle_ShortLearningUnchanged(t *testing.T) {
 	const short = "查開放資料前先取一筆看欄位"
 	if got := memoryTitle(short); got != short {
 		t.Errorf("短學習不該被改寫：%q → %q", short, got)
+	}
+}
+
+// trigger 的完整旅程：反思尾綴 → 提案 bullet 續行 → 解析 → 放行 → 記錄 frontmatter。
+//
+// 五個接點（Cut 拆綴、renderProposedBullet、attachMeta、ApplyProposedMemory、
+// writeMemoryRecord）任何一個掉了，觸發詞就靜默消失——檢索照常運作，只是永遠比對不到
+// 那一欄，跟沒做過一樣。這正是「資料量到了卻救不回來」型缺陷（同 LatencyMS 那課）。
+func TestTriggerRoundTrip_ReflectionToRecord(t *testing.T) {
+	root := t.TempDir()
+	m := NewMemorySynthesizer(nil, root) // provider 不用：直接餵 proposeLearnings
+
+	added, err := m.proposeLearnings("查台北房價",
+		[]string{"實價登錄單價為每平方公尺，換算每坪乘 3.305785｜觸發：房價 坪數 每坪"}, "慣例")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 || strings.Contains(added[0], "觸發") {
+		t.Fatalf("回傳的事實清單不該殘留觸發尾綴：%q", added)
+	}
+
+	// 提案檔要能被解析回 Trigger（人審與逐條放行都靠這條路）
+	entries := ListProposedMemory(root)
+	if len(entries) != 1 {
+		t.Fatalf("應有 1 條提案，實際 %d", len(entries))
+	}
+	if entries[0].Trigger != "房價 坪數 每坪" {
+		t.Fatalf("提案解析丟了觸發詞：%+v", entries[0])
+	}
+
+	// 放行 → 記錄 frontmatter 帶 trigger:，且 context 端解析得出來
+	if _, _, err := ApplyProposedMemory(root); err != nil {
+		t.Fatal(err)
+	}
+	recs := ctxpkg.NewMemoryLoader(root).Records()
+	if len(recs) != 1 {
+		t.Fatalf("應有 1 筆記錄，實際 %d", len(recs))
+	}
+	if recs[0].Trigger != "房價 坪數 每坪" {
+		t.Errorf("落盤的記錄缺 trigger（frontmatter 沒寫或沒解析）：%+v", recs[0])
 	}
 }

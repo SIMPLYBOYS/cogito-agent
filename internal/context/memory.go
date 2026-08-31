@@ -36,6 +36,10 @@ type MemoryRecord struct {
 	Description string
 	Tags        []string
 	Body        string
+	// Trigger 是「什麼情況該想起我」——與內容分離的檢索觸發詞（frontmatter trigger:，選填）。
+	// 內容說「每平方公尺乘 3.305785」，觸發卻是「房價 坪數」：那幾個字不在內容裡，
+	// 關鍵字比對天生撈不到。技能索引早就是這個原則（description = 何時用），記憶層補上。
+	Trigger string
 
 	// Recorded 是寫入時間（frontmatter `recorded:`）。跟 usedAt 不同：這筆【不會】因為被
 	// recall 而變動，所以拿它排序的結果每輪都一樣——畫像要的正是這種穩定。
@@ -569,8 +573,14 @@ func scoreRecord(r MemoryRecord, terms []string) int {
 	name := strings.ToLower(r.Name)
 	desc := strings.ToLower(r.Description)
 	body := strings.ToLower(r.Body)
+	trig := strings.ToLower(r.Trigger)
 	score := 0
 	for _, t := range terms {
+		// trigger 權重最高：它是作者【專門為檢索寫的】那一欄——比 tags（分類）、
+		// name（標題）、內容字面都更接近「這筆該不該出現」的本意。
+		if trig != "" && strings.Contains(trig, t) {
+			score += 6
+		}
 		if strings.Contains(tagStr, t) {
 			score += 4
 		}
@@ -636,6 +646,8 @@ func parseMemoryMD(content string) MemoryRecord {
 					rec.Name = strings.TrimSpace(strings.TrimPrefix(line, "name:"))
 				case strings.HasPrefix(line, "description:"):
 					rec.Description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+				case strings.HasPrefix(line, "trigger:"):
+					rec.Trigger = strings.TrimSpace(strings.TrimPrefix(line, "trigger:"))
 				case strings.HasPrefix(line, "tags:"):
 					rec.Tags = parseTags(strings.TrimPrefix(line, "tags:"))
 				case strings.HasPrefix(line, "recorded:"):

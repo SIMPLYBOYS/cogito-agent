@@ -64,7 +64,11 @@ const memoryReflectSystemPrompt = `你是專案長期記憶的維護者。看完
   與「用三角視角收斂決策」是同一條。要補充既有那條缺的細節時，也不要新開一條。
 
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
-{"learnings": ["<一句話>"], "user_facts": ["<一句話>"]}；沒有的那項給空陣列。`
+{"learnings": ["<一句話>"], "user_facts": ["<一句話>"]}；沒有的那項給空陣列。
+
+每句話可在句尾用「｜觸發：<空格分隔的觸發詞>」附上檢索觸發——【什麼情況該想起這條】，
+用的是未來提問裡會出現的詞，不是內容裡的詞。例：內容「單價乘 3.305785」的觸發是
+「房價 坪數 實價登錄」——問的人只會說要查房價，不會說要乘什麼數。想不出觸發就不要硬附。`
 
 // existingMemory 把目前記憶庫壓成一句一行，餵給反思當「已經知道的事」。
 //
@@ -168,7 +172,8 @@ const failureReflectSystemPrompt = `你是負責「失敗反思」的教練。�
 （程式崩潰／達回合上限／成本熔斷／無法完成）。看完任務、執行軌跡、失敗原因後，萃取【一條】值得寫進
 專案長期記憶、未來能改善「判斷與決策」的教訓。
 - 聚焦「下次面對同類任務，該怎麼判斷／做不同才不會再卡」。可泛化、不要寫死本次數值。
-只輸出一個 JSON 物件：{"lesson": "<一句教訓>"}；若真的沒有可記的，輸出 {"lesson": ""}。`
+只輸出一個 JSON 物件：{"lesson": "<一句教訓>"}；若真的沒有可記的，輸出 {"lesson": ""}。
+教訓句尾可用「｜觸發：<空格分隔的觸發詞>」附上檢索觸發（未來什麼樣的任務該想起這條）。`
 
 // ReflectFailure 在【真實互動失敗】後反思（live Reflexion）：萃取一條教訓，經同一去重+安全管道
 // 追加到提案記憶。回傳實際追加的（0 或 1 條）。教訓仍是提案，須 apply 放行為記憶記錄才生效。
@@ -208,10 +213,16 @@ func (m *MemorySynthesizer) ReflectFailure(ctx context.Context, taskPrompt strin
 func (m *MemorySynthesizer) proposeLearnings(taskPrompt string, candidates []string, kind string) ([]string, error) {
 	existingNorm := normalize(readFileIgnore(m.agentsPath) + "\n" + readFileIgnore(m.proposedPath))
 
-	var added []string
+	var added, bullets []string
 	seen := map[string]bool{}
 	for _, l := range candidates {
 		l = oneLine(l)
+		// 反思器可在句尾用「｜觸發：房價 坪數」附檢索觸發詞。先拆下來：去重與安全掃描
+		// 只該看事實本身——同一條事實配不同觸發詞，仍然是同一條記憶。
+		var trig string
+		if fact, t, ok := strings.Cut(l, "｜觸發："); ok {
+			l, trig = strings.TrimSpace(fact), strings.TrimSpace(t)
+		}
 		if l == "" {
 			continue
 		}
@@ -219,23 +230,24 @@ func (m *MemorySynthesizer) proposeLearnings(taskPrompt string, candidates []str
 		if seen[key] || strings.Contains(existingNorm, key) {
 			continue // 與現有或本批重複
 		}
-		if hits := scanDangerous(l); len(hits) > 0 {
-			continue // 危險建議（如「都用 sudo」）不入庫
+		if hits := scanDangerous(l + " " + trig); len(hits) > 0 {
+			continue // 危險建議（如「都用 sudo」）不入庫——觸發詞也掃，別留後門
 		}
 		seen[key] = true
 		added = append(added, l)
+		bullets = append(bullets, renderProposedBullet(ProposedMemoryEntry{Learning: l, Trigger: trig}))
 	}
 
 	if len(added) == 0 {
 		return nil, nil
 	}
-	if err := m.appendProposed(taskPrompt, added, kind); err != nil {
+	if err := m.appendProposed(taskPrompt, bullets, kind); err != nil {
 		return nil, err
 	}
 	return added, nil
 }
 
-func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string, kind string) error {
+func (m *MemorySynthesizer) appendProposed(taskPrompt string, bullets []string, kind string) error {
 	ctxpkg.LockKnowledge() // 只鎖檔案寫尾段（synth 的 LLM 呼叫已在更外層、不持鎖）
 	defer ctxpkg.UnlockKnowledge()
 	if err := os.MkdirAll(filepath.Dir(m.proposedPath), 0o755); err != nil {
@@ -246,8 +258,8 @@ func (m *MemorySynthesizer) appendProposed(taskPrompt string, learnings []string
 		b.WriteString(proposedFileHeader)
 	}
 	fmt.Fprintf(&b, "\n## [%s] 來自任務「%s」（%s）\n", kind, oneLine(taskPrompt), time.Now().Format(time.RFC3339))
-	for _, l := range learnings {
-		b.WriteString("- " + l + "\n")
+	for _, blk := range bullets {
+		b.WriteString(blk) // 已含「- 」前綴與可能的續行（觸發：…）——渲染統一走 renderProposedBullet
 	}
 
 	f, err := os.OpenFile(m.proposedPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
@@ -280,6 +292,9 @@ type ProposedMemoryEntry struct {
 	Target string // update/delete 的目標記錄 slug（.claw/memory/<slug>.md 去掉副檔名）
 	Old    string // update 的舊值 / delete 的原值——人審時看 diff 用，放行時當樂觀鎖比對
 	Why    string // 為何要動它。人審的依據，update/delete 必填
+	// Trigger 是這條記憶的檢索觸發詞（「什麼情況該想起我」），與內容分離——內容說
+	// 「每平方公尺乘 3.305785」，觸發是「房價 坪數」。選填；放行時寫進記錄的 frontmatter。
+	Trigger string
 }
 
 // 提案動作。設計與理由見 docs/memory-reconcile-format.md。
@@ -363,9 +378,11 @@ func parseProposedMemory(raw string) []ProposedMemoryEntry {
 			out = append(out, e)
 
 		case indented && len(out) > 0:
-			// 附帶行只對【動作型】提案有意義；純 ADD 底下的縮排文字忽略，
-			// 免得舊檔裡碰巧的縮排被誤讀成欄位。
-			if e := &out[len(out)-1]; e.IsDestructive() {
+			// 附帶行的規則分兩級：動作型（UPDATE/DELETE）吃全部欄位（舊/值/因/觸發）；
+			// 純 ADD 只認「觸發：」這一種——其他縮排文字照舊忽略，免得舊檔裡碰巧的縮排
+			// 被誤讀成欄位（這是原本整條 else 不存在的理由，防護保留、只開一個白名單口）。
+			e := &out[len(out)-1]
+			if e.IsDestructive() || strings.HasPrefix(line, "觸發：") || strings.HasPrefix(line, "觸發:") {
 				attachMeta(e, line)
 			}
 		}
@@ -402,6 +419,7 @@ func attachMeta(e *ProposedMemoryEntry, line string) {
 	}{
 		{[]string{"舊：", "舊:", "值：", "值:"}, &e.Old},
 		{[]string{"因：", "因:"}, &e.Why},
+		{[]string{"觸發：", "觸發:"}, &e.Trigger},
 	} {
 		for _, p := range m.prefixes {
 			if strings.HasPrefix(line, p) {
@@ -443,7 +461,13 @@ func renderProposedBullet(e ProposedMemoryEntry) string {
 		fmt.Fprintf(&b, "- DELETE %s\n", e.Target)
 	default:
 		fmt.Fprintf(&b, "- %s\n", e.Learning)
-		return b.String() // ADD 沒有附帶行
+		if e.Trigger != "" {
+			fmt.Fprintf(&b, "  觸發：%s\n", e.Trigger)
+		}
+		return b.String()
+	}
+	if e.Trigger != "" {
+		fmt.Fprintf(&b, "  觸發：%s\n", e.Trigger)
 	}
 	if e.Old != "" {
 		label := "舊"
@@ -506,7 +530,7 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 	loader := ctxpkg.NewMemoryLoader(root)
 	for _, e := range picked {
 		if !e.IsDestructive() {
-			if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning); err != nil {
+			if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning, e.Trigger); err != nil {
 				return applied, skipped, err
 			}
 			applied = append(applied, e.Learning)
@@ -731,7 +755,7 @@ func memSlug(learning string) string {
 	return fmt.Sprintf("mem-%08x", h.Sum32())
 }
 
-func writeMemoryRecord(memDir, kind, task, learning string) error {
+func writeMemoryRecord(memDir, kind, task, learning, trigger string) error {
 	learning = oneLine(learning)
 	slug := memSlug(learning)
 
@@ -740,8 +764,12 @@ func writeMemoryRecord(memDir, kind, task, learning string) error {
 	// 時渲染給模型看，讓「檢索到的真實記憶」自帶「由誰、何時、從哪個任務沉澱」——可溯源、可稽核、
 	// 和模型自產內容區分。時間戳同時作為 last-recorded（同一條學習重複放行＝重新確認）。
 	ts := time.Now().Format(time.RFC3339)
-	body := fmt.Sprintf("---\nname: %s\ndescription: %s\ntags: [%s]\nrecorded: %s\n---\n%s\n\n〔來源 provenance〕由「%s」反思、於 %s 從任務「%s」沉澱。\n",
-		title, learning, kind, ts, learning, kind, ts, oneLine(task))
+	trigLine := ""
+	if t := oneLine(trigger); t != "" {
+		trigLine = "trigger: " + t + "\n" // 檢索觸發詞（scoreRecord 最高權重）；缺省＝行為同舊記錄
+	}
+	body := fmt.Sprintf("---\nname: %s\ndescription: %s\n%stags: [%s]\nrecorded: %s\n---\n%s\n\n〔來源 provenance〕由「%s」反思、於 %s 從任務「%s」沉澱。\n",
+		title, learning, trigLine, kind, ts, learning, kind, ts, oneLine(task))
 	return os.WriteFile(filepath.Join(memDir, slug+".md"), []byte(body), 0o644)
 }
 

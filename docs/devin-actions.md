@@ -30,6 +30,14 @@
 **完成條件**：一條「內容不含查詢詞、但 trigger 含」的測試記錄能被 recall 撈到
 （現況撈不到，即紅→綠）；缺 `trigger` 的舊記錄檢索行為不變。
 
+### ✅ 已完成（2026-08-31）
+
+完整鏈路：反思句尾「｜觸發：…」 → 提案 bullet 的「觸發：」續行（與 舊/因 同文法）→
+解析 → 放行 → 記錄 frontmatter `trigger:` → `scoreRecord` 權重 6（高於 tags 的 4）。
+兩條完成條件都以紅→綠驗證；另補 round-trip 測試釘住五個接點——實作時它就抓到一個真缺口
+（解析端刻意忽略 ADD 的縮排續行，為 trigger 開了唯一的白名單口、原防護保留）。
+既有記錄不回填，缺省行為不變。
+
 ## 2. 🟡 技能模板補兩段：Required from User、Forbidden Actions
 
 **是什麼**：Devin playbook 六段式裡我們缺的兩段——
