@@ -39,6 +39,11 @@ func ApplyProposedEdges(root string) (applied, rejected int, err error) {
 	real := map[string]bool{}
 	for _, r := range NewMemoryLoader(root).Records() {
 		real[r.Name] = true
+		// 檔名 slug 也算真實端點：推導邊（DeriveEdges）刻意用 slug 當端點，因為那是
+		// 內容定址的正典 ID，不受標題品質影響。閘只認 name 的話，那些邊會被整批誤拒。
+		if slug := recordSlug(r); slug != "" {
+			real[slug] = true
+		}
 	}
 	// 既有邊：去重基準 + 每節點出邊計數。
 	seen := map[string]bool{}

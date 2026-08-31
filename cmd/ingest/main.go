@@ -33,7 +33,47 @@ func main() {
 	evalLabels := flag.String("eval", "", "（記憶檢索評測）以標註集 JSONL（{query,expected}）跑 hit@k/MRR 三模式對照")
 	k := flag.Int("k", 3, "評測 top-k")
 	model := flag.String("model", "claude-haiku-4-5", "LLM 抽取用的模型")
+	deriveEdges := flag.Bool("derive-edges", false, "從記錄的 provenance 推導同源邊 → 寫進提案檔（確定性、零 LLM、可重跑）")
+	fixNames := flag.Bool("fix-names", false, "改寫既有記錄斷句的 frontmatter name（預設只列出計畫，加 -apply 才寫入）")
+	apply := flag.Bool("apply", false, "與 -fix-names 併用：真的寫入（會先備份整個 memory/）")
 	flag.Parse()
+
+	if *deriveEdges {
+		edges := ctxpkg.DeriveEdges(*root)
+		if len(edges) == 0 {
+			fmt.Println("沒有可推導的邊（記錄缺 provenance，或每個任務只有一筆）。")
+			return
+		}
+		n, err := ctxpkg.AppendProposedEdges(*root, edges)
+		if err != nil {
+			log.Fatalf("寫入提案邊失敗: %v", err)
+		}
+		fmt.Printf("推導出 %d 條同源邊，新增 %d 條到提案檔（其餘為既有重複）。\n", len(edges), n)
+		fmt.Println("接著：-review-edges 檢視、-apply-edges 過閘併入。")
+		return
+	}
+
+	if *fixNames {
+		plans := evolve.PlanRecordNames(*root)
+		if len(plans) == 0 {
+			fmt.Println("沒有需要改寫的 name。")
+			return
+		}
+		fmt.Printf("=== 標題改寫計畫（%d 筆；檔名與正文不動）===\n", len(plans))
+		for _, p := range plans {
+			fmt.Printf("  %s\n    舊 %q\n    新 %q\n", p.Slug, p.Old, p.New)
+		}
+		if !*apply {
+			fmt.Println("\n（這是預覽。確認無誤後加 -apply 才會寫入）")
+			return
+		}
+		backup, err := evolve.ApplyRecordNames(*root, plans)
+		if err != nil {
+			log.Fatalf("改寫失敗: %v", err)
+		}
+		fmt.Printf("\n✓ 已改寫 %d 筆。備份在 %s（回滾＝把它複製回 .claw/memory/）\n", len(plans), backup)
+		return
+	}
 
 	switch {
 	case *evalLabels != "":

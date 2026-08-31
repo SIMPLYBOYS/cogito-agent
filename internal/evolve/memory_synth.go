@@ -639,37 +639,54 @@ func memoryTitle(learning string) string {
 		return strings.TrimSpace(trimTitleEdge(string(r)))
 	}
 	head := r[:memoryTitleRunes]
-	// 由後往前找句讀；太靠前的不採用（切到剩三個字等於沒有標題）。
-	const minTitleRunes = 8
-	for i := len(head) - 1; i >= minTitleRunes; i-- {
-		if isTitleBreak(head[i]) {
-			return strings.TrimSpace(trimTitleEdge(string(head[:i])))
+	// 依【標點強度】分層找切點，不是找最後一個能切的地方。
+	//
+	// 實測教訓：把空格也當切點時，「實價登錄單價欄位為每平方公尺，換算每坪需乘以 3.305785」
+	// 會切在最後那個空格→「…換算每坪需乘以」，比切在更前面的「，」→「實價登錄單價欄位為每平方公尺」
+	// 差得多。中英混排的空格只是語言邊界不是語意邊界，所以【完全不採用】。
+	for _, tier := range []string{"。！？!?", "，、；：,;:", "）」』〕】)]"} {
+		if i := lastIndexAny(head, tier); i >= minTitleRunes {
+			return strings.TrimSpace(trimTitleEdge(string(head[:i+1])))
 		}
 	}
 	return strings.TrimSpace(trimTitleEdge(string(head)))
 }
 
-// isTitleBreak 判斷一個字元是不是可以切標題的句讀（中英標點皆收）。
-func isTitleBreak(c rune) bool {
-	return strings.ContainsRune("，。、；：！？（）「」『』〔〕【】,.;:!?()[]— ", c)
+// minTitleRunes 是切點的下限：切到只剩幾個字等於沒有標題，那還不如硬切滿。
+const minTitleRunes = 8
+
+// lastIndexAny 回 head 裡最後一個屬於 set 的 rune 索引；沒有回 -1。
+func lastIndexAny(head []rune, set string) int {
+	for i := len(head) - 1; i >= 0; i-- {
+		if strings.ContainsRune(set, head[i]) {
+			return i
+		}
+	}
+	return -1
 }
 
-// trimTitleEdge 剝掉標題尾端的 markdown 記號與孤立開引號，再砍掉未閉合的括號段。
+// trimTitleEdge 清掉切點留下的殘渣。【順序有意義】：
 //
-// 兩步都必要：TrimRight 處理「結尾就是開括號」，balanceBrackets 處理「括號開了但沒關」
-// ——後者長這樣：涉及數值區間的過濾（如「年薪≥140萬」遇到  ← （ 一直沒閉合。
-// 留著它當 [[link]] 目標一樣是廢的。
+//  1. 先剝尾端的記號與標點——因為 TrimRight 自己會【製造】不平衡：
+//     「外部工具**起初查無不代表永久不可用**」尾端那組 ** 被剝掉之後，前面那組就落單了。
+//     先剝再配對，配對看到的才是最終字串。
+//  2. 再配對括號與記號。
+//  3. 最後只剝尾端【標點】（不含記號），避免第 3 步又把剛配好的記號拆掉。
 func trimTitleEdge(s string) string {
+	const edgeAll = "*_`~#（(「『〔【[<，、；：-— "
+	const edgePunct = "（(「『〔【[<，、；：-— "
+	s = strings.TrimRight(s, edgeAll)
+	s = stripMarkers(s)
 	s = balanceBrackets(s)
-	return strings.TrimRight(s, "*_`~#（(「『〔【[<，、；：-— ")
+	return strings.TrimRight(s, edgePunct)
 }
 
-// titleBrackets 是要配對的括號（開→閉）。只收成對的標點，引號類也算。
+// titleBrackets 是要配對的括號（開→閉）。引號類也算。
 var titleBrackets = map[rune]rune{'（': '）', '(': ')', '「': '」', '『': '』', '〔': '〕', '【': '】', '[': ']'}
 
 // balanceBrackets 砍到第一個未閉合的開括號之前。已全數閉合則原樣回傳。
 func balanceBrackets(s string) string {
-	var stack []int // 未閉合開括號的 rune 索引
+	var stack []int
 	r := []rune(s)
 	for i, c := range r {
 		if _, ok := titleBrackets[c]; ok {
@@ -684,6 +701,24 @@ func balanceBrackets(s string) string {
 		return s
 	}
 	return string(r[:stack[0]])
+}
+
+// titleMarkers 是標題裡要【整個剝掉】的 markdown 強調記號。
+//
+// 剝掉而不是「切在未閉合處」：強調記號在標題裡沒有任何語意，切掉反而丟內容——
+// 「外部工具**起初查無不代表永久不可用**；」若切在未閉合的 ** 只剩「外部工具」，
+// 剝掉則得到完整的「外部工具起初查無不代表永久不可用」。實測踩過。
+//
+// 刻意【不含 _】：底線在技術文字裡是識別字的一部分（query_rows、tool_name），
+// 當成強調記號會把「查詢開放資料前先用 query_rows」砍成「…先用 query」。也實測踩過。
+var titleMarkers = []string{"**", "`"}
+
+// stripMarkers 把強調記號從標題中移除（不影響其餘文字）。
+func stripMarkers(s string) string {
+	for _, m := range titleMarkers {
+		s = strings.ReplaceAll(s, m, "")
+	}
+	return s
 }
 
 // writeMemoryRecord 把一條學習落成可檢索記錄。slug 用內容雜湊→同一條學習冪等（重複放行覆蓋同檔，不增量）。

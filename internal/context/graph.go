@@ -31,6 +31,7 @@ type Graph struct {
 	nodes map[string]MemoryRecord
 	out   map[string][]Edge
 	in    map[string][]Edge
+	alias map[string]string // 檔名 slug → 節點鍵（name）。只轉址，不複製節點。
 }
 
 // parseLinks 從正文抽 [[target]] 或 [[type::target]]（後者為 Stage 2 typed edge 預留）。
@@ -56,17 +57,18 @@ func (m *MemoryLoader) Graph() *Graph {
 		nodes: make(map[string]MemoryRecord, len(recs)),
 		out:   make(map[string][]Edge),
 		in:    make(map[string][]Edge),
+		alias: make(map[string]string),
 	}
 	for _, r := range recs {
 		g.nodes[r.Name] = r
-		// 檔名 slug（mem-xxxxxxxx）也當節點鍵。
+		// 檔名 slug（mem-xxxxxxxx）登記成【別名】而不是第二個節點。
 		//
-		// 【為何】那才是這筆記錄的【正典識別】：整併的 UPDATE/DELETE 用它比對、撤回窗靠它
-		// 事後對回檔案（內容定址）。name 只是顯示標題，恰好也被當成 [[link]] 目標——一旦
-		// 標題不好寫（或被改寫），連結就配不到。認 slug 讓「指得到」不依賴標題品質，
-		// 也讓自動推導的邊有一個永遠穩定的鍵可用。
+		// 【為何是別名】slug 才是這筆記錄的正典 ID（整併用它比對、撤回窗靠它對回檔案），
+		// 所以連結與推導邊都該指得到它。但若直接 g.nodes[slug]=r，同一筆記錄就變成兩個
+		// 節點——BFS 的 visited 以鍵為單位，同一筆會被走訪兩次、吃掉兩格 budget、
+		// 在子圖裡印兩遍。實測踩過。別名只做鍵的轉址，節點永遠一份。
 		if slug := recordSlug(r); slug != "" && slug != r.Name {
-			g.nodes[slug] = r
+			g.alias[slug] = r.Name
 		}
 	}
 	for _, r := range recs {
@@ -90,8 +92,23 @@ func recordSlug(r MemoryRecord) string {
 	return strings.TrimSuffix(filepath.Base(r.Path), ".md")
 }
 
+// resolve 把任意鍵（節點名或檔名 slug）轉成正典節點鍵。不認得就原樣回傳
+// ——讓呼叫端照舊走「建 dangling stub」那條路。
+func (g *Graph) resolve(key string) string {
+	if _, ok := g.nodes[key]; ok {
+		return key
+	}
+	if canon, ok := g.alias[key]; ok {
+		return canon
+	}
+	return key
+}
+
 // addEdge 加一條邊到鄰接表；自環略過、指向不存在節點則建 dangling stub。
 func (g *Graph) addEdge(e Edge) {
+	// 先把兩端轉成正典鍵：推導邊用 slug 當端點，不轉的話會各自建出 dangling stub，
+	// 於是圖裡同時有「真記錄」與「同一筆的空殼」，而邊只連到空殼那個。
+	e.From, e.To = g.resolve(e.From), g.resolve(e.To)
 	if e.From == "" || e.To == "" || e.From == e.To {
 		return
 	}
@@ -215,6 +232,7 @@ func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Ed
 	depth := map[string]int{}
 	var order, queue []string
 	for _, s := range seeds {
+		s = g.resolve(s) // 種子也可能是 slug
 		if _, ok := g.nodes[s]; ok && !visited[s] {
 			visited[s] = true
 			depth[s] = 0

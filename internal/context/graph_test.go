@@ -130,17 +130,23 @@ func TestGraph_NodesAddressableByFileSlug(t *testing.T) {
 
 	g := NewMemoryLoader(dir).Graph()
 
-	// 斷言【真的記錄】，不是 dangling stub——沒有 slug 索引時 addEdge 也會建一個同名 stub，
-	// 只檢查「節點存在」會綠得毫無意義（實際踩過這個假綠）。
-	n, ok := g.nodes["mem-bbbb2222"]
+	// slug 要能【轉址】到真記錄，而不是自成一個節點。
+	// 斷言真記錄而非「節點存在」：沒有這個機制時 addEdge 也會建一個同名 dangling stub，
+	// 只檢查存在會綠得毫無意義（實際踩過這個假綠）。
+	n, ok := g.nodes[g.resolve("mem-bbbb2222")]
 	if !ok {
-		t.Fatal("檔名 slug 不是節點鍵——自動推導的邊會沒有穩定的鍵可用")
+		t.Fatal("檔名 slug 轉址不到節點——自動推導的邊會沒有穩定的鍵可用")
 	}
 	if n.Path == "" || n.Description == "" {
 		t.Fatalf("slug 指到的是空殼 stub 而非真記錄：%+v", n)
 	}
 	if !strings.Contains(n.Body, "被指向的記錄") {
 		t.Errorf("slug 指到的節點內容不對：%q", n.Body)
+	}
+	// 【同一筆記錄只能有一個節點】。曾經把 slug 直接寫成第二個 nodes 鍵，於是 BFS 走訪
+	// 兩次、吃掉兩格 budget、子圖裡同一筆印兩遍。別名只轉址，不複製。
+	if len(g.nodes) != 2 {
+		t.Errorf("兩筆記錄應只有 2 個節點，實際 %d（slug 被當成獨立節點了）", len(g.nodes))
 	}
 	nodes, edges := g.Subgraph([]string{"起點"}, 1, 8)
 	if len(nodes) != 2 {

@@ -36,6 +36,13 @@ topic edges 用「≥2 個 agent 都提過」的啟發式，並自承「This is 
 **完成條件**：跑一次推導後 `edges.jsonl` 有 ≥1 條 source 標 `derived` 的邊，
 且 `cmd/ingest -recall` 能沿它撈到多跳結果；推導可重跑且冪等（跑兩次不重複）。
 
+### ✅ 已完成（2026-08-31）
+
+`cmd/ingest -derive-edges` → 提案檔 → 既有的 `-review-edges` / `-apply-edges` 流程。
+實測 4 個任務推出 **24 條** `same-origin` 邊、過閘 **0 拒絕**，`-recall -hops 2`
+撈回 8 個連通節點。**co-recall 邊未做**：帳本（memory-usage.json）只有 `last_used`
+與 `hits`，沒有共現紀錄——要做得先擴充帳本，另立工項。
+
 ## 2. 🟢 修 KG 節點 name 截斷（既有待辦，優先級因 #1 提高）
 
 **現況**：`memoryTitleRunes = 24` 硬截斷，14 個節點 ID 全是斷句，`[[link]]` 無從指向
@@ -53,7 +60,7 @@ topic edges 用「≥2 個 agent 都提過」的啟發式，並自承「This is 
   兩個產生點（新記錄、整併 UPDATE）共用。**只影響往後產生的記錄。**
 - ✅ **圖改認檔名 slug**：`Graph()` 同時以 `name` 與 `mem-xxxxxxxx` 索引節點。
   既有 14 筆【立刻可被指向】，不必等遷移——這也讓 #1 的推導邊有永遠穩定的鍵。
-- ⬜ **既有 14 筆遷移**：改寫 frontmatter `name`。動的是使用者資料，另行決定。
+- ✅ **既有記錄已遷移**（2026-08-31）：`cmd/ingest -fix-names`（預設預覽、`-apply` 才寫、先備份）。實跑改寫 11 筆，檔名與正文零改動。
 - ⬜ **LLM 自擬短標題**（可選）：句讀切法產出的仍是長句片段（如
   「對外部 MCP 工具回傳的資料，一律當作」）。要真正好寫的連結目標，
   得讓反思器自己吐一個 title 欄位——那要改提案格式，範圍較大。
