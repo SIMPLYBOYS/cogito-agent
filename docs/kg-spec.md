@@ -3,7 +3,10 @@
 > **狀態**：**Stage 1 + Stage 2 已實作** —— Stage 1（`[[links]]` 建圖 + 子圖 recall，[graph.go](../internal/context/graph.go)）；Stage 2a（多檔案 md **結構式 ingest** → 節點 + `edges.jsonl`，[ingest.go](../internal/context/ingest.go)）；Stage 2b（**gated LLM typed 關係抽取**：[evolve/kg_extract.go](../internal/evolve/kg_extract.go) 抽 → [context/kg_gate.go](../internal/context/kg_gate.go) 把關 → 併入，入口 `cmd/ingest -llm / -review-edges / -apply-edges`）；Stage 3a（**embedding 混合選種子**，opt-in：[embed.go](../internal/context/embed.go) + [provider/embedding.go](../internal/provider/embedding.go)，`cmd/ingest -embed` 建向量快取，未配置則退回關鍵字）。**Stage 3b**（持久化 / ANN 索引）待做——巨量才需，觸發未到。本文是可迭代的設計。
 > 背景與取捨見 [DESIGN.md](../DESIGN.md) 的「長期記憶」維度；現有記憶實作見 [internal/context/memory.go](../internal/context/memory.go)。
 >
-> ⚠️ **本文是設計意圖。實際跑起來是什麼樣子見 [kg-status.md](kg-status.md)**——那份實測過程式碼與真實資料，並記錄了一個關鍵落差：正式記憶庫目前 14 個節點、**0 條邊**，KG 那層在本機是空轉的（原因是節點 `name` 被截斷成無法被 `[[link]]` 指向的句子）。
+> ⚠️ **本文是設計意圖。實際跑起來是什麼樣子見 [kg-status.md](kg-status.md)**——那份實測過程式碼與真實資料。
+> 2026-08-31 起正式記憶庫已真的在用（14 節點、25 條邊）；此前曾長期空轉（0 條邊），根因是節點 `name` 被硬切成斷句、沒有人寫得出指向它的連結，該段分析保留在 kg-status §4。
+>
+> **本文未涵蓋的兩項後續實作**：邊的第三種來源「從 provenance **推導**」（`cmd/ingest -derive-edges`，確定性、零 LLM），以及節點可用**檔名 slug** 定址（不再只靠 `name`）。
 
 ## 目標
 把「離散記錄 + 關鍵字檢索」升級成「**可遍歷的圖 + 子圖檢索**」，讓 agent 能做 **RAG 做不到的多跳關係推理**；並支援**多檔案 md ingest** 成圖。核心理念：**KG 提供結構，LLM 在明確的關係子圖上做推理**。
