@@ -224,7 +224,9 @@ func (g *Graph) neighbors(name string) []string {
 }
 
 // Subgraph 從種子 BFS 無向擴張 hops 跳，總節點封頂 budget（就近優先）；回傳節點（BFS 序）與誘導子圖的邊。
-func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Edge) {
+// 第三個回傳值＝【是否因為 budget 而停下】。呼叫端要據此告訴使用者/模型「這不是全部」
+// ——靜默截斷會讓人把部分鄰域當成完整鄰域（DESIGN.md 原則 6）。
+func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Edge, bool) {
 	if budget <= 0 {
 		budget = recallBudget
 	}
@@ -240,6 +242,7 @@ func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Ed
 			queue = append(queue, s)
 		}
 	}
+	truncated := false
 	for len(queue) > 0 && len(order) < budget {
 		cur := queue[0]
 		queue = queue[1:]
@@ -247,7 +250,11 @@ func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Ed
 			continue
 		}
 		for _, nb := range g.neighbors(cur) {
-			if visited[nb] || len(order) >= budget {
+			if visited[nb] {
+				continue
+			}
+			if len(order) >= budget {
+				truncated = true // 還有沒展開的鄰居，是預算把我們擋下來的
 				continue
 			}
 			visited[nb] = true
@@ -277,7 +284,7 @@ func (g *Graph) Subgraph(seeds []string, hops, budget int) ([]MemoryRecord, []Ed
 		}
 		return edges[i].To < edges[j].To
 	})
-	return nodes, edges
+	return nodes, edges, truncated
 }
 
 // RenderSubgraph 把子圖序列化給 LLM：各節點正文 + 一段明確的關係列表（讓模型在關係上做多跳推理）。

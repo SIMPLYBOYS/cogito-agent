@@ -98,7 +98,7 @@ func RunMemEval(loader *ctxpkg.MemoryLoader, cases []MemEvalCase, emb ctxpkg.Emb
 				score("embedding", g.SeedsEmbed(qv, cache, k), exp)
 			}
 		}
-		nodes, _ := g.Subgraph(g.Seeds(c.Query, recallSeedsForEval), hops, k)
+		nodes, _, _ := g.Subgraph(g.Seeds(c.Query, recallSeedsForEval), hops, k)
 		score("keyword+kg", recordNames(nodes), exp)
 	}
 

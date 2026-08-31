@@ -1,6 +1,7 @@
 package context
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,7 +62,7 @@ func TestGraph_SeedsAndSubgraph(t *testing.T) {
 	}
 
 	// 1 跳：alpha + 直接鄰居 beta/gamma/ghost
-	nodes, edges := g.Subgraph(seeds, 1, 8)
+	nodes, edges, _ := g.Subgraph(seeds, 1, 8)
 	got := map[string]bool{}
 	for _, n := range nodes {
 		got[n.Name] = true
@@ -88,7 +89,7 @@ func TestGraph_SeedsAndSubgraph(t *testing.T) {
 
 func TestGraph_SubgraphBudgetCap(t *testing.T) {
 	g := setupGraph(t).Graph()
-	nodes, _ := g.Subgraph([]string{"alpha"}, 2, 2)
+	nodes, _, _ := g.Subgraph([]string{"alpha"}, 2, 2)
 	if len(nodes) != 2 {
 		t.Errorf("budget=2 應只回 2 節點，got %d", len(nodes))
 	}
@@ -148,7 +149,7 @@ func TestGraph_NodesAddressableByFileSlug(t *testing.T) {
 	if len(g.nodes) != 2 {
 		t.Errorf("兩筆記錄應只有 2 個節點，實際 %d（slug 被當成獨立節點了）", len(g.nodes))
 	}
-	nodes, edges := g.Subgraph([]string{"起點"}, 1, 8)
+	nodes, edges, _ := g.Subgraph([]string{"起點"}, 1, 8)
 	if len(nodes) != 2 {
 		t.Errorf("應沿 slug 連結擴張到 2 個節點，實際 %d", len(nodes))
 	}
@@ -158,5 +159,34 @@ func TestGraph_NodesAddressableByFileSlug(t *testing.T) {
 	// 標題仍然可以當鍵，兩種都通。
 	if _, ok := g.nodes["外部工具（MCP/API）查不到或未掛載時"]; !ok {
 		t.Error("name 也應該還是節點鍵（不能只認 slug）")
+	}
+}
+
+// 子圖被預算擋下時，輸出必須講出來（DESIGN.md 原則 6：絕不靜默截斷）。
+//
+// 靜默封頂會讓模型把【部分鄰域】當成完整鄰域——「檢索到的就是我知道的一切」這種錯覺
+// 正是這樣來的，而且事後完全查不出來（輸出看起來就是一份正常的子圖）。
+func TestRecallGraph_AnnouncesBudgetCap(t *testing.T) {
+	dir := t.TempDir()
+	memDir := filepath.Join(dir, ".claw", "memory")
+	if err := os.MkdirAll(memDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 一個星狀圖：中心連出 12 個鄰居，遠超 recallBudget(8)。
+	var links string
+	for i := 0; i < 12; i++ {
+		leaf := fmt.Sprintf("葉%02d", i)
+		links += "[[" + leaf + "]] "
+		writeMem(t, memDir, fmt.Sprintf("mem-leaf%02d", i),
+			"---\nname: "+leaf+"\ndescription: d\n---\n葉節點內容")
+	}
+	writeMem(t, memDir, "mem-hub", "---\nname: 中心\ndescription: 星狀圖中心\n---\n"+links)
+
+	out := NewMemoryLoader(dir).RecallGraph("中心", 1, nil)
+	if out == "" {
+		t.Fatal("應撈得到東西")
+	}
+	if !strings.Contains(out, "上限") {
+		t.Errorf("子圖被預算擋下卻沒講——模型會把部分鄰域當成全部。輸出：\n%s", out)
 	}
 }

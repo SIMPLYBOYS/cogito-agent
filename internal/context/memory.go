@@ -548,13 +548,19 @@ func (m *MemoryLoader) RecallGraph(query string, hops int, emb Embedder) string 
 	if len(seeds) == 0 {
 		return ""
 	}
-	nodes, edges := g.Subgraph(seeds, hops, recallBudget)
+	nodes, edges, truncated := g.Subgraph(seeds, hops, recallBudget)
 	hits := make([]string, 0, len(nodes))
 	for _, n := range nodes {
 		hits = append(hits, n.Path) // stub 節點 Path="" → recordHits 內部略過
 	}
 	m.recordHits(hits)
-	return RenderSubgraph(nodes, edges)
+	out := RenderSubgraph(nodes, edges)
+	if truncated {
+		// 絕不靜默截斷（DESIGN.md 原則 6）：打到預算時模型看到的是【部分】鄰域，
+		// 不講的話它會把這幾筆當成全部——「檢索到的就是我知道的一切」正是這樣來的。
+		out += fmt.Sprintf("\n（子圖已達 %d 個節點的上限，仍有未展開的鄰居；需要時對其中一個節點名再 recall 一次往外走）\n", recallBudget)
+	}
+	return out
 }
 
 // scoreRecord：tags > name > description > body 加權的關鍵字命中加總。
