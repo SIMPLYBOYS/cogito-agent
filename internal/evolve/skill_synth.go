@@ -84,8 +84,17 @@ body 請依 agentskills.io 慣例分三段（markdown）：
 ## Examples
 - 真實範例：命令 + 預期輸出
 
+另有兩段【選填】——有真實內容才寫，空段落是雜訊：
+## Required from user
+- 開工前需要使用者先提供、執行者自己拿不到的東西（憑證、目標位置、二選一的決策）。
+  寫了這段，執行者會【開場先要】，而不是跑到一半卡在缺東西。
+## Forbidden actions
+- 這個流程裡絕對不可做的事，一行一條，寫踩過的雷。
+  【注意】寫行為描述（「不要強制覆寫遠端分支」），不要貼危險指令原文——
+  安全掃描掃的是全文、不看語境，貼原文會讓這份技能過不了晉升把關。
+
 輸出規則：只輸出一個 JSON 物件，不要任何其他文字或 markdown 圍欄。
-- 值得保存：{"worth_saving": true, "name": "<kebab-case 短名，限 a-z0-9._->", "description": "<一句話：做什麼 + 何時用>", "body": "<上述三段式 markdown>"}
+- 值得保存：{"worth_saving": true, "name": "<kebab-case 短名，限 a-z0-9._->", "description": "<一句話：做什麼 + 何時用>", "body": "<上述分段 markdown，選填段落沒內容就整段省略>"}
 - 不值得：{"worth_saving": false}`
 
 // existingSkills 列出「已經有的」技能一句話索引：生效中的 + 還在等審的提案。
