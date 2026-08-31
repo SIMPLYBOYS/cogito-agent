@@ -1,0 +1,91 @@
+# CI 失敗自動診斷 —— Devin use-case #25 的拉式等價物（事件端在 GitHub 發起，
+# 我們不需要 webhook 接收器）。詳見 docs/ci-autofix-runbook.md。
+#
+# 【預設惰性】兩個條件都成立才會跑（缺一即整個 job 跳過，不留紅燈雜訊）：
+#   1. repo Variables 設 COGITO_AUTOFIX=1   ← 開關：這個 workflow 每次觸發都花真錢
+#   2. repo Secrets 設 ANTHROPIC_API_KEY
+#
+# 【只診斷，不推碼】刻意不讓它 push fix：
+#   - 推碼會再觸發 CI，修不好就是「失敗→修→失敗」的付費迴圈
+#   - 診斷報告進 job summary + artifact，修不修由人決定——與本專案「提案→人審」的治理一致
+name: CI Autofix
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read # 下載失敗 run 的 log
+
+jobs:
+  diagnose:
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      vars.COGITO_AUTOFIX == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 檢查 secret（缺就明確跳過，別留看不懂的紅燈）
+        id: key
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            echo "未設 ANTHROPIC_API_KEY，跳過。" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.skip != '1'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }} # 診斷【失敗的那個 commit】，不是 main 尖端
+
+      - uses: actions/setup-go@v5
+        if: steps.key.outputs.skip != '1'
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: 抓失敗 run 的 log
+        if: steps.key.outputs.skip != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view ${{ github.event.workflow_run.id }} --repo ${{ github.repository }} \
+            --log-failed > ci-failure.log 2>&1 || true
+          tail -c 200000 ci-failure.log > ci-failure-tail.log   # 只留尾段：結論在尾巴
+
+      - name: claw-cli 診斷
+        if: steps.key.outputs.skip != '1'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: claude-haiku-4-5 # 診斷用 haiku 就夠；要換模型改這裡
+        run: |
+          go run ./cmd/claw-cli -dir . -session "ci-autofix-${{ github.event.workflow_run.id }}" \
+            -prompt "$(cat <<'EOF'
+          CI 在這個 commit 上失敗了（gofmt / go vet / go build / go test -race 四關之一）。
+          失敗 log 的尾段在 ci-failure-tail.log。照 diagnosing-bugs 的紀律：
+          1. 讀 log 找出【哪一關、哪個測試/檔案】失敗，先在本地重現那個紅（能重現才算找到）
+          2. 排出 1~3 個可證偽的根因假設，逐一驗證
+          3. 產出報告寫進 ci-diagnosis.md：失敗點｜根因｜最小修法（含 diff 建議）｜排除掉的假設
+          【不要】改任何原始碼、【不要】git commit——你的交付物只有 ci-diagnosis.md。
+          EOF
+          )" 2>&1 | tail -40
+
+      - name: 報告進 job summary
+        if: steps.key.outputs.skip != '1'
+        run: |
+          if [ -f workspace/ci-diagnosis.md ]; then cat workspace/ci-diagnosis.md >> "$GITHUB_STEP_SUMMARY";
+          elif [ -f ci-diagnosis.md ]; then cat ci-diagnosis.md >> "$GITHUB_STEP_SUMMARY";
+          else echo "⚠️ agent 沒有產出 ci-diagnosis.md（看上一步的輸出尾段）" >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.skip != '1'
+        with:
+          name: ci-diagnosis-${{ github.event.workflow_run.id }}
+          path: |
+            ci-diagnosis.md
+            workspace/ci-diagnosis.md
+            ci-failure-tail.log
+          if-no-files-found: ignore
+          retention-days: 14

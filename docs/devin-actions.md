@@ -97,6 +97,20 @@ dangerousSkillPatterns 掃全文、無否定句豁免——實測「不要跑 rm
 | 事件觸發廣度（GitHub CI 失敗/Linear/webhook → 開任務） | **真缺口但屬廣度**——roadmap 已定調是 transport adapter 的事，按需求加；加的那天帶上 §4 第二條 |
 | DeepWiki / repo 索引 | **未評估**（沒讀到細節），不是「不追」——誠實區分 |
 
+## 6. Use-case 缺口盤點（2026-08-31 補）
+
+對照 Devin 的 45 條 use-case gallery 逐項映射：約六成今天做得到、一成卡「事件觸發」
+單一缺口、其餘是裁決過的量級差異。真正遺漏的多半是**食譜不是能力**：
+
+- ✅ **CI 失敗自動診斷**（其 #25 的拉式等價）——已落地：
+  [.github/workflows/ci-autofix.yml](../.github/workflows/ci-autofix.yml) +
+  [ci-autofix-runbook.md](ci-autofix-runbook.md)。預設惰性（repo variable 開關）、
+  只診斷不推碼（防付費迴圈）、haiku + 熔斷雙保險。
+- ⬜ **webhook → `/task` 安全食譜**——零件都在（office 協定第三端點：Bearer token、
+  預設 loopback），缺 payload 塑形與對外暴露形態；掛 tsnet-plan 的觸發，
+  做的那天帶上 §4 的網路政策。
+- ⬜ **cron cookbook**（週報/依賴更新/夜測）——純文件，機制全有。
+
 ## 建議執行順序
 
 **#1 → #2**（#1 打在已量測的弱點上；#2 幾行）。#3 掛觸發、#4 純記錄。
