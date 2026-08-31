@@ -156,5 +156,6 @@ go run ./cmd/ingest -root <記憶根> -recall "查詢字串" -hops 2
 
 1. **修 `name` 截斷**（§4）——不修的話 KG 在正式庫裡永遠是裝飾。風險低、範圍清楚。
 2. **裁決那 9 條提案邊**——跑一次 `-review-edges` 看它們是否還有意義（2026-06-29 至今）。
-3. 補 `edges.jsonl` → `Graph()` 的端到端測試（§8）。
-4. Stage 3b：等節點數真的讓 `Graph()` 變慢再說。
+3. **自動邊（推導，零 LLM）**——co-recall 邊（同 session 一起被 recall）與 provenance 邊（同任務沉澱），讓圖自己長。細節見 [munder-difflin-actions.md](munder-difflin-actions.md) §1。
+4. 補 `edges.jsonl` → `Graph()` 的端到端測試（§8）。
+5. Stage 3b：等節點數真的讓 `Graph()` 變慢再說。

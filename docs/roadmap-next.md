@@ -237,7 +237,7 @@ Revoke）改用它。稽核粒度從「從面板做的」升級成「aaron@examp
 |---|---|
 | **Kanban 共享工作面** | 先跑 orchestrator 一週；現在做是照抄別人的解法，解自己還沒有的問題 |
 | **通道廣度**（WhatsApp／Signal／Email／iMessage） | positioning 已定調：廣度是它的護城河。`chatbot.Core` 平台無關，要加隨時是 transport adapter 的事，不是架構問題 |
-| **Inter-agent messaging**（行程間路由） | 具名 agent 的持久記憶先解掉大部分需求；等 orchestrator 用出真需求再說 |
+| **Inter-agent messaging**（行程間路由） | 具名 agent 的持久記憶先解掉大部分需求；等 orchestrator 用出真需求再說。**觸發時的參考設計已記錄**：[munder-difflin-actions.md](munder-difflin-actions.md) §4（檔案信箱＋FIPA 言語行為＋hop 封頂，口味與我們一致） |
 | **桌面 app／TUI** | 不同量級的產品面。C-Spec §七.4 已判定「按 cogito 進駐 IM 的定位，互動式介面是**選配非核心**」 |
 | **面板的 Logs／Analytics 頁** | **不是缺口是分工**——trace 與成本已上 Langfuse，那邊本來就有多人認證 |
 | **Ragas 評測框架**（2026-08-18 評估） | **它解的問題跟我們的風險不同。** 它的 RAG 指標我們已有更好的替代（`hit@k` 確定性、$0；Agent Goal ≈ SWE-bench 的客觀 pass/fail），真正的缺口只有 faithfulness 與 Tool Call Accuracy——而 agent 最危險的失真是「說做完了但沒做」，那個我們用**驗產物**解決（`delegate-and-verify-file`、`spec` 軸），比請 AI 幫散文打分準且免費。**決定性的一點**：原始需求是「偵測 drift → 分析原因 → 提出解法並執行」，Ragas **三件都不做**，引進來還得自己蓋 drift 層，且蓋在一個 LLM 評審換版就會漂的訊號上 |
