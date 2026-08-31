@@ -174,6 +174,8 @@ go run ./cmd/ingest -root <記憶根> -recall "查詢字串" -hops 2
 
 剩下的：
 
+0. **記憶 `trigger` 欄位**——「什麼情況該想起我」與內容分離，直接打 11/14 筆 `hits:0`
+   的檢索弱點。細節見 [devin-actions.md](devin-actions.md) §1。
 1. **co-recall 邊**——同一 session 被一起 recall 的記錄互相關聯。**卡在資料**：
    帳本（`memory-usage.json`）只有 `last_used` 與 `hits`，沒有共現紀錄，要先擴充它。
 2. **LLM 自擬短標題**（可選）——句讀切法產出的仍是長句片段（「對外部 MCP 工具回傳的資料」）。
