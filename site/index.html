@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cogito-agent — 想，故而做</title>
+<meta name="description" content="Go 寫的單 binary 自託管 agent harness：安全控制與可觀測評測見長，Slack/Telegram 進駐，附像素辦公室投影。">
+<link rel="icon" href="assets/avatar.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* Hallmark · macrostructure: Marquee Hero · theme: studied-DNA (source: https://munderdiffl.in/)
+ * 完整 stamp 見 tokens.css 頂部 */
+* { box-sizing: border-box; }
+html { overflow-x: clip; }
+body {
+  overflow-x: clip;
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: var(--text-base);
+  line-height: 1.65;
+}
+.wrap { max-width: var(--maxw); margin-inline: auto; padding-inline: var(--page-gutter); }
+a { color: var(--color-accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--color-accent-deep); }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 3px; }
+img { max-width: 100%; height: auto; }
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-height: 1.12; text-wrap: balance; overflow-wrap: anywhere; min-width: 0; }
+
+/* ── N1 導覽（本頁只有兩個目的地，N1 是誠實的選擇）── */
+.nav { display: flex; align-items: center; justify-content: space-between; gap: var(--space-lg); padding-block: var(--space-lg); }
+.wordmark { font-family: var(--font-outlier); font-size: var(--text-sm); color: var(--color-ink); text-decoration: none; letter-spacing: 0.02em; }
+.wordmark:hover { color: var(--color-accent); }
+.nav ul { display: flex; gap: var(--space-lg); list-style: none; margin: 0; padding: 0; }
+.nav a { white-space: nowrap; }
+
+/* ── Marquee hero：宣言即版面 ── */
+.hero { min-height: 72dvh; display: grid; align-content: end; padding-block: var(--space-2xl) var(--space-xl); }
+.hero .status { font-family: var(--font-outlier); font-size: 0.6rem; color: var(--color-ok); letter-spacing: 0.08em; margin: 0 0 var(--space-lg); }
+.hero h1 { font-size: var(--text-display); font-weight: 700; margin: 0; max-width: 22ch; }
+.hero h1 em { font-style: normal; color: var(--color-accent); }
+.rule-thick { border: 0; border-top: 3px solid var(--color-rule-strong); margin: var(--space-xl) 0 0; }
+
+/* ── 定位 + demo ── */
+.pitch { display: grid; gap: var(--space-xl); grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); align-items: start; padding-block: var(--space-3xl) var(--space-2xl); }
+.pitch p { max-width: 34em; margin: 0 0 var(--space-md); }
+.pitch .lead { font-size: var(--text-md); color: var(--color-ink); }
+.pitch .muted { color: var(--color-muted); }
+.office { margin: 0; }
+.office img { display: block; border: var(--px-border); box-shadow: var(--px-shadow); image-rendering: pixelated; border-radius: 0; }
+.office figcaption { font-size: var(--text-sm); color: var(--color-faint); padding-top: var(--space-sm); }
+
+/* ── T4 數據帶：真數字 + 保留註記 ── */
+.stats { border-block: 1px solid var(--color-rule); padding-block: var(--space-xl); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-lg); font-variant-numeric: tabular-nums; }
+.stats b { display: block; font-family: var(--font-display); font-size: var(--text-xl); font-weight: 700; color: var(--color-ink); }
+.stats .up { color: var(--color-accent); }
+.stats span { display: block; font-size: var(--text-sm); color: var(--color-muted); margin-top: var(--space-2xs); line-height: 1.5; }
+.stats .note { color: var(--color-faint); }
+
+/* ── F4 三步驟（真序列，容許編號）── */
+.steps-wrap { padding-block: var(--space-3xl); }
+.steps-wrap h2 { font-size: var(--text-lg); margin: 0 0 var(--space-xl); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xl); }
+.steps li { display: grid; gap: var(--space-2xs); max-width: 46em; }
+.steps .stage { font-family: var(--font-display); font-weight: 700; color: var(--color-accent); font-size: var(--text-sm); letter-spacing: 0.04em; }
+.steps h3 { font-size: var(--text-md); margin: 0; }
+.steps p { margin: 0; color: var(--color-muted); }
+.steps li:nth-child(2) { margin-inline-start: clamp(0rem, 6vw, 4rem); } /* 刻意不對齊：節奏不是模板 */
+.steps li:nth-child(3) { margin-inline-start: clamp(0rem, 12vw, 8rem); }
+.steps code { font-family: var(--font-body); background: var(--color-paper-2); border: 1px solid var(--color-rule); border-radius: var(--radius-sm); padding: 0.1em 0.4em; font-size: 0.9em; }
+
+/* ── C1 CTA ── */
+.cta-band { padding-block: var(--space-2xl) var(--space-4xl); display: grid; gap: var(--space-lg); justify-items: start; }
+.cta-band p { margin: 0; color: var(--color-muted); max-width: 38em; }
+.cta-outline { display: inline-flex; align-items: center; gap: 0.5em; padding: 0.8rem 1.4rem; min-height: 44px; border: 2px solid var(--color-accent); color: var(--color-accent); font-family: var(--font-display); font-weight: 700; text-decoration: none; white-space: nowrap; box-shadow: var(--px-shadow); transition: transform var(--dur-micro) var(--ease-out), background-color var(--dur-short) var(--ease-out); }
+.cta-outline:hover { background: var(--color-accent-soft); color: var(--color-accent); transform: translateY(-1px); }
+.cta-outline:active { transform: translateY(1px); }
+
+/* ── Ft3 footer（真實文件 sitemap；無社群圖示列）── */
+.foot { border-top: 1px solid var(--color-rule); padding-block: var(--space-2xl); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-xl); }
+.foot .caps { font-size: var(--text-sm); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-faint); margin: 0 0 var(--space-sm); font-weight: 600; }
+.foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-xs); }
+.foot a { color: var(--color-muted); text-decoration: none; }
+.foot a:hover { color: var(--color-accent); text-decoration: underline; }
+.colophon { padding-block: var(--space-lg) var(--space-2xl); color: var(--color-faint); font-size: var(--text-sm); }
+
+/* ── 一次開場 stagger（唯一的進場動畫）── */
+.reveal { opacity: 0; transform: translateY(8px); animation: reveal var(--dur-long) var(--ease-out) forwards; animation-delay: calc(var(--i, 0) * 70ms); }
+@keyframes reveal { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 150ms !important; animation-iteration-count: 1 !important; transition-duration: 150ms !important; }
+  .reveal { animation: reveal-r 150ms linear forwards; }
+  @keyframes reveal-r { to { opacity: 1; transform: none; } }
+}
+
+/* ── 響應（320/375/414/768 驗過的收斂）── */
+@media (max-width: 60rem) {
+  .pitch { grid-template-columns: minmax(0, 1fr); }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .steps li:nth-child(2), .steps li:nth-child(3) { margin-inline-start: 0; }
+}
+@media (max-width: 40rem) {
+  .hero { min-height: 60dvh; }
+  .stats { grid-template-columns: minmax(0, 1fr); }
+  .foot { grid-template-columns: minmax(0, 1fr); }
+  .nav ul { gap: var(--space-md); }
+}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <nav class="nav" aria-label="主導覽">
+    <a class="wordmark" href="#top">COGITO</a>
+    <ul>
+      <li><a href="#eval">實測數據</a></li>
+      <li><a href="https://github.com/SIMPLYBOYS/cogito-agent">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero wrap reveal" style="--i:0">
+    <p class="status">● 單 BINARY・自託管・GATED 自我進化</p>
+    <h1>會思考的 agent 很多，<br><em>敢被審計的</em>不多。</h1>
+    <hr class="rule-thick">
+  </section>
+
+  <section class="pitch wrap">
+    <div class="reveal" style="--i:1">
+      <p class="lead">cogito-agent 是 Go 寫的 agent harness：把 Claude 驅動的 ReAct 迴圈接進 Slack 與 Telegram，在鎖定的工作區內讀寫檔案、執行指令、完成開發任務。</p>
+      <p class="muted">它的賭注下在別人略過的地方——成本熔斷、死迴圈指紋、工具權限政策、Docker 沙箱是框架硬性執行的，不指望模型自覺；技能、記憶、參數的自我進化一律「提案 → 把關 → 才生效」。每一輪花多少錢、走了哪些工具，OpenTelemetry 與面板都看得到。</p>
+      <p class="muted">然後，它有一間像素辦公室：每個 agent 是一個 NPC，接工作走到工位，委派子 agent 時真的有人起身。</p>
+    </div>
+    <figure class="office reveal" style="--i:2">
+      <img src="assets/brag.gif" alt="像素辦公室投影：多個 NPC 員工在辦公室內走動、入座工位、開會" width="820" height="461" loading="lazy">
+      <figcaption>office 投影實錄——事件來自真實的 agent 迴圈，不是預錄動畫。</figcaption>
+    </figure>
+  </section>
+
+  <section id="eval" class="wrap">
+    <div class="stats reveal" style="--i:3">
+      <div><b class="up">0.50 → 1.00</b><span>記憶檢索 hit@k：關鍵字 vs 加知識圖譜。$0、不呼叫 LLM 的確定性評測。</span></div>
+      <div><b class="up">7/20 → 15/20</b><span>技能開關的 A/B 通過率。Fisher 精確檢定 p=0.0248，補到 n=20 才顯著。</span></div>
+      <div><b class="up">8 → 3 回合</b><span>同一任務開啟長期記憶後的回合數，成本省 66%。</span></div>
+      <div><b>4/5</b><span class="note">SWE-bench 5 題子集（opus）。n=5、p=0.206 未達顯著——照實標成觀察，不寫成分數。</span></div>
+    </div>
+  </section>
+
+  <section class="steps-wrap wrap">
+    <h2 class="reveal" style="--i:4">從一則訊息到一次交付</h2>
+    <ol class="steps">
+      <li class="reveal" style="--i:5"><span class="stage">1</span><h3>丟任務給它</h3><p>在 Telegram 或 Slack @它，或用 <code>claw-cli</code> 接進腳本與 CI。任務進到鎖定的工作區。</p></li>
+      <li class="reveal" style="--i:6"><span class="stage">2</span><h3>迴圈在防線內跑</h3><p>思考 → 呼叫工具 → 觀察。回合上限、成本熔斷、危險指令黑名單、審批閘全程站崗——模型會壞，框架不跟著壞。</p></li>
+      <li class="reveal" style="--i:7"><span class="stage">3</span><h3>做完的經驗變成提案</h3><p>反思沉澱出的技能與記憶只寫進提案區，過確定性把關、人放行才生效。進化不繞過控制。</p></li>
+    </ol>
+  </section>
+
+  <section class="cta-band wrap">
+    <p class="reveal" style="--i:8">整個專案是公開的：架構取捨、評測判讀、踩過的坑都寫在 repo 裡。</p>
+    <a class="cta-outline reveal" style="--i:9" href="https://github.com/SIMPLYBOYS/cogito-agent">讀 README →</a>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div class="foot">
+    <div>
+      <p class="caps">文件</p>
+      <ul>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/DESIGN.md">設計取捨 DESIGN</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/POSITIONING.md">定位 POSITIONING</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/SECURITY.md">安全模型 SECURITY</a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="caps">評測</p>
+      <ul>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/docs/eval-results.md">結果與判讀</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/docs/swebench-runbook.md">SWE-bench runbook</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/docs/kg-status.md">知識圖譜現況</a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="caps">專案</p>
+      <ul>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent">GitHub</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/docs/office-protocol.md">像素辦公室協定</a></li>
+        <li><a href="https://github.com/SIMPLYBOYS/cogito-agent/blob/main/docs/incident-blacklist-bypass.md">事故紀錄（誠實版）</a></li>
+      </ul>
+    </div>
+  </div>
+  <p class="colophon wrap-inner">cogito, ergo ago——想，故而做。一個 HTML 檔，沒有建置步驟。</p>
+</footer>
+</body>
+</html>
