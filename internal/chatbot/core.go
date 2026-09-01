@@ -558,6 +558,7 @@ const helpText = "🧭 **cogito-agent 指令一覽**\n\n" +
 	"**交辦任務**：直接打字描述任務即可（群組請 @我 或回覆我）。危險操作會請你 approve/reject。\n\n" +
 	"**執行控制**\n" +
 	"`stop` — 中止本頻道正在跑的任務\n" +
+	"`/steer <一句話>` — 對進行中的任務插話糾正方向（下一回合生效，不打斷、不作廢已做的）\n" +
 	"`status` — 看本會話花費 / token / 歷史長度 / 模型\n" +
 	"`get <路徑>` — 把工作區裡的檔案傳回聊天（如 `get report.md`；上限 50 MB）\n" +
 	"`model` / `model <id>` — 查看 / 切換本頻道模型（`model reset` 還原預設）\n" +

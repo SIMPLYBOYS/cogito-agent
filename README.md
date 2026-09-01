@@ -43,7 +43,7 @@
 - 🔒 **入口授權（fail-closed）**：Slack/Telegram 只有 `COGITO_ALLOWED_USERS` 名單內的 user id 能驅動 agent；不設＝拒絕所有人。高危審批限 `COGITO_ADMIN_USERS`，杜絕「發起者自我放行」。**上線前務必設白名單**（見 [.env.example](.env.example)）——bot 入口 + 工具執行不設限＝未授權者可 RCE。
 - 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的呼叫掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區——`..` 穿越、絕對路徑、**以及 symlink**（解析到最深的已存在祖先後重驗前綴），不依賴可被繞過的審批。
 - 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
-- 🚦 **失控熔斷**：回合上限、per-task 成本熔斷（兩道硬斷路）＋ 無窮迴圈指紋探測（軟干預：命中即注入「跳出重試」提醒，不中止）。
+- 🚦 **失控熔斷**：回合上限、per-task 成本熔斷（兩道硬斷路）＋ 無窮迴圈指紋探測（軟干預：命中即注入「跳出重試」提醒，不中止）；人工介入也有階梯——看到走偏可先 `/steer` 插話糾正方向（不作廢已燒的錢），`stop` 是最後一階。
 - ⚡ **工具併發限流** ＋ 🩹 **錯誤自愈**：報錯時注入「下一步怎麼做」的救援指南。
 
 **上下文工程**
@@ -52,13 +52,13 @@
 - 👤 **使用者畫像層（常駐）**：標了 `tags: [user]` 的記憶【正文每輪常駐】，不走 `recall`——「他不吃某種寫法」這種事，等模型想起來要查時通常已經寫完了。額度封頂（12 條 / 2000 字）、依名稱穩定排序（凍結前綴、不打掉 prompt cache）、超額寧可整條不放（截斷會把「不要 X」切成「要 X」）。反思時順手從同一次 LLM 呼叫分流出來，不多花錢。
 - 🧠 **可檢索長期記憶（知識圖譜）**：記憶存成離散記錄、System Prompt 只常駐索引（封頂）；`recall` 回**連通子圖**——命中記憶 + 其 `[[連結]]` 鄰域 + 它們之間的關係（中文 bigram 選種子、k 跳擴張），讓模型做多跳關係推理。命中更新 LRU、超量自動歸檔（可復原非刪除）。取代「`AGENTS.md` 整檔全載」，對齊 CoALA 長期語意層。
 - 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原；並成為 `search_sessions` 的檢索母體——過去的對話從「只能續接」變成「可以回頭查」。
-- 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。
+- 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。唯一例外是可選的 `COGITO_MEMORY_AUTOAPPLY`：四判準全中的窄新增記憶自動放行，掛 72 小時撤回窗＋一提案一 git commit 可回滾。
 
 **接入與可觀測性**
 - 💬 **多平台整合（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同行程同時跑，會話/工作目錄**預設**靠 `platform:` 前綴命名空間隔開（設了 `COGITO_USER_LINK` 則刻意例外，見下）；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行，且跨平台生效）。
   - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @
 - 🔗 **DM 跨平台連續性**（`COGITO_USER_LINK`）：宣告同一人的各平台 id 後，在 Telegram 私聊問到一半換 Slack 也能接著問——同一份 session 歷史，回覆與審批通知送到最後說話的那個平台。僅私聊生效，群組不合併。
-- 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
+- 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD；設了 `COGITO_OFFICE_URL` 時，收工事件帶**本次真實花費**投影到像素辦公室的任務卡（0/未知不送——不畫 $0 假裝免費）。
 - 🧊 **Prompt caching 三斷點**：`tools` / `system` / **對話尾端**各掛一個 ephemeral 斷點 ＋ 錨定式窗口（`EnableSummary` 開時吃全量，前綴 append-only 才穩定命中），長對話的全價輸入從數千 tk 降到**每輪 2 tk**。[結構圖](docs/diagrams/caching-breakpoints.svg)
 - 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未設定端點時零成本 no-op。
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
@@ -298,6 +298,7 @@ cp .env.example .env
 | `COGITO_MEMORY_SCOPE` | （選填）`channel`＝長期記憶 **per-conversation 隔離**（技能仍共享）；預設 `global` 跨對話共享。見 [docs/multi-tenancy.md](docs/multi-tenancy.md) |
 | `COGITO_REFLECT_MODEL` | （選填）**背景反思改用便宜模型**（技能/記憶/KG 蒸餾）。它們在任務結束後才跑、沒人在等、產物還要人工放行——沒必要燒主模型。刻意**不**涵蓋 goal judge（那道驗收影響任務結果） |
 | `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | （選填）`1` 開啟自我進化的三種反思：提案技能／提案記憶（成功慣例 + 失敗教訓）／提案 KG 關係。**產物一律只進暫存區，需人工放行** |
+| `COGITO_MEMORY_AUTOAPPLY` | （選填）`1`＝提案記憶中【四判準全中】的自動放行：①純風格不改決策行為（LLM 判，fail-closed）②純新增（刪改永遠人審）③單行 ≤100 字 ④與既有記憶零衝突。放行的掛 **72 小時撤回窗**（`undo memory` 一鍵撤回），且**一提案一 git commit**（workspace 是 git repo 時；revert 即回滾單條）。其餘照舊留給人審 |
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
 | `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
 | `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
@@ -353,6 +354,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `help` / `指令` / `commands` | 顯示指令一覽 |
    | `goal <驗收標準>` | 設一個持久目標，agent 每輪完成後用 LLM judge 驗收、未達成自動續跑（封頂 5 次；受成本熔斷/回合上限保護）。`goal status`/`pause`/`resume`/`clear` 管理 |
    | `stop` | 中止本頻道正在執行的任務（可取消 context，回合邊界即時停下）。連結身分（`COGITO_USER_LINK`）下，從任一平台都能中止同一份共享 session |
+| `/steer <一句話>` | 對**進行中**的任務插話糾正方向（別名 `steer`／`插話`）：塞進插話佇列、回合邊界收進對話——不打斷正在跑的那一步、不作廢已燒的錢。閒置時不代發成新任務（「糾正」不得靜默升級成「開工」）。這是 steer→constrain→stop 階梯的第一階；constrain 刻意未做（MaxTurns/MaxCostUSD 已是硬防線） |
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
    | `get <路徑>` | 把本頻道工作區裡的檔案傳回聊天（Telegram `sendDocument`／Slack 檔案上傳；上限 50 MB）。**user-pull**——只有人打指令才外傳，agent 沒有上傳工具（防 prompt injection 外滲） |
    | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |
@@ -362,7 +364,8 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `memory list` | 列出提案記憶（含編號），供逐條審核。破壞性提案會標出**舊值/新值/理由**與 ⚠️ |
    | `memory reconcile` | **整併長期記憶**：掃既有記錄找矛盾與過時的，產出可 diff 的 `UPDATE`/`DELETE`/`ADD` 提案（**不自動生效**，須 `apply memory`）。需 `COGITO_MEMORY_SYNTH=1` |
    | `apply memory` / `reject memory`（可帶編號） | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄）。不帶編號＝整批；帶編號＝逐條，如 `apply memory 1 3`——反思是批次產出的，「大致有用但夾一條爛的」才是常態 |
-   | `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
+   | `undo memory`（可帶編號） | 列出 / 撤回 **72 小時窗內**自動放行的記憶（`COGITO_MEMORY_AUTOAPPLY`）：撤回＝歸檔（可復原）＋留 git commit |
+| `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
    | `apply config` / `reject config` | 放行 / 丟棄 `cmd/bench -tune` 產出的**提案參數**（放行＝晉升為 `.claw/config.json`、下次任務起套用；套用時再 clamp 有界） |
    | `plan on` / `plan off` / `plan status` | 切換**本頻道** Plan Mode（計畫外部化到 `PLAN.md`/`TODO.md` + 目標錨 + 確定性步驟跳過）。多步長任務建議開、閒聊免儀式；狀態隨 session 持久化 |
 
