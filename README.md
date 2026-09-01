@@ -2,6 +2,13 @@
   <img src="docs/logo/banner.png" alt="COGITO-AGENT — cogito, ergo ago" width="720">
 </p>
 
+<p align="center">
+  <a href="https://simplyboys.github.io/cogito-agent/"><b>官網</b></a> ·
+  <a href="docs/eval-results.md">評測結果</a> ·
+  <a href="DESIGN.md">設計取捨</a> ·
+  <a href="SECURITY.md">安全模型</a>
+</p>
+
 # cogito-agent
 
 > 一個用 Go 寫的極簡自主 Agent 框架：把 Claude 驅動的 ReAct 引擎接進 Slack / Telegram，在鎖定的工作區內自主跑「思考 → 呼叫工具 → 觀察」的迴圈，讀寫檔案、執行指令，完成程式開發任務。
