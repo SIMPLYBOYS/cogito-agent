@@ -155,3 +155,46 @@ func TestStop(t *testing.T) {
 		t.Fatal("stop 應呼叫該任務的 cancel")
 	}
 }
+
+// /steer：只在任務進行中收（塞進 session 佇列）；閒置時不代發成新任務——
+// 那會把「糾正」靜默升級成「開工」。一般文字不得被誤吞。
+func TestSteerCommand(t *testing.T) {
+	c := NewCore("steertest", t.TempDir(), nil, func(string, string) {})
+	conv := "steertest:chanS"
+	wd := c.channelWorkDir(conv)
+	t.Cleanup(func() { c.release(wd) }) // running 是 package 級的
+
+	// 閒置：指令要被消費（有回覆），但佇列不收
+	if !c.trySteerCommand(conv, "/steer 別再讀那個檔") {
+		t.Fatal("閒置時 /steer 也應被消費（回提示），不能漏到任務路徑")
+	}
+	if got := c.sessionFor(conv).DrainSteers(); len(got) != 0 {
+		t.Fatalf("閒置時不該入佇列: %v", got)
+	}
+
+	// 進行中：入佇列
+	c.tryAcquire(wd, func() {})
+	if !c.trySteerCommand(conv, "/steer 別再讀那個檔") {
+		t.Fatal("/steer 應被消費")
+	}
+	if !c.trySteerCommand(conv, "插話 直接用快取") {
+		t.Fatal("中文別名應被消費")
+	}
+	got := c.sessionFor(conv).DrainSteers()
+	if len(got) != 2 || got[0] != "別再讀那個檔" || got[1] != "直接用快取" {
+		t.Fatalf("佇列內容不對: %v", got)
+	}
+
+	// 空插話：消費並提示，不入佇列
+	if !c.trySteerCommand(conv, "/steer") {
+		t.Fatal("裸 /steer 應回用法提示")
+	}
+	if got := c.sessionFor(conv).DrainSteers(); len(got) != 0 {
+		t.Fatalf("裸 /steer 不該入佇列: %v", got)
+	}
+
+	// 一般文字不得被誤吞
+	if c.trySteerCommand(conv, "幫我 steer 一下這個專案的方向") {
+		t.Error("開頭不是 steer 的一般文字不該被消費")
+	}
+}

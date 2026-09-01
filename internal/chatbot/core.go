@@ -340,9 +340,10 @@ func (c *Core) dispatch(channelID, userID, text string, isDM bool) {
 	}
 	// 指令 gate：stop/status/model 等即時控制 + help + 自我進化 apply/reject + Plan Mode
 	// （不佔鎖、不當成新任務；stop/status/model 即便忙碌也要能處理）。
-	if c.tryStopCommand(id, text) || c.tryStatusCommand(id, text) || c.tryModelCommand(id, text) ||
-		c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) || c.tryEdgesCommand(id, text) ||
-		c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) || c.tryGetCommand(id, text) {
+	if c.tryStopCommand(id, text) || c.trySteerCommand(id, text) || c.tryStatusCommand(id, text) ||
+		c.tryModelCommand(id, text) || c.tryHelpCommand(id, text) || c.tryMemoryCommand(id, text) ||
+		c.tryEdgesCommand(id, text) || c.tryConfigCommand(id, text) || c.tryPlanCommand(id, text) ||
+		c.tryGetCommand(id, text) {
 		return
 	}
 	// compress / learn / goal：會摺疊 session、蒸餾技能，或起一個持久目標任務（各自處理鎖）。命中即消費。
@@ -654,6 +655,43 @@ func (c *Core) tryStopCommand(convID, text string) bool {
 		return true
 	}
 	return false
+}
+
+// trySteerCommand：`/steer <一句話>`——把即時修正塞給【進行中】的任務，回合邊界生效
+// （engine/loop.go 收 DrainSteers）。這是 steer→constrain→stop 階梯的第一階：沒有它，
+// 看到 agent 走偏的當下唯一選項是 /stop 殺掉重來，前面燒的錢全部作廢。
+func (c *Core) trySteerCommand(convID, text string) bool {
+	t := strings.TrimSpace(text)
+	low := strings.ToLower(t)
+	var body string
+	switch {
+	case low == "/steer" || low == "steer" || t == "插話":
+		SendMessage(convID, "用法：`/steer <一句話>`——塞給進行中的任務即時修正方向，下一個回合生效（不打斷正在跑的那一步）。")
+		return true
+	case strings.HasPrefix(low, "/steer "):
+		body = strings.TrimSpace(t[len("/steer "):])
+	case strings.HasPrefix(low, "steer "):
+		body = strings.TrimSpace(t[len("steer "):])
+	case strings.HasPrefix(t, "插話 "):
+		body = strings.TrimSpace(strings.TrimPrefix(t, "插話 "))
+	case strings.HasPrefix(t, "插話："):
+		body = strings.TrimSpace(strings.TrimPrefix(t, "插話："))
+	default:
+		return false
+	}
+	if body == "" {
+		SendMessage(convID, "插話是空的——`/steer` 後面要接要補的那句話。")
+		return true
+	}
+	if !c.isRunning(c.channelWorkDir(convID)) {
+		// 沒任務在跑，插話無處可插。不代發成新任務——那會把「糾正」靜默升級成「開工」，
+		// 使用者以為只是講了句話，實際上開始花錢了。
+		SendMessage(convID, "ℹ️ 目前沒有進行中的任務，插不進去——要開工就直接把任務發過來。")
+		return true
+	}
+	c.sessionFor(convID).AddSteer(body)
+	SendMessage(convID, "📨 已插話。下一個回合生效——正在跑的那一步（模型呼叫或工具）不會被打斷。")
+	return true
 }
 
 // tryStatusCommand：顯示本會話狀態（花費/token/歷史長度/模型/Plan/忙碌）。

@@ -39,7 +39,11 @@ type Session struct {
 	// resumeAttempts＝跨重啟續跑已嘗試次數（防同一任務崩潰迴圈燒錢）。
 	running        bool
 	resumeAttempts int
-	mu             sync.RWMutex
+	// steers 是「插話」佇列：任務執行中由聊天端塞入（`/steer`），引擎在【回合邊界】收進對話。
+	// 走佇列而不直接 Append 進歷史——歷史在 Run 期間由引擎的 goroutine 獨佔，外部直寫會競態。
+	// 刻意不進快照：插話是對「正在跑的這個任務」講的，行程重啟後那個任務已經不在了。
+	steers []string
+	mu     sync.RWMutex
 
 	// 該 Session 累計消耗的資源（由外部 CostTracker 通過 RecordUsage 累加）
 	TotalPromptTokens     int
@@ -254,6 +258,22 @@ func (s *Session) Usage() (promptTokens, completionTokens int, costUSD float64) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.TotalPromptTokens, s.TotalCompletionTokens, s.TotalCostUSD
+}
+
+// AddSteer 把一句插話排進佇列（聊天端 `/steer`，任務執行中呼叫）。
+func (s *Session) AddSteer(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.steers = append(s.steers, text)
+}
+
+// DrainSteers 取走並清空插話佇列（引擎在回合邊界呼叫；見 steers 欄位註）。
+func (s *Session) DrainSteers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.steers
+	s.steers = nil
+	return out
 }
 
 // HistoryLen 回傳目前 history 的訊息數（供 /status）。

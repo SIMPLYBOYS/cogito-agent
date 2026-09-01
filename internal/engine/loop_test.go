@@ -373,3 +373,30 @@ func TestRun_PersistsUsagePerAssistantMessage(t *testing.T) {
 		t.Errorf("兩輪 assistant 訊息都應帶 Usage，got %d", withUsage)
 	}
 }
+
+// 插話（steer）：Run 前排進佇列的插話，第一輪就以 user 訊息進 history（佇列清空）。
+// 這是 steer→constrain→stop 的第一階——沒有它，糾正走偏的唯一辦法是 /stop 殺掉重來。
+func TestRun_SteerInjectedAtTurnBoundary(t *testing.T) {
+	fp := &fakeProvider{}
+	eng := NewAgentEngine(fp, newTestRegistry(), false, false)
+	eng.MaxTurns = 2
+
+	sess := ctxpkg.NewSession("steer", t.TempDir())
+	sess.Append(schema.Message{Role: schema.RoleUser, Content: "整理報表"})
+	sess.AddSteer("別再讀那個檔了，路徑是 docs/x.md")
+
+	_ = eng.Run(context.Background(), sess, nil) // MaxTurns 熔斷收場，本測試只看注入
+
+	var hit bool
+	for _, m := range sess.GetWorkingMemory(0) {
+		if m.Role == schema.RoleUser && strings.Contains(m.Content, "[老闆插話] 別再讀那個檔了，路徑是 docs/x.md") {
+			hit = true
+		}
+	}
+	if !hit {
+		t.Fatal("插話應在回合邊界以 user 訊息進 history")
+	}
+	if got := sess.DrainSteers(); len(got) != 0 {
+		t.Fatalf("插話佇列應被清空，殘留 %v", got)
+	}
+}

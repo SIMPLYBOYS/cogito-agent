@@ -134,6 +134,17 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 		}
 		turnCount++
 
+		// 插話（steer）：老闆對【進行中任務】的即時修正，回合邊界收進對話——與下面的軟著陸
+		// 提醒同款塞法（同一個 goroutine 做 Append，無競態）。正在跑的那一步不被打斷，本輪的
+		// 模型呼叫就看得到。這是 steer→constrain→stop 階梯的第一階：在「殺掉重來」之外，
+		// 給一個「不作廢已燒的錢、只糾正方向」的選項。
+		for _, sTxt := range session.DrainSteers() {
+			log.Printf("[Engine] 📨 插話進場（本輪生效）: %s", schema.TruncRunes(sTxt, 60, "…"))
+			session.Append(schema.Message{Role: schema.RoleUser,
+				Content: "[老闆插話] " + sTxt + "\n（這是對進行中任務的即時修正：據此調整方向並【繼續當前任務】，" +
+					"不要把它當成新任務重跑，也不要只回應這句話就收工。）"})
+		}
+
 		// 【硬防線①】回合數熔斷：主迴圈不再無上限 for{}，超過上限由框架強制中止，
 		// 不指望模型自己停下。對齊 RunSub 的 maxSubTurns 思路。
 		if e.MaxTurns > 0 && turnCount > e.MaxTurns {
