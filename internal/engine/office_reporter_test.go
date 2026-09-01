@@ -267,10 +267,33 @@ func TestIsCritical(t *testing.T) {
 		{"result", "bash", false},
 		{"think", "", false},
 		{"turn", "3", false},
-		{"msg", "一段回覆", false},
+		// msg 升關鍵（2026-09-02）：它是報告本體，不是裝飾——看板多子 agent 並行收工的
+		// 泡泡洪峰把訊息擠掉過（實際回報：對照 dashboard 才發現工作串少了訊息）。
+		{"msg", "一段回覆", true},
 	} {
 		if got := isCritical(c.kind, c.label); got != c.want {
 			t.Errorf("isCritical(%q,%q)=%v want %v", c.kind, c.label, got, c.want)
 		}
+	}
+}
+
+// 長訊息不在 2000 字被砍——行動指示常在尾巴（dashboard 不截，辦公室也不該截在報告腰上）。
+func TestLongMessageNotCutAt2000(t *testing.T) {
+	var mu sync.Mutex
+	var got officeEvent
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		mu.Unlock()
+	}))
+	defer srv.Close()
+	r := NewOfficeReporter(srv.URL, "p05")
+	long := strings.Repeat("內容", 1500) + "【尾巴的行動指示】"
+	r.OnMessage(context.Background(), long)
+	r.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(got.Label, "【尾巴的行動指示】") {
+		t.Fatalf("3000 字訊息的尾巴被砍掉了（長度=%d）", len([]rune(got.Label)))
 	}
 }

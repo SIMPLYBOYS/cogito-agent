@@ -87,6 +87,11 @@ func isCritical(kind, label string) bool {
 	switch kind {
 	case "start", "done":
 		return true
+	case "msg":
+		// 訊息升關鍵：它是報告本體，不是裝飾。看板六個子 agent 並行收工正是泡泡佇列
+		// 最容易滿的一刻——掉一則報告比掉十顆泡泡嚴重（實際回報：對照 dashboard 才
+		// 發現工作串少了訊息）。關鍵佇列 320 有餘裕。
+		return true
 	case "tool", "result", "error":
 		return strings.HasPrefix(label, "spawn_subagent")
 	}
@@ -268,8 +273,11 @@ func (r *OfficeReporter) OnToolResult(_ context.Context, name, result string, is
 }
 func (r *OfficeReporter) OnMessage(_ context.Context, content string) {
 	if content != "" {
-		// 全文供橋端「點 NPC 看報告」面板用，上限放寬；泡泡顯示由橋端自行截短。
-		r.push("msg", schema.TruncRunes(content, 2000, "…"), "")
+		// 全文供橋端工作串/報告面板用；泡泡顯示由橋端自行截短。8000 對齊「dashboard 看得到、
+		// 辦公室也要看得到」——先前 2000 會把長會議報告的尾巴切掉，而行動指示常在尾巴
+		// （dashboard 的 OnMessage 不截，落差就是這樣來的）。仍設上限：這是單筆 HTTP 事件，
+		// 不是傳檔通道。
+		r.push("msg", schema.TruncRunes(content, 8000, "…"), "")
 	}
 }
 
