@@ -11,11 +11,11 @@
 
 # cogito-agent
 
-> 一個用 Go 寫的極簡自主 Agent 框架：把 Claude 驅動的 ReAct 引擎接進 Slack / Telegram，在鎖定的工作區內自主跑「思考 → 呼叫工具 → 觀察」的迴圈，讀寫檔案、執行指令，完成程式開發任務。
+> 用 Go 寫的極簡自主 Agent 框架：把 Claude 驅動的 ReAct 引擎接進 Slack / Telegram，在鎖定的工作區內自主跑「思考 → 呼叫工具 → 觀察」的迴圈，讀寫檔案、執行指令，完成程式開發任務。
 
-`cogito-agent` 讓你在 Slack / Telegram 上 @它或私聊交辦任務，它就在那個鎖定的工作目錄裡自主執行，並把每一步的思考、工具呼叫與結果即時回推到對話中——整個過程透明可見，你也隨時能介入。
+`cogito-agent` 讓你在 Slack / Telegram 上 @它或私聊交辦任務，它就在鎖定的工作目錄裡自主執行，把每一步思考、工具呼叫與結果即時回推到對話——全程透明，你隨時能介入。
 
-你可以把它當成一名**進駐團隊的數位員工**：常駐你的 IM、記得你們聊過的事（session 跨重啟持久 + 長期記憶）、做危險操作前會請示（審批）、花了多少錢有帳可查（成本追蹤）；接到複雜任務時，它會派出自己的專家隊——planner、code-reviewer、security-auditor、implementer 等[具名子 agent](#具名子-agentclawagentsmd)——並行分工、審查糾錯，最後整合回報。一個員工，背後一整隊專才。
+把它當成一名**進駐團隊的數位員工**：常駐你的 IM、記得你們聊過的事（session 跨重啟持久 + 長期記憶）、做危險操作前會請示（審批）、花了多少錢有帳可查（成本追蹤）；接到複雜任務時，它會派出自己的專家隊——planner、code-reviewer、security-auditor、implementer 等[具名子 agent](#具名子-agentclawagentsmd)——並行分工、審查糾錯，最後整合回報。一個員工，背後一整隊專才。
 
 > 這個專案是什麼、不是什麼，以及它的差異化與發展優先序，見 [POSITIONING.md](POSITIONING.md)。
 
@@ -23,7 +23,7 @@
 
 ![cogito-agent demo](docs/brag.gif)
 
-▶ 完整版（有畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
+▶ 完整版（高畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
 ## Features
 
@@ -32,14 +32,14 @@
 - 🧠 **多 Provider**：統一 `LLMProvider` 介面，預設 Claude，可一鍵切到任何 OpenAI 相容端點（OpenAI / vLLM / Ollama / OpenRouter / Groq…）。
 
 **內建工具**（全在鎖定的工作區內執行）
-- `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四件極簡原語。
+- `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四個極簡原語。
 - 🧭 **`spawn_subagent`**：把子任務委派給隔離的子 agent，上下文隔離、可並行派多路；可綁定技能進子 context。支援**具名 agent**（`agent_type`）——在 `.claw/agents/<name>.md` 用 frontmatter 定義角色/工具集（code-reviewer、planner、security-auditor…），不指定則為預設探路者。
 - ⏱️ **背景任務**：長命令（dev server、長建置/訓練）丟背景跑、跨輪查輸出/終止；每會話獨立、有並發上限、走同一危險審批。
 - 🔎 **`search_sessions`**：關鍵字檢索**過去的對話**（跨 session／跨頻道，中英皆可），回**有界**摘要——何時、哪個會話、花了多少、命中片段。「這件事以前處理過嗎／上次怎麼解的」不必再自己 grep 整份 session JSON。
 - 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
 
 **駕馭工程（失控控制）**
-- 📄 **[SECURITY.md](SECURITY.md)——防什麼、更重要的是[不防什麼](SECURITY.md#-不防什麼)**：prompt injection 明確不防、命令黑名單可繞過（附實際事故記錄）、host 模式 bash ＝ 宿主機 RCE 路徑。上線前請照該文最後一節配置。
+- 📄 **[SECURITY.md](SECURITY.md)——防什麼、更重要的是[不防什麼](SECURITY.md#-不防什麼)**：prompt injection 明確不防、命令黑名單可繞過（附實際事故記錄）、host 模式 bash ＝ 宿主機 RCE 路徑。上線前請照該文最後一節設定。
 - 🔒 **入口授權（fail-closed）**：Slack/Telegram 只有 `COGITO_ALLOWED_USERS` 名單內的 user id 能驅動 agent；不設＝拒絕所有人。高危審批限 `COGITO_ADMIN_USERS`，杜絕「發起者自我放行」。**上線前務必設白名單**（見 [.env.example](.env.example)）——bot 入口 + 工具執行不設限＝未授權者可 RCE。
 - 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的呼叫掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區——`..` 穿越、絕對路徑、**以及 symlink**（解析到最深的已存在祖先後重驗前綴），不依賴可被繞過的審批。
 - 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
@@ -60,7 +60,7 @@
 - 🔗 **DM 跨平台連續性**（`COGITO_USER_LINK`）：宣告同一人的各平台 id 後，在 Telegram 私聊問到一半換 Slack 也能接著問——同一份 session 歷史，回覆與審批通知送到最後說話的那個平台。僅私聊生效，群組不合併。
 - 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD。
 - 🧊 **Prompt caching 三斷點**：`tools` / `system` / **對話尾端**各掛一個 ephemeral 斷點 ＋ 錨定式窗口（`EnableSummary` 開時吃全量，前綴 append-only 才穩定命中），長對話的全價輸入從數千 tk 降到**每輪 2 tk**。[結構圖](docs/diagrams/caching-breakpoints.svg)
-- 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未配置端點時零成本 no-op。
+- 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未設定端點時零成本 no-op。
 - 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
 - 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
 - ⏰ **內建 cron**：到點自動派任務給 agent，標準 cron 運算式 + 時區設定；結果推播 Slack／Telegram（含執行來源）。排程住常駐行程，bot 與面板各跑一個、靠檔案鎖仲裁不重複執行。
@@ -132,7 +132,7 @@ flowchart TB
 
 ### 上下文工程：一輪 prompt 怎麼組起來的
 
-每次發 LLM 前，context 層把 prompt 組成 **靜態系統層 + 動態滑動窗口**，過三道防線後送出；工具 schema 走帶外通道；回應寫回 history 供下一輪。
+每輪呼叫 LLM 前，context 層把 prompt 組成 **靜態系統層 + 動態滑動窗口**，過三道防線後送出；工具 schema 走帶外通道；回應寫回 history 供下一輪。
 
 ```mermaid
 flowchart TB
@@ -215,7 +215,7 @@ internal/
 │   ├── interface.go         LLMProvider（Generate + MaxContextTokens + ModelName）
 │   ├── factory.go           FromEnv 依 COGITO_PROVIDER 選 provider
 │   ├── claude.go            Anthropic Claude 實現
-│   └── openai.go            OpenAI 相容實現（可配 BaseURL：vLLM/Ollama/OpenRouter…）
+│   └── openai.go            OpenAI 相容實現（可設 BaseURL：vLLM/Ollama/OpenRouter…）
 ├── tools/                   工具集、註冊表與中間件
 │   ├── registry.go          註冊 / 發現 / 執行 + 環繞式中間件鏈
 │   ├── middleware.go        計時中間件（量測工具物理執行耗時）
@@ -241,7 +241,7 @@ internal/
 
 ### 圖解（詳版流程圖）
 
-上面兩張 mermaid 是骨架；下面兩張 draw.io 圖把兩個關鍵子系統畫細（可編輯原始檔在連結裡，拖回 [draw.io](https://app.diagrams.net) 即可改）。
+上面兩張 mermaid 是骨架；下面三張 draw.io 圖把三個關鍵子系統畫細（可編輯原始檔在連結裡，拖回 [draw.io](https://app.diagrams.net) 即可改）。
 
 **多 agent 編排流** — orchestrator 同一輪並行派三個窄專員各審一面向、隔離 context，整合成上線判斷；兩個護欄（工具邊界＝註冊表 Subset、政策 Deny＝目標終止）都是框架層而非 prompt 求來的。原始檔：[`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)
 
@@ -257,7 +257,7 @@ internal/
 
 ## Install
 
-從源碼建置：
+從原始碼建置：
 
 ```bash
 git clone https://github.com/SIMPLYBOYS/cogito-agent.git
@@ -265,27 +265,27 @@ cd cogito-agent
 go build ./...
 ```
 
-需要 **Go 1.25 或更高版本**。
+需要 **Go 1.25 以上**。
 
 ## Configuration
 
-複製環境變數模板並填入真實值（`.env` 已被 `.gitignore` 忽略，不會被提交）：
+複製環境變數範本並填入真實值（`.env` 已被 `.gitignore` 忽略，不會被提交）：
 
 ```bash
 cp .env.example .env
 ```
 
-需要配置的變數：
+要設定的變數：
 
 | 變數 | 說明 |
 |------|------|
-| `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，從 <https://console.anthropic.com> 獲取 |
+| `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，至 <https://console.anthropic.com> 取得 |
 | `SLACK_BOT_TOKEN` | Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history`、`files:write`（`get` 檔案取回用；後補 scope 需 Reinstall to Workspace） |
 | `SLACK_APP_TOKEN` | Slack App-Level Token（`xapp-` 開頭，scope `connections:write`），啟用 Socket Mode 後取得；走 outbound websocket 免公開 URL |
 | `TELEGRAM_BOT_TOKEN` | （選填，多平台）Telegram Bot Token，向 @BotFather 申請；設了就與 Slack 同行程跑 getUpdates 長輪詢 |
 | `COGITO_ALLOWED_USERS` | **（伺服器端務必設）** 可驅動 agent 的 user id 白名單（逗號分隔）。不設＝fail-closed 拒絕所有入站。Telegram＝數字 id、Slack＝`U` 開頭 |
 | `COGITO_ADMIN_USERS` | （選填）可 `approve`/`reject` 高危操作者（逗號分隔）；不設＝回退為 `COGITO_ALLOWED_USERS`。設它以做到「發起者≠批准者」 |
-| `COGITO_USER_LINK` | （選填）**DM 跨平台連續性**：宣告同一人在各平台的 user id（`=` 連接一組、逗號分隔多組，如 `771163423=U0AABBCC`）。設了之後這個人在 Telegram / Slack 的**私聊**共用同一份對話狀態（session/工作目錄/忙碌鎖）——Telegram 問到一半換 Slack 接著問，歷史都在；回覆與審批通知送到最後說話的平台。群組不合併（頻道 context 屬於頻道）。必須顯式配置——這是信任宣告，系統不猜 |
+| `COGITO_USER_LINK` | （選填）**DM 跨平台連續性**：宣告同一人在各平台的 user id（`=` 連接一組、逗號分隔多組，如 `771163423=U0AABBCC`）。設了之後這個人在 Telegram / Slack 的**私聊**共用同一份對話狀態（session/工作目錄/忙碌鎖）——Telegram 問到一半換 Slack 接著問，歷史都在；回覆與審批通知送到最後說話的平台。群組不合併（頻道 context 屬於頻道）。必須顯式設定——這是信任宣告，系統不猜 |
 | `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | （選填）未登記模型的 fallback 估價（美元/百萬 token），讓成本熔斷對非 Claude 端點仍生效；不設＝opus 級 5/25 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
@@ -332,7 +332,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 
 ## Usage
 
-1. 配置好 `.env` 後，啟動服務：
+1. 設定好 `.env` 後，啟動服務：
 
    ```bash
    go run ./cmd/claw
@@ -340,7 +340,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 
    Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者都是 outbound 連線，**不開對外連接埠、不需要公開 URL／ngrok**。
 
-2. 在 Slack App 後臺啟用 **Socket Mode**（Settings → Socket Mode → Enable），產生一個 App-Level Token（`xapp-` 開頭，scope `connections:write`），填入 `SLACK_APP_TOKEN`；並在 **Event Subscriptions** 訂閱 `app_mention`、`message.im` 事件（Socket Mode 下無需填 Request URL）。
+2. 在 Slack App 後台啟用 **Socket Mode**（Settings → Socket Mode → Enable），產生一個 App-Level Token（`xapp-` 開頭，scope `connections:write`），填入 `SLACK_APP_TOKEN`；並在 **Event Subscriptions** 訂閱 `app_mention`、`message.im` 事件（Socket Mode 下無需填 Request URL）。
 
 3. 在 Slack 中與機器人互動：
    - 在頻道中 **@機器人** 並描述任務；
@@ -407,7 +407,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 
 > 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景行程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
 >
-> 持久的是**檔案系統層**的狀態（套件/檔案/行程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新行程（與 host 模式「每次新 shell」一致）。要持久環境變數請寫進 `~/.bashrc` 等檔案。
+> 持久的是**檔案系統層**的狀態（套件/檔案/行程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新行程（與 host 模式「每次新 shell」一致）。要讓環境變數跨呼叫保留，寫進 `~/.bashrc` 等檔案。
 >
 > **隔離範圍（重要）**：容器關住的是 **`bash`**（含背景任務），**不是整個 agent**。`read_file` / `write_file` / `edit_file` 一律在**宿主機**執行——它們的邊界是工具層的工作區圍堵（`..`、絕對路徑、symlink 全擋），不是容器。這是刻意的分工：**容器擋「任意命令」，工具層擋「逃出工作區」**，兩者互補而非重疊。（正因如此，工具層的 symlink 解析是必要的：容器內的 bash 可以在掛載進來的 workDir 裡種一個指向宿主機的 symlink，宿主機上的檔案工具若不解 symlink 就會跟著寫出去。）審批 middleware 與兩者正交——高危命令即使在容器裡也照樣要人工放行。
 >
@@ -422,7 +422,7 @@ go run ./cmd/claw-cli -session task_001 -prompt "開始一個多步驟任務"
 go run ./cmd/claw-cli -session task_001 -prompt "繼續"
 ```
 
-對 Slack（`cmd/claw`）同理：設 `COGITO_SESSION_DIR` 後各頻道記憶不因服務重啟而丟失。每個 session 一個 JSON 檔（含對話歷史），請勿入庫（已加進 `.gitignore`）。
+對 Slack（`cmd/claw`）同理：設 `COGITO_SESSION_DIR` 後各頻道記憶不因服務重啟而丟失。每個 session 一個 JSON 檔（含對話歷史），勿提交進版控（已加入 `.gitignore`）。
 
 ### Operator Dashboard（維運面板）
 
@@ -530,7 +530,7 @@ go build ./...     # 建置
 
 ### 評測（eval）：分三層，因為它們測的不是同一件事
 
-一個常見的誤解是「評測就是測模型能力」。SWE-bench 這類基準測的是**模型 × harness 的乘積**，
+常見的誤解是「評測就是測模型能力」。SWE-bench 這類基準測的是**模型 × harness 的乘積**，
 單一分數**分不開兩者的貢獻**。所以這裡分三層——前兩層評自己的機制，第三層只當外部座標。
 
 | 層 | 測什麼 | 模型的角色 | 成本 | 實測結果 |
@@ -711,7 +711,7 @@ isolation: worktree             # 可選；在 git worktree 隔離執行，完�
 ```
 
 - `agent_type` 未指定 → 預設探路者（**唯讀** `read_file`+`bash`），行為與過去一致。
-- **可寫的實作型 agent**：在 `tools` 明確宣告 `write_file` / `edit_file`，該 agent 就能改檔（如上例 `implementer`）。寫入是 **opt-in**——沒宣告就拿不到，且照走審批 middleware（敏感寫入 `.env`/`.git`/絕對路徑仍需人工放行）、檔案工具在工具層硬擋逃出工作區。
+- **可寫的實作型 agent**：在 `tools` 明確宣告 `write_file` / `edit_file`，該 agent 就能改檔（例如 `implementer` 這類實作型角色）。寫入是 **opt-in**——沒宣告就拿不到，且照走審批 middleware（敏感寫入 `.env`/`.git`/絕對路徑仍需人工放行）、檔案工具在工具層硬擋逃出工作區。
 - `tools` 只能是子 agent 工具超集（`read_file`/`bash`/`write_file`/`edit_file`）的子集，不含 `spawn_subagent`（杜絕遞迴）。
 - 可用清單會自動列進 `spawn_subagent` 的工具說明，讓模型知道有哪些角色可派。
 - **選模型 / effort**：`model` 讓探路用便宜快的（haiku）、審查用強的（opus）分層；`effort` 調輸出深度（token 上限）。provider 支援才生效，成本仍記進同一 session。effort 是輸出上限的粗略代理，非 extended-thinking。
@@ -799,4 +799,4 @@ CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 g
 
 ## License
 
-基於 [MIT License](LICENSE) 發佈。
+以 [MIT License](LICENSE) 發佈。
