@@ -40,9 +40,9 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
 .nav a { white-space: nowrap; }
 
 /* ── Marquee hero：宣言即版面 ── */
-.hero { min-height: min(62dvh, 34rem); display: grid; align-content: end; padding-block: var(--space-2xl) var(--space-xl); }
-/* 高視窗上 72dvh 會在導覽與標題之間撐出整片虛空（實機截圖抓到的）——
-   高度上限讓留白停在「刻意」的量；字級同步放大，宣言才真的佔住摺頁。 */
+/* 使用者兩次實機截圖都點名導覽與標題之間的黑色虛空——「貼底錨定」在高視窗上
+   就是會產生它，改成【內容驅動】：標題距導覽只留一段固定範圍的呼吸，不再吃滿視窗。 */
+.hero { padding-block: clamp(3rem, 10dvh, 6.5rem) var(--space-xl); }
 .hero .status { font-family: var(--font-outlier); font-size: 0.6rem; color: var(--color-ok); letter-spacing: 0.08em; margin: 0 0 var(--space-lg); }
 .hero h1 { font-size: var(--text-display-hero); font-weight: 700; margin: 0; max-width: 22ch; }
 .hero h1 em { font-style: normal; color: var(--color-accent); }
@@ -107,7 +107,6 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
   .steps li:nth-child(2), .steps li:nth-child(3) { margin-inline-start: 0; }
 }
 @media (max-width: 40rem) {
-  .hero { min-height: min(52dvh, 26rem); }
   .stats { grid-template-columns: minmax(0, 1fr); }
   .foot { grid-template-columns: minmax(0, 1fr); }
   .nav ul { gap: var(--space-md); }
