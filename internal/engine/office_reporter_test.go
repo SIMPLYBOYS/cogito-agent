@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,7 +36,7 @@ func TestOfficeReporterContract(t *testing.T) {
 	r.OnToolResult(ctx, "bash", "3 處", false)
 	r.OnToolResult(ctx, "bash", "boom", true)
 	r.OnMessage(ctx, "完成")
-	r.End(errors.New("網路中斷"))
+	r.End(errors.New("網路中斷"), 0.0231)
 	r.Close() // 排空後 got 即完整
 
 	want := []officeEvent{
@@ -43,7 +45,8 @@ func TestOfficeReporterContract(t *testing.T) {
 		{V: officeProtocolVersion, Agent: "p17", Kind: "result", Label: "bash", Detail: "3 處"},
 		{V: officeProtocolVersion, Agent: "p17", Kind: "error", Label: "bash", Detail: "boom"},
 		{V: officeProtocolVersion, Agent: "p17", Kind: "msg", Label: "完成"},
-		{V: officeProtocolVersion, Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷"},
+		// done 帶本次真實花費——外殼收工列據此顯示；0/未知不送（見 Cost 欄位註）
+		{V: officeProtocolVersion, Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷", Cost: 0.0231},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("事件數 %d != %d: %+v", len(got), len(want), got)
@@ -63,8 +66,29 @@ func TestOfficeReporterContract(t *testing.T) {
 func TestOfficeReporterBridgeDown(t *testing.T) {
 	r := NewOfficeReporter("http://127.0.0.1:1", "p17") // 連線秒拒
 	r.Begin("x", "")
-	r.End(nil)
+	r.End(nil, 0)
 	r.Close() // 卡住即測試逾時失敗
+}
+
+// 花費為 0 / 未知時，done 的線上格式【不得出現 cost 鍵】——
+// 顯示 $0.0000 會把「沒拿到 usage」偽裝成「免費」，投影估計值跟畫假進度條是同一種謊。
+func TestOfficeReporterOmitsUnknownCost(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	r := NewOfficeReporter(srv.URL, "p05")
+	r.End(nil, 0)
+	r.Close()
+	if len(bodies) != 1 || strings.Contains(bodies[0], `"cost"`) {
+		t.Fatalf("cost 未知卻上了線: %v", bodies)
+	}
 }
 
 // 半死的橋（接受連線但不回應）：Close 必須在預算內返回，不能無上限等排空。
@@ -105,14 +129,14 @@ func TestOfficeReporterCloseIsSafe(t *testing.T) {
 
 	r := NewOfficeReporter(srv.URL, "p01")
 	r.Begin("任務", "/tmp/x")
-	r.End(nil)
+	r.End(nil, 0)
 	r.Close()
 
 	// Close 後仍有事件到（模擬殘留的 goroutine）：必須靜默丟棄，不 panic
 	r.OnToolCall(context.Background(), "bash", "ls")
 	r.OnMessage(context.Background(), "遲到的訊息")
 	r.OnTurn(context.Background(), 7)
-	r.End(errors.New("遲到的收工"))
+	r.End(errors.New("遲到的收工"), 0)
 
 	// 重複 Close：必須冪等，不 panic
 	r.Close()
@@ -169,7 +193,7 @@ func TestOfficeReporter_CriticalNotDroppedUnderBubbleFlood(t *testing.T) {
 			r.OnToolResult(ctx, "spawn_subagent:planner", "完成", false)
 		}
 	}
-	r.End(nil)
+	r.End(nil, 0)
 	r.Close()
 
 	if d := r.DroppedCritical(); d != 0 {

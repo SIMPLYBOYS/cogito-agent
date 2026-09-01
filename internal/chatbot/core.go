@@ -382,19 +382,21 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	defer session.SetRunning(false) // 正常結束（成功/終局失敗）都清掉——只有硬砍才會留 true
 	session.Append(schema.Message{Role: schema.RoleUser, Content: prompt})
 
+	startCost := session.CostUSD() // 快照本次任務進入時的累計花費，收尾時報「本次」增量（session 是跨任務累加的）
+
 	var rep engine.Reporter = &reporter{convID: convID}
 	// COGITO_OFFICE_URL 設定時，引擎事件同步投影到像素辦公室（unity_demo 橋）。convID 直接當
 	// 事件的 agent 身分——橋端把未知 id 動態指派給閒置 NPC（黏性映射，同頻道固定同員工）。
 	var taskErr error // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
 	if office := newOfficeReporter(convID); office != nil {
 		office.Begin(prompt, workDir)
-		defer func() { office.End(taskErr); office.Close() }()
+		// done 帶本次真實花費增量——外殼收工列印的數字與聊天端「本次花費 $x」是同一份帳
+		defer func() { office.End(taskErr, session.CostUSD()-startCost); office.Close() }()
 		rep = engine.MultiReporter{rep, office}
 	}
 	eng := c.factory(session, rep)
 
-	startCost := session.CostUSD() // 快照本次任務進入時的累計花費，收尾時報「本次」增量（session 是跨任務累加的）
-	goalContinues := 0             // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
+	goalContinues := 0 // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
 
 	// 自動斷點續跑（opt-in）：任務因【暫時性】錯誤（網路中斷等）中止時，退避等待恢復後補一則系統
 	// 續跑提示、帶完整歷史重跑，直到成功或重試用盡。回合/成本熔斷等【終局】錯誤不重試（重試只會再撞牆）。

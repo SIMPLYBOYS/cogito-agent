@@ -41,6 +41,9 @@ type officeEvent struct {
 	Kind   string `json:"kind"`
 	Label  string `json:"label"`
 	Detail string `json:"detail,omitempty"`
+	// Cost 是本次任務的【真實】花費（美元，provider 回報的 usage 累計），只在 done 事件帶。
+	// omitempty：0 或未知＝不送——投影估計值跟畫假的進度條是同一種謊，寧可空白。
+	Cost float64 `json:"cost,omitempty"`
 }
 
 type OfficeReporter struct {
@@ -183,8 +186,11 @@ func (r *OfficeReporter) send(endpoint string) {
 // 狀態機事件走 critical 佇列，不與泡泡搶同一個緩衝——否則 orchestrator 並行收工時，
 // 大量泡泡會把「釋放 NPC」的事件擠掉。兩條都滿才丟，且關鍵事件被丟時記一筆。
 func (r *OfficeReporter) push(kind, label, detail string) {
-	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: kind, Label: label, Detail: detail}
-	critical := isCritical(kind, label)
+	r.pushEv(officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: kind, Label: label, Detail: detail})
+}
+
+func (r *OfficeReporter) pushEv(ev officeEvent) {
+	critical := isCritical(ev.Kind, ev.Label)
 
 	r.mu.Lock()
 	switch {
@@ -219,12 +225,17 @@ func (r *OfficeReporter) DroppedCritical() int64 { return r.dropped.Load() }
 func (r *OfficeReporter) Begin(task, workDir string) {
 	r.push("start", schema.TruncRunes(task, 80, "…"), workDir)
 }
-func (r *OfficeReporter) End(err error) {
-	if err != nil {
-		r.push("done", "error", schema.TruncRunes(err.Error(), 120, "…"))
-		return
+
+// End 收工。costUSD 是本次任務的真實花費（呼叫端算增量）；≤0＝未知，不送（見 Cost 欄位）。
+func (r *OfficeReporter) End(err error, costUSD float64) {
+	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: "done", Label: "ok"}
+	if costUSD > 0 {
+		ev.Cost = costUSD
 	}
-	r.push("done", "ok", "")
+	if err != nil {
+		ev.Label, ev.Detail = "error", schema.TruncRunes(err.Error(), 120, "…")
+	}
+	r.pushEv(ev)
 }
 
 func (r *OfficeReporter) OnThinking(context.Context) { r.push("think", "", "") }
