@@ -148,7 +148,17 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
 .foot a:hover { color: var(--color-accent); text-decoration: underline; }
 .colophon { padding-block: var(--space-lg) var(--space-2xl); color: var(--color-faint); font-size: var(--text-sm); }
 
-/* ── 一次開場 stagger（唯一的進場動畫）── */
+/* ── scroll 進場（IntersectionObserver 加 .is-in；一次性、不重播）──
+   漸進增強：隱藏狀態只在 <html class="js"> 下生效——JS 掛了頁面照常完整。 */
+.js .sr { opacity: 0; transform: translateY(12px); }
+.js .sr.is-in { opacity: 1; transform: none; transition: opacity var(--dur-long) var(--ease-out), transform var(--dur-long) var(--ease-out); transition-delay: calc(var(--i, 0) * 90ms); }
+
+/* 重點字掃光：琥珀底從左掃到右，跟著所屬區塊的進場一起發生（同一個編排時刻，不是第四種噪音） */
+mark.hl { color: var(--color-ink); background: linear-gradient(oklch(87% 0.130 85 / 0.28), oklch(87% 0.130 85 / 0.28)) no-repeat 0 60%; background-size: 0% 45%; padding-inline: 0.08em; }
+.js .sr.is-in mark.hl { background-size: 100% 45%; transition: background-size 700ms var(--ease-out) 350ms; }
+html:not(.js) mark.hl { background-size: 100% 45%; }
+
+/* ── 一次開場 stagger（僅 hero；其餘交給 scroll 觸發）── */
 .reveal { opacity: 0; transform: translateY(8px); animation: reveal var(--dur-long) var(--ease-out) forwards; animation-delay: calc(var(--i, 0) * 70ms); }
 @keyframes reveal { to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
@@ -190,19 +200,19 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
   </section>
 
   <section class="pitch wrap">
-    <div class="reveal" style="--i:1">
+    <div class="sr" style="--i:0">
       <p class="lead">賭注下在別人略過的地方。</p>
-      <p class="muted">它的賭注下在別人略過的地方——成本熔斷、死迴圈指紋、工具權限政策、Docker 沙箱是框架硬性執行的，不指望模型自覺；技能、記憶、參數的自我進化一律「提案 → 把關 → 才生效」。每一輪花多少錢、走了哪些工具，OpenTelemetry 與面板都看得到。</p>
+      <p class="muted">它的賭注下在別人略過的地方——成本熔斷、死迴圈指紋、工具權限政策、Docker 沙箱是框架硬性執行的，<mark class="hl">不指望模型自覺</mark>；技能、記憶、參數的自我進化一律「提案 → 把關 → 才生效」。每一輪花多少錢、走了哪些工具，OpenTelemetry 與面板都看得到。</p>
       <p class="muted">然後，它有一間像素辦公室：每個 agent 是一個 NPC，接工作走到工位，委派子 agent 時真的有人起身。</p>
     </div>
-    <figure class="office reveal" style="--i:2">
+    <figure class="office sr" style="--i:1">
       <img src="assets/brag.gif" alt="像素辦公室投影：多個 NPC 員工在辦公室內走動、入座工位、開會" width="820" height="461" loading="lazy">
       <figcaption>office 投影實錄——事件來自真實的 agent 迴圈，不是預錄動畫。</figcaption>
     </figure>
   </section>
 
   <section id="eval" class="wrap">
-    <div class="stats reveal" style="--i:3">
+    <div class="stats sr" style="--i:0">
       <div><b class="up">0.50 → 1.00</b><span>記憶檢索 hit@k：關鍵字 vs 加知識圖譜。$0、不呼叫 LLM 的確定性評測。</span></div>
       <div><b class="up">7/20 → 15/20</b><span>技能開關的 A/B 通過率。Fisher 精確檢定 p=0.0248，補到 n=20 才顯著。</span></div>
       <div><b class="up">8 → 3 回合</b><span>同一任務開啟長期記憶後的回合數，成本省 66%。</span></div>
@@ -211,17 +221,17 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
   </section>
 
   <section class="steps-wrap wrap">
-    <h2 class="reveal" style="--i:4">從一則訊息到一次交付</h2>
+    <h2 class="sr" style="--i:0">從一則訊息到一次交付</h2>
     <ol class="steps">
-      <li class="reveal" style="--i:5"><span class="stage">1</span><h3>丟任務給它</h3><p>在 Telegram 或 Slack @它，或用 <code>claw-cli</code> 接進腳本與 CI。任務進到鎖定的工作區。</p></li>
-      <li class="reveal" style="--i:6"><span class="stage">2</span><h3>迴圈在防線內跑</h3><p>思考 → 呼叫工具 → 觀察。回合上限、成本熔斷、危險指令黑名單、審批閘全程站崗——模型會壞，框架不跟著壞。</p></li>
-      <li class="reveal" style="--i:7"><span class="stage">3</span><h3>做完的經驗變成提案</h3><p>反思沉澱出的技能與記憶只寫進提案區，過確定性把關、人放行才生效。進化不繞過控制。</p></li>
+      <li class="sr" style="--i:1"><span class="stage">1</span><h3>丟任務給它</h3><p>在 Telegram 或 Slack @它，或用 <code>claw-cli</code> 接進腳本與 CI。任務進到鎖定的工作區。</p></li>
+      <li class="sr" style="--i:2"><span class="stage">2</span><h3>迴圈在防線內跑</h3><p>思考 → 呼叫工具 → 觀察。回合上限、成本熔斷、危險指令黑名單、審批閘全程站崗——模型會壞，框架不跟著壞。</p></li>
+      <li class="sr" style="--i:3"><span class="stage">3</span><h3>做完的經驗變成提案</h3><p>反思沉澱出的技能與記憶只寫進提案區，過確定性把關、<mark class="hl">人放行才生效</mark>。進化不繞過控制。</p></li>
     </ol>
   </section>
 
   <section class="cta-band wrap">
-    <p class="reveal" style="--i:8">整個專案是公開的：架構取捨、評測判讀、踩過的坑都寫在 repo 裡。</p>
-    <a class="cta-outline reveal" style="--i:9" href="https://github.com/SIMPLYBOYS/cogito-agent">讀 README →</a>
+    <p class="sr" style="--i:0">整個專案是公開的：架構取捨、評測判讀、踩過的坑都寫在 repo 裡。</p>
+    <a class="cta-outline sr" style="--i:1" href="https://github.com/SIMPLYBOYS/cogito-agent">讀 README →</a>
   </section>
 </main>
 
@@ -254,5 +264,48 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
   </div>
   <p class="colophon wrap-inner">cogito, ergo ago——想，故而做。一個 HTML 檔，沒有建置步驟。</p>
 </footer>
+<script>
+/* 漸進增強開關：沒有 JS 就沒有隱藏狀態，頁面照常完整 */
+document.documentElement.classList.add('js');
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* scroll 進場：一次性；reduced-motion 直接全部顯示 */
+const srs = document.querySelectorAll('.sr');
+if (reduce || !('IntersectionObserver' in window)) {
+  srs.forEach(el => el.classList.add('is-in'));
+} else {
+  const io = new IntersectionObserver(entries => {
+    for (const e of entries) if (e.isIntersecting) {
+      e.target.classList.add('is-in');
+      io.unobserve(e.target);
+      if (e.target.classList.contains('stats')) countUp(e.target);
+    }
+  }, { threshold: 0.25, rootMargin: '0px 0px -8% 0px' });
+  srs.forEach(el => io.observe(el));
+}
+
+/* 關鍵數字 count-up：逐 token 從 0 滾到實際值，格式（小數位/分數/箭頭）原樣保留。
+   螢幕閱讀器唸的是 aria-label 裡的最終值，不會聽到滾動過程。 */
+function countUp(stats) {
+  stats.querySelectorAll('b').forEach(b => {
+    const finalText = b.textContent;
+    b.setAttribute('aria-label', finalText);
+    const parts = finalText.split(/(\d+\.\d+|\d+)/);
+    const t0 = performance.now(), dur = 1200;
+    (function tick(now) {
+      const p = Math.min((now - t0) / dur, 1);
+      const eased = 1 - Math.pow(1 - p, 3); /* ease-out cubic */
+      b.textContent = parts.map(seg => {
+        if (!/^\d/.test(seg)) return seg;
+        const dec = seg.includes('.') ? seg.split('.')[1].length : 0;
+        return (parseFloat(seg) * eased).toFixed(dec);
+      }).join('');
+      if (p < 1) requestAnimationFrame(tick); else b.textContent = finalText;
+    })(t0);
+  });
+}
+if (reduce) document.querySelectorAll('.stats b').forEach(b => b.setAttribute('aria-label', b.textContent));
+</script>
 </body>
 </html>
