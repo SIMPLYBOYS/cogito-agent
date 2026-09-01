@@ -528,12 +528,16 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 		return nil, nil, fmt.Errorf("建立記憶目錄失敗: %w", err)
 	}
 	loader := ctxpkg.NewMemoryLoader(root)
+	// 先把散落在記憶目錄的既有變化收成一個 commit（崩潰殘留、手動編修）——
+	// 少這步，第一條放行的 commit 會把它們全掃進來，revert 單條就不再是單條。
+	commitMemory(root, "收整散落變化（非本次放行）")
 	for _, e := range picked {
 		if !e.IsDestructive() {
 			if err := writeMemoryRecord(memDir, e.Kind, e.Task, e.Learning, e.Trigger); err != nil {
 				return applied, skipped, err
 			}
 			applied = append(applied, e.Learning)
+			commitMemory(root, "放行 "+e.Learning) // 一提案一 commit：revert 即回滾單條
 			continue
 		}
 		note, err := applyDestructive(loader, memDir, e)
@@ -546,6 +550,7 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 			continue
 		}
 		applied = append(applied, describeEntry(e))
+		commitMemory(root, "放行 "+describeEntry(e))
 	}
 	// 被跳過的塞回 rest，順序會亂掉——依原編號排回去，回寫的檔案才與使用者看過的清單一致。
 	sort.Slice(rest, func(i, j int) bool { return rest[i].N < rest[j].N })
@@ -554,6 +559,7 @@ func ApplyProposedMemory(root string, only ...int) (applied, skipped []string, e
 	}
 	// 放行後順手淘汰：超過上限的最久未用記錄歸檔（可復原），避免記憶庫無限長。
 	loader.Prune(maxMemoryRecords)
+	commitMemory(root, "淘汰歸檔（超過記錄上限，最久未用）")
 	return applied, skipped, nil
 }
 

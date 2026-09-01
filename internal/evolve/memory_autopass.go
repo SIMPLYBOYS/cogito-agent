@@ -100,6 +100,7 @@ func RevokeAutopass(root string, n int) (string, error) {
 		return "", fmt.Errorf("歸檔失敗: %w", err)
 	}
 	saveAutopass(root, append(live[:n-1], live[n:]...))
+	commitMemory(root, "撤回 "+e.Desc)
 	return e.Desc, nil
 }
 
