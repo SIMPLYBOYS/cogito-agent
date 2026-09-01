@@ -9,10 +9,65 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:ital,wght@0,400;0,600;1,400&family=Press+Start+2P&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="tokens.css">
 <style>
+/* ── tokens（內聯：單一檔案＝不可能版本錯位）── */
+/* Hallmark · macrostructure: Marquee Hero · H1 knobs: size=xl, alignment=left-bias, underlay=rule-below
+ * nav: N1 (2 destinations) · footer: Ft3 (genuine doc sitemap) · sections: T4 + F4 + C1
+ * theme: studied-DNA (source: url) · source-url: https://munderdiffl.in/
+ * observed-fonts: Space Grotesk + Inter + JetBrains Mono + pixel trio → 收斂為 Space Grotesk + IBM Plex Sans + Press Start 2P (2+1)
+ * observed-paper: #0A0D14 → oklch(15% 0.015 260) · observed-accent: #FFCA54 → oklch(87% 0.13 85)
+ * rhythm: unknown (URL mode) · studied: yes · DNA-source: public reference for user's own project
+ * Hallmark · pre-emit critique: P4 H4 E4 S5 R4 V4
+ */
+:root {
+  color-scheme: dark;
+  /* 紙面層（DNA 深藍黑，OKLCH 化） */
+  --color-paper:    oklch(15% 0.015 260);
+  --color-paper-2:  oklch(18% 0.016 260);
+  --color-paper-3:  oklch(22% 0.018 260);
+  --color-rule:     oklch(30% 0.014 260);
+  --color-rule-strong: oklch(38% 0.016 260);
+  --color-ink:      oklch(94% 0.008 260);
+  --color-muted:    oklch(74% 0.010 260);
+  --color-faint:    oklch(56% 0.010 260);
+  /* 琥珀錨點（DNA #FFCA54） */
+  --color-accent:      oklch(87% 0.130 85);
+  --color-accent-deep: oklch(78% 0.140 80);
+  --color-accent-ink:  oklch(17% 0.020 85);
+  --color-accent-soft: oklch(87% 0.130 85 / 0.10);
+  --color-accent-line: oklch(87% 0.130 85 / 0.38);
+  --color-ok:          oklch(80% 0.150 155);
+  --color-focus:       oklch(87% 0.150 85);
+  /* 像素手法：硬偏移影（DNA 的 3px 3px 0）與粗邊 */
+  --px-border: 3px solid oklch(12% 0.02 300);
+  --px-shadow: 4px 4px 0 oklch(12% 0.02 300 / 0.9);
+  /* 字型（2+1；outlier 僅 wordmark + 狀態章） */
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-outlier: "Press Start 2P", monospace;
+  /* 字級（1.25 比例；display 遵守 ≤5.25rem 上限） */
+  --text-sm:   0.8rem;
+  --text-base: 1rem;
+  --text-md:   1.25rem;
+  --text-lg:   1.5625rem;
+  --text-xl:   1.9531rem;
+  --text-2xl:  2.4414rem;
+  --text-display: clamp(2.75rem, 4.5vw + 1rem, 5.25rem);
+  /* 空間（4pt） */
+  --space-2xs: 0.25rem; --space-xs: 0.5rem; --space-sm: 0.75rem; --space-md: 1rem;
+  --space-lg: 1.5rem; --space-xl: 2.5rem; --space-2xl: 4rem; --space-3xl: 6rem; --space-4xl: 9rem;
+  /* 動效 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:  cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-micro: 120ms; --dur-short: 220ms; --dur-long: 420ms;
+  --radius: 14px; --radius-sm: 10px;
+  --maxw: 68rem; --page-gutter: clamp(1rem, 4vw, 2.5rem);
+  --z-base: 1; --z-sticky: 200;
+}
+
+/* ── 頁面 ── */
 /* Hallmark · macrostructure: Marquee Hero · theme: studied-DNA (source: https://munderdiffl.in/)
- * 完整 stamp 見 tokens.css 頂部 */
+ * 完整 stamp 見上方內聯 tokens 區塊頂部 */
 * { box-sizing: border-box; }
 html { overflow-x: clip; }
 body {
@@ -40,16 +95,18 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
 .nav a { white-space: nowrap; }
 
 /* ── Marquee hero：宣言即版面 ── */
-/* 使用者兩次實機截圖都點名導覽與標題之間的黑色虛空——「貼底錨定」在高視窗上
-   就是會產生它，改成【內容驅動】：標題距導覽只留一段固定範圍的呼吸，不再吃滿視窗。 */
-.hero { padding-block: clamp(3rem, 10dvh, 6.5rem) var(--space-xl); }
-.hero .status { font-family: var(--font-outlier); font-size: 0.6rem; color: var(--color-ok); letter-spacing: 0.08em; margin: 0 0 var(--space-lg); }
-.hero h1 { font-size: var(--text-display-hero); font-weight: 700; margin: 0; max-width: 22ch; }
+/* header refactor（第三版，使用者裁決）：拋棄 marquee 的「宣言貼底＋視窗高留白」概念，
+   改成完整的頭部組合——狀態章 → 大標 → 引言。內容驅動、緊湊、無人造虛空。
+   （前一版還踩過 tokens.css 快取錯位讓 var() 失效、標題崩回 1rem——tokens 已內聯根治。） */
+.hero { padding-block: clamp(2.5rem, 7dvh, 4.5rem) var(--space-xl); display: grid; gap: var(--space-lg); justify-items: start; }
+.hero .status { font-family: var(--font-outlier); font-size: 0.6rem; color: var(--color-ok); letter-spacing: 0.08em; margin: 0; }
+.hero h1 { font-size: var(--text-display); font-weight: 700; margin: 0; max-width: 22ch; }
+.hero .lede { font-size: var(--text-md); color: var(--color-muted); max-width: 40ch; margin: 0; }
 .hero h1 em { font-style: normal; color: var(--color-accent); }
-.rule-thick { border: 0; border-top: 3px solid var(--color-rule-strong); margin: var(--space-xl) 0 0; }
+.rule-thick { border: 0; border-top: 3px solid var(--color-rule-strong); margin: var(--space-lg) 0 0; width: 100%; }
 
 /* ── 定位 + demo ── */
-.pitch { display: grid; gap: var(--space-xl); grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); align-items: start; padding-block: var(--space-3xl) var(--space-2xl); }
+.pitch { display: grid; gap: var(--space-xl); grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); align-items: start; padding-block: var(--space-2xl); }
 .pitch p { max-width: 34em; margin: 0 0 var(--space-md); }
 .pitch .lead { font-size: var(--text-md); color: var(--color-ink); }
 .pitch .muted { color: var(--color-muted); }
@@ -128,12 +185,13 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-hei
   <section class="hero wrap reveal" style="--i:0">
     <p class="status">● 單 BINARY・自託管・GATED 自我進化</p>
     <h1>會思考的 agent 很多，<br><em>敢被審計的</em>不多。</h1>
+    <p class="lede">cogito-agent 是 Go 寫的 agent harness：把 Claude 驅動的 ReAct 迴圈接進 Slack 與 Telegram，在鎖定的工作區內完成開發任務。</p>
     <hr class="rule-thick">
   </section>
 
   <section class="pitch wrap">
     <div class="reveal" style="--i:1">
-      <p class="lead">cogito-agent 是 Go 寫的 agent harness：把 Claude 驅動的 ReAct 迴圈接進 Slack 與 Telegram，在鎖定的工作區內讀寫檔案、執行指令、完成開發任務。</p>
+      <p class="lead">賭注下在別人略過的地方。</p>
       <p class="muted">它的賭注下在別人略過的地方——成本熔斷、死迴圈指紋、工具權限政策、Docker 沙箱是框架硬性執行的，不指望模型自覺；技能、記憶、參數的自我進化一律「提案 → 把關 → 才生效」。每一輪花多少錢、走了哪些工具，OpenTelemetry 與面板都看得到。</p>
       <p class="muted">然後，它有一間像素辦公室：每個 agent 是一個 NPC，接工作走到工位，委派子 agent 時真的有人起身。</p>
     </div>
