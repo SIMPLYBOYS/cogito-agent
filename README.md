@@ -298,6 +298,7 @@ cp .env.example .env
 | `COGITO_MEMORY_SCOPE` | （選填）`channel`＝長期記憶 **per-conversation 隔離**（技能仍共享）；預設 `global` 跨對話共享。見 [docs/multi-tenancy.md](docs/multi-tenancy.md) |
 | `COGITO_REFLECT_MODEL` | （選填）**背景反思改用便宜模型**（技能/記憶/KG 蒸餾）。它們在任務結束後才跑、沒人在等、產物還要人工放行——沒必要燒主模型。刻意**不**涵蓋 goal judge（那道驗收影響任務結果） |
 | `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | （選填）`1` 開啟自我進化的三種反思：提案技能／提案記憶（成功慣例 + 失敗教訓）／提案 KG 關係。**產物一律只進暫存區，需人工放行** |
+| `TAVILY_API_KEY` | （選填）設了才註冊 `web_search`／`fetch_url` 兩顆向外查證工具（Tavily；抓頁走其 /extract——抓取發生在遠端，內網位址拿不到，SSRF 整類排除），並注入紀律第 10 條「輸入不足先查證再動工」。未設＝不註冊也不注入——工具清單與紀律不擺用不了的東西。查詢封頂 400 字防夾帶外滲，夾機密片段（.env/id_rsa…）走審批 |
 | `COGITO_MEMORY_AUTOAPPLY` | （選填）`1`＝提案記憶中【四判準全中】的自動放行：①純風格不改決策行為（LLM 判，fail-closed）②純新增（刪改永遠人審）③單行 ≤100 字 ④與既有記憶零衝突。放行的掛 **72 小時撤回窗**（`undo memory` 一鍵撤回），且**一提案一 git commit**（workspace 是 git repo 時；revert 即回滾單條）。其餘照舊留給人審 |
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
 | `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
@@ -369,7 +370,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
    | `apply config` / `reject config` | 放行 / 丟棄 `cmd/bench -tune` 產出的**提案參數**（放行＝晉升為 `.claw/config.json`、下次任務起套用；套用時再 clamp 有界） |
    | `plan on` / `plan off` / `plan status` | 切換**本頻道** Plan Mode（計畫外部化到 `PLAN.md`/`TODO.md` + 目標錨 + 確定性步驟跳過）。多步長任務建議開、閒聊免儀式；狀態隨 session 持久化 |
 
-   （`apply memory` / `apply edges` 需啟用對應的 `COGITO_*_SYNTH`；提案產生時機器人會主動通知。Plan Mode 為 per-channel、預設關。其餘能力用**自然語言**交辦：讀寫檔、bash、`recall` 長期記憶、派子 agent、畫長條圖、呼叫 MCP 工具…）
+   （`apply memory` / `apply edges` 需啟用對應的 `COGITO_*_SYNTH`；提案產生時機器人會主動通知。Plan Mode 為 per-channel、預設關。其餘能力用**自然語言**交辦：讀寫檔、bash、`recall` 長期記憶、派子 agent、畫長條圖、上網查證（web_search/fetch_url，需 `TAVILY_API_KEY`）、呼叫 MCP 工具…）
 
    **CLI（`cmd/claw-cli`）旗標**：
 

@@ -29,6 +29,16 @@ func RegisterCoreTools(r tools.Registry, workDir, skillDir, memoryDir string, ex
 	r.Register(tools.NewReadSkillTool(skillDir))
 	r.Register(tools.NewRecallTool(memoryDir))
 	r.Register(tools.NewBarChartTool())
+	registerWebTools(r)
+}
+
+// registerWebTools 掛向外查證的兩顆（web_search / fetch_url）。TAVILY_API_KEY 未設＝不註冊——
+// 工具清單不擺用不了的東西（模型會呼叫、然後拿一輪報錯白燒錢），與其他可選能力同款靜默降級。
+func registerWebTools(r tools.Registry) {
+	if key := os.Getenv("TAVILY_API_KEY"); key != "" {
+		r.Register(tools.NewWebSearchTool(key))
+		r.Register(tools.NewFetchURLTool(key))
+	}
 }
 
 // SubagentOpts 是各站點對子 agent 佈線的差異點。
@@ -52,6 +62,7 @@ func WireSubagent(mainReg tools.Registry, runner tools.AgentRunner, baseWorkDir 
 		r.Register(tools.NewBashToolWithExecutor(wd, opts.Executor))
 		r.Register(tools.NewWriteFileTool(wd))
 		r.Register(tools.NewEditFileTool(wd))
+		registerWebTools(r) // 研究型子 agent（市場調查等）最需要向外查證
 		for _, mw := range opts.Middleware {
 			r.Use(mw)
 		}

@@ -60,3 +60,21 @@ func TestRegisterMCPTools_NilSafe(t *testing.T) {
 		t.Error("nil gateway 不該註冊任何工具")
 	}
 }
+
+// web_search / fetch_url 的註冊由 TAVILY_API_KEY 決定：沒 key 不擺進清單——
+// 工具清單不擺用不了的東西（模型會呼叫、拿一輪報錯白燒錢）。
+func TestWebToolsGatedByKey(t *testing.T) {
+	build := func() map[string]bool {
+		r := tools.NewRegistry()
+		RegisterCoreTools(r, t.TempDir(), t.TempDir(), t.TempDir(), sandbox.FromEnv())
+		return toolNames(r)
+	}
+	t.Setenv("TAVILY_API_KEY", "")
+	if n := build(); n["web_search"] || n["fetch_url"] {
+		t.Fatal("沒 key 不該註冊 web 工具")
+	}
+	t.Setenv("TAVILY_API_KEY", "tvly-test")
+	if n := build(); !n["web_search"] || !n["fetch_url"] {
+		t.Fatal("有 key 就該讓 web_search / fetch_url 上工具清單")
+	}
+}

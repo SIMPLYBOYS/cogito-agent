@@ -165,6 +165,15 @@ func IsDangerousCommand(toolName string, args string) bool {
 				return true // 機密/憑證外洩（cat .env / 讀 id_rsa …）
 			}
 		}
+	case "web_search", "fetch_url":
+		// 查詢/網址會外送搜尋服務——夾帶機密片段（.env、金鑰路徑）就是外滲通道，
+		// 與 bash 同一道 secretSegments 掃描：命中即審批，不是禁用（也許真有正當理由）。
+		low := strings.ToLower(args)
+		for _, seg := range secretSegments {
+			if strings.Contains(low, seg) {
+				return true
+			}
+		}
 	case "mcp_call_tool":
 		// gateway 以 {"name":<遠端工具>,"arguments":{...}} 呼叫遠端 MCP 工具。解析不出 → 保守審批。
 		var a struct {
