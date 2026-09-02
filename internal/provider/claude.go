@@ -26,16 +26,26 @@ func NewClaudeProvider(model string) *ClaudeProvider {
 	if apiKey == "" {
 		panic("請設置 ANTHROPIC_API_KEY 環境變數")
 	}
-	return &ClaudeProvider{
+	p := &ClaudeProvider{
 		client: anthropic.NewClient(option.WithAPIKey(apiKey)),
 		model:  model,
 	}
+	p.warmWindows() // 背景預熱窗口表，讓【第一個】任務的壓縮水位就是準的
+	return p
 }
 
-// MaxContextTokens 回傳 Claude 模型的上下文窗口。當前 Claude 家族（Opus/Sonnet/Haiku 4.x）
-// 標準窗口均為 200k tokens。
+// MaxContextTokens 回傳【這個模型實際的】上下文窗口，問官方（/v1/models 的
+// max_input_tokens，見 models.go 的 windowOf）；查不到才退回保守的 200k。
+//
+// 先前這裡寫死 200000，註解還寫著「當前 Claude 家族均為 200k」——官方資料打臉了那句：
+// opus-5／sonnet-5／fable-5／opus-4-6~4-8 都是 1M，只有 haiku-4-5 與 opus-4-5 是 200k。
+// 而這個值直接決定壓縮水位（窗口 × 0.75），所以 1M 的模型會在【實際容量的 15%】就開始
+// 摺疊歷史：白丟上下文、還付錢做不必要的摘要。
 func (p *ClaudeProvider) MaxContextTokens() int {
-	return 200000
+	if w := p.windowOf(p.model); w > 0 {
+		return w
+	}
+	return windowFallback
 }
 
 // ModelName 回傳構造時傳入的 Claude 模型 id（如 claude-opus-4-8）。
