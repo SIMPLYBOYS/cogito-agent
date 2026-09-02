@@ -198,3 +198,21 @@ func TestSteerCommand(t *testing.T) {
 		t.Error("開頭不是 steer 的一般文字不該被消費")
 	}
 }
+
+// SetChannelModel：reset/default 與聊天端 `model reset` 同義（收回覆蓋），
+// 其餘字串照設。外殼靠這個把臨時覆蓋還原——空字串在 HTTP 入口是「不要動」，不能混用。
+func TestSetChannelModel(t *testing.T) {
+	c := NewCore("modeltest", t.TempDir(), nil, func(string, string) {})
+	conv := "modeltest:chanM"
+	c.SetChannelModel("chanM", " claude-opus-5 ")
+	if got := c.sessionFor(conv).Model(); got != "claude-opus-5" {
+		t.Errorf("設定失敗（也該去空白）: %q", got)
+	}
+	for _, word := range []string{"reset", "DEFAULT", " Reset "} {
+		c.SetChannelModel("chanM", "claude-haiku-4-5")
+		c.SetChannelModel("chanM", word)
+		if got := c.sessionFor(conv).Model(); got != "" {
+			t.Errorf("%q 應還原成預設（空），got %q", word, got)
+		}
+	}
+}

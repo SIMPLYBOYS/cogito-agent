@@ -523,11 +523,18 @@ func (c *Core) Capabilities(channelID string) ([]schema.ToolDefinition, []ctxpkg
 	return eng.AvailableTools(), ctxpkg.NewSkillLoader(c.workDir).List()
 }
 
-// SetChannelModel 設定某個頻道要用的模型（空＝還原成啟動預設）。供 office HTTP 入口在派工時
-// 帶上——像素辦公室把「用哪個模型」當成【員工的屬性】（老徐做架構判斷、小樺做資料彙整，
-// 本來就該是不同等級），而不是每次派工要重講的參數。與聊天端的 `model` 指令改的是同一個地方。
+// SetChannelModel 設定某個頻道要用的模型。供 office HTTP 入口在派工時帶上——像素辦公室把
+// 「用哪個模型」當成【員工的屬性】（老徐做架構判斷、小樺做資料彙整，本來就該是不同等級），
+// 而不是每次派工要重講的參數。與聊天端的 `model` 指令改的是同一個地方。
+//
+// `reset`／`default` 與聊天端 `model reset` 同義（還原啟動預設）——外殼要能把臨時覆蓋收回去，
+// 而 HTTP 入口那邊「送空字串」是「不要動現有設定」的意思，兩者必須分得開。
 func (c *Core) SetChannelModel(channelID, model string) {
-	c.sessionFor(c.convID(channelID)).SetModel(strings.TrimSpace(model))
+	m := strings.TrimSpace(model)
+	if strings.EqualFold(m, "reset") || strings.EqualFold(m, "default") {
+		m = ""
+	}
+	c.sessionFor(c.convID(channelID)).SetModel(m)
 }
 
 // ResumeInterrupted 在行程啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍
