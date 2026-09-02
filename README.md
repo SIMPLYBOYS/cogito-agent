@@ -54,6 +54,8 @@
 - 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原；並成為 `search_sessions` 的檢索母體——過去的對話從「只能續接」變成「可以回頭查」。
 - 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。唯一例外是可選的 `COGITO_MEMORY_AUTOAPPLY`：四判準全中的窄新增記憶自動放行，掛 72 小時撤回窗＋一提案一 git commit 可回滾。
 
+- 📚 **可查證的架構文件**：`verify_citations` 讓 agent 寫的 `docs/wiki/` 引用【驗得過】——引用格式自帶錨點（`〔路徑:行號 · 那幾行該有的字串〕`），工具逐條打開檔案比對，行號錯了直接回報**實際在第幾行**。搭 `repo-wiki` 技能（章節樹＋概念→程式實體對映表＋mermaid＋只更新被改動影響的頁）。**為什麼需要**：實測某雲端服務對真實 repo 生成的架構文件，`file:line` 是模型猜的——宣稱某函式在 438 行、實際在 498 行（438 行是一張 SVG）。它人不在 repo 裡情有可原；你的 agent 就在 repo 裡，沒有理由猜。
+
 **接入與可觀測性**
 - 💬 **多平台整合（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同行程同時跑，會話/工作目錄**預設**靠 `platform:` 前綴命名空間隔開（設了 `COGITO_USER_LINK` 則刻意例外，見下）；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行，且跨平台生效）。
   - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @
@@ -222,7 +224,9 @@ internal/
 │   ├── read_file/write_file/edit_file/bash.go   內建工具
 │   ├── subagent.go          spawn_subagent（agent-as-tool）
 │   ├── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
-│   └── search_sessions.go   過去對話檢索（薄殼；評分在 context/session_search.go）
+│   ├── search_sessions.go   過去對話檢索（薄殼；評分在 context/session_search.go）
+│   ├── web_search.go        向外查證：web_search / fetch_url（需 TAVILY_API_KEY，見環境變數表）
+│   └── verify_citations.go  文件引用驗證：〔路徑:行號 · 錨點〕逐條打開檔案比對，錯的回報【實際在第幾行】
 ├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
 ├── mcp/                     MCP 客戶端（stdio + Streamable HTTP 兩種 transport）+ gateway（漸進式暴露）
 ├── chatbot/                 傳輸無關核心：指令閘/會話隔離/鎖/跑任務管線/進度回報 + HITL 審批 + 跨平台發送路由

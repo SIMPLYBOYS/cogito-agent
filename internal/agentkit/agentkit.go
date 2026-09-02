@@ -29,6 +29,7 @@ func RegisterCoreTools(r tools.Registry, workDir, skillDir, memoryDir string, ex
 	r.Register(tools.NewReadSkillTool(skillDir))
 	r.Register(tools.NewRecallTool(memoryDir))
 	r.Register(tools.NewBarChartTool())
+	r.Register(tools.NewVerifyCitationsTool(workDir))
 	registerWebTools(r)
 }
 
@@ -62,7 +63,8 @@ func WireSubagent(mainReg tools.Registry, runner tools.AgentRunner, baseWorkDir 
 		r.Register(tools.NewBashToolWithExecutor(wd, opts.Executor))
 		r.Register(tools.NewWriteFileTool(wd))
 		r.Register(tools.NewEditFileTool(wd))
-		registerWebTools(r) // 研究型子 agent（市場調查等）最需要向外查證
+		r.Register(tools.NewVerifyCitationsTool(wd)) // 文件工作可能被委派，驗證跟著走（rooted 在該 worktree）
+		registerWebTools(r)                          // 研究型子 agent（市場調查等）最需要向外查證
 		for _, mw := range opts.Middleware {
 			r.Use(mw)
 		}
