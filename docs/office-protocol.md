@@ -62,6 +62,13 @@
 false 時不送。橋端要把它標出來（外殼顯示成 `~$0.9000`）——估計值長得跟實價一模一樣，
 是另一種「假的成功」。
 
+### `GET /models`
+
+回「現在真正能用哪些模型」：`{"models":[{"id","name"}],"source":"live"|"pricing"}`。
+`live` ＝來自 provider 本人（Anthropic 的 `/v1/models`，帶 6 小時快取）；`pricing` ＝問不到，
+降級成計價表的鍵。**降級要看得見**——外殼據此告訴使用者這份清單可能過期。
+需要 token（與 `/capabilities` 同一把）。
+
 ### `/task` 的請求欄位
 
 派工端可帶 `model`（string，選填）：設定該頻道之後要用的模型（等同聊天端的 `model <id>`

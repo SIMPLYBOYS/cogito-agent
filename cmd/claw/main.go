@@ -328,7 +328,9 @@ func main() {
 
 	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。
 	// 【必須在 hooks 組好之後】——先前擺在前面，結構上就不可能掛到鉤子。
-	startOfficeHTTP(factory, rootDir, hooks, mcpGateway)
+	// llmProvider 傳進去只為 /models：問官方「現在真正能用哪些模型」（provider 支援才問，
+	// 見 provider.ModelLister）。刻意傳【未包 CostTracker 的原始 provider】——列清單不記帳。
+	startOfficeHTTP(factory, rootDir, hooks, mcpGateway, llmProvider)
 
 	// 監聽 SIGINT/SIGTERM 以優雅關閉：先停傳輸層（websocket/長輪詢隨 ctx 取消），再 flush OTel span。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

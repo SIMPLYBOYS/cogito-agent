@@ -2,17 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -25,7 +29,7 @@ import (
 // 出訊（審批卡/完成/失敗訊息）經 rawSend POST 回橋的 /office/chat，顯示在 Web 工作串。
 // hooks 是【必填參數】而非事後 setter：這個入口先前漏掛 postRun/postFailure，導致從辦公室派的工
 // 跑完不反思（同一 agent、同一 factory，行為卻依入口而異）。設成參數後，新入口漏接就編譯不過。
-func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbot.Hooks, gw *mcp.Gateway) {
+func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbot.Hooks, gw *mcp.Gateway, llm provider.LLMProvider) {
 	addr, token := os.Getenv("COGITO_HTTP_ADDR"), os.Getenv("COGITO_HTTP_TOKEN")
 	if addr == "" || token == "" {
 		return
@@ -66,6 +70,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 	mux := http.NewServeMux()
 	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch, core.SetChannelModel))
 	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities, gw))
+	mux.HandleFunc("/models", officeModelsHandler(token, llm))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
 	// Dispatch 本身很快（任務進背景 goroutine），但指令路徑會同步 POST 回橋，故 write 留寬一點。
 	srv := &http.Server{
@@ -85,6 +90,47 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 }
 
 // officeCapsHandler 回報某頻道實際掛上的工具與技能（唯讀）。像素辦公室的名冊用它顯示
+// officeModelsHandler 回「現在真正能用哪些模型」。清單來自 provider 本人（Anthropic 的
+// /v1/models，帶 TTL 快取），問不到就降級成【計價表的鍵】——那張表至少是我們保證算得出
+// 錢的集合。source 欄位講清楚這份清單是哪來的，別讓降級變成無聲的。
+//
+// 為何不寫死一張表：模型發布是持續發生的事。實測跑這支時，計價表裡缺 opus-5 與 sonnet-5，
+// 而 persona 已經在用 opus-5——手動維護的清單必然落後於現實。
+func officeModelsHandler(token string, llm provider.LLMProvider) http.HandlerFunc {
+	wantAuth := []byte("Bearer " + token)
+	var lister provider.ModelLister
+	if l, ok := llm.(provider.ModelLister); ok {
+		lister = provider.NewCachedLister(l)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), wantAuth) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		out := struct {
+			Models []provider.ModelInfo `json:"models"`
+			Source string               `json:"source"` // live／pricing
+		}{Models: []provider.ModelInfo{}, Source: "pricing"}
+		if lister != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+			defer cancel()
+			if got, err := lister.ListModels(ctx); err == nil && len(got) > 0 {
+				out.Models, out.Source = got, "live"
+			} else if err != nil {
+				log.Printf("[office] 問不到官方模型清單（降級成計價表）: %v", err)
+			}
+		}
+		if out.Source == "pricing" {
+			for id := range observability.PricingModel {
+				out.Models = append(out.Models, provider.ModelInfo{ID: id, Name: id})
+			}
+			sort.Slice(out.Models, func(i, j int) bool { return out.Models[i].ID < out.Models[j].ID })
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	}
+}
+
 // 「這位員工有哪些能力」——清單來自引擎本人，不是寫死的表，否則工具增減就會失真。
 // 同樣要 token：它會透露這台機器上掛了哪些 MCP 工具與內部技能名稱。
 func officeCapsHandler(token string, caps func(string) ([]schema.ToolDefinition, []ctxpkg.Skill), gw *mcp.Gateway) http.HandlerFunc {
