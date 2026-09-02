@@ -260,6 +260,15 @@ func (s *Session) Usage() (promptTokens, completionTokens int, costUSD float64) 
 	return s.TotalPromptTokens, s.TotalCompletionTokens, s.TotalCostUSD
 }
 
+// ModelUsed 回報本 session【實際】跑在哪個模型（由 CostTracker 計費時記錄）。
+// 與 Model() 不同：沒設覆蓋時 Model() 是空的，但這裡仍答得出真正跑的那個——
+// 揭露給使用者看的必須是這個，設定值不等於事實。
+func (s *Session) ModelUsed() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.modelUsed
+}
+
 // AddSteer 把一句插話排進佇列（聊天端 `/steer`，任務執行中呼叫）。
 func (s *Session) AddSteer(text string) {
 	s.mu.Lock()

@@ -64,7 +64,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 	core.ResumeInterrupted() // 跨重啟續跑（需 AUTO_RESUME + SESSION_DIR），同 Slack/TG
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch))
+	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch, core.SetChannelModel))
 	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities, gw))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
 	// Dispatch 本身很快（任務進背景 goroutine），但指令路徑會同步 POST 回橋，故 write 留寬一點。
@@ -129,7 +129,8 @@ func officeBindDenied(addr string, insecure bool) bool {
 
 // officeTaskHandler 是 /task 的處理器。dispatch 以參數注入（而非直接吃 *Core）純為可單測——
 // 這是全系統最強的一道入口（能跑任意 bash／寫檔），auth 與輸入把關值得有測試釘住。
-func officeTaskHandler(token, user string, dispatch func(channelID, userID, text string)) http.HandlerFunc {
+func officeTaskHandler(token, user string, dispatch func(channelID, userID, text string),
+	setModel func(channelID, model string)) http.HandlerFunc {
 	wantAuth := []byte("Bearer " + token)
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -141,11 +142,16 @@ func officeTaskHandler(token, user string, dispatch func(channelID, userID, text
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		var in struct{ Agent, Text string }
+		// Model 可選：辦公室把「用哪個模型」當成【員工的屬性】（persona 的 model 欄位），
+		// 派工時一起帶過來。空＝不動這個頻道現有的設定（可能是聊天端 `model` 指令設的）。
+		var in struct{ Agent, Text, Model string }
 		// 限制請求體，避免一個大 body 就吃掉記憶體（任務文字 1 MB 綽綽有餘）。
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || in.Agent == "" || in.Text == "" {
 			http.Error(w, `need {"agent","text"}`, http.StatusBadRequest)
 			return
+		}
+		if in.Model != "" && setModel != nil {
+			setModel(in.Agent, in.Model) // 下一個任務（也就是這個）生效
 		}
 		dispatch(in.Agent, user, in.Text) // channelID = persona id（p17）→ conv "office:p17"
 		w.WriteHeader(http.StatusAccepted)

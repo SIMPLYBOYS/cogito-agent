@@ -36,7 +36,7 @@ func TestOfficeReporterContract(t *testing.T) {
 	r.OnToolResult(ctx, "bash", "3 處", false)
 	r.OnToolResult(ctx, "bash", "boom", true)
 	r.OnMessage(ctx, "完成")
-	r.End(errors.New("網路中斷"), 0.0231)
+	r.End(errors.New("網路中斷"), 0.0231, "claude-opus-5")
 	r.Close() // 排空後 got 即完整
 
 	want := []officeEvent{
@@ -46,7 +46,7 @@ func TestOfficeReporterContract(t *testing.T) {
 		{V: officeProtocolVersion, Agent: "p17", Kind: "error", Label: "bash", Detail: "boom"},
 		{V: officeProtocolVersion, Agent: "p17", Kind: "msg", Label: "完成"},
 		// done 帶本次真實花費——外殼收工列據此顯示；0/未知不送（見 Cost 欄位註）
-		{V: officeProtocolVersion, Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷", Cost: 0.0231},
+		{V: officeProtocolVersion, Agent: "p17", Kind: "done", Label: "error", Detail: "網路中斷", Cost: 0.0231, Model: "claude-opus-5"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("事件數 %d != %d: %+v", len(got), len(want), got)
@@ -66,7 +66,7 @@ func TestOfficeReporterContract(t *testing.T) {
 func TestOfficeReporterBridgeDown(t *testing.T) {
 	r := NewOfficeReporter("http://127.0.0.1:1", "p17") // 連線秒拒
 	r.Begin("x", "")
-	r.End(nil, 0)
+	r.End(nil, 0, "")
 	r.Close() // 卡住即測試逾時失敗
 }
 
@@ -84,10 +84,14 @@ func TestOfficeReporterOmitsUnknownCost(t *testing.T) {
 	defer srv.Close()
 
 	r := NewOfficeReporter(srv.URL, "p05")
-	r.End(nil, 0)
+	r.End(nil, 0, "")
 	r.Close()
 	if len(bodies) != 1 || strings.Contains(bodies[0], `"cost"`) {
 		t.Fatalf("cost 未知卻上了線: %v", bodies)
+	}
+	// 模型同理：沒跑過模型就失敗的任務，寧可空白也不要編一個 id 上去
+	if strings.Contains(bodies[0], `"model"`) {
+		t.Fatalf("model 未知卻上了線: %v", bodies)
 	}
 }
 
@@ -129,14 +133,14 @@ func TestOfficeReporterCloseIsSafe(t *testing.T) {
 
 	r := NewOfficeReporter(srv.URL, "p01")
 	r.Begin("任務", "/tmp/x")
-	r.End(nil, 0)
+	r.End(nil, 0, "")
 	r.Close()
 
 	// Close 後仍有事件到（模擬殘留的 goroutine）：必須靜默丟棄，不 panic
 	r.OnToolCall(context.Background(), "bash", "ls")
 	r.OnMessage(context.Background(), "遲到的訊息")
 	r.OnTurn(context.Background(), 7)
-	r.End(errors.New("遲到的收工"), 0)
+	r.End(errors.New("遲到的收工"), 0, "")
 
 	// 重複 Close：必須冪等，不 panic
 	r.Close()
@@ -193,7 +197,7 @@ func TestOfficeReporter_CriticalNotDroppedUnderBubbleFlood(t *testing.T) {
 			r.OnToolResult(ctx, "spawn_subagent:planner", "完成", false)
 		}
 	}
-	r.End(nil, 0)
+	r.End(nil, 0, "")
 	r.Close()
 
 	if d := r.DroppedCritical(); d != 0 {

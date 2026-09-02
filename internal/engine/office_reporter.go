@@ -44,6 +44,10 @@ type officeEvent struct {
 	// Cost 是本次任務的【真實】花費（美元，provider 回報的 usage 累計），只在 done 事件帶。
 	// omitempty：0 或未知＝不送——投影估計值跟畫假的進度條是同一種謊，寧可空白。
 	Cost float64 `json:"cost,omitempty"`
+	// Model 是本次【主 agent 實際】跑的模型 id（session.ModelUsed，由 CostTracker 記），
+	// 只在 done 帶。沒有它，花費數字就沒有分母——$0.0231 是 haiku 跑很多輪還是 opus 跑兩輪，
+	// 看不出來。子 agent 可能各用各的模型，那些不在這裡（措辭要講「主 agent」）。
+	Model string `json:"model,omitempty"`
 }
 
 type OfficeReporter struct {
@@ -232,8 +236,9 @@ func (r *OfficeReporter) Begin(task, workDir string) {
 }
 
 // End 收工。costUSD 是本次任務的真實花費（呼叫端算增量）；≤0＝未知，不送（見 Cost 欄位）。
-func (r *OfficeReporter) End(err error, costUSD float64) {
-	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: "done", Label: "ok"}
+// model 是主 agent 實際跑的模型 id，空＝未知（例如還沒呼叫過模型就失敗了），一樣不送。
+func (r *OfficeReporter) End(err error, costUSD float64, model string) {
+	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: "done", Label: "ok", Model: model}
 	if costUSD > 0 {
 		ev.Cost = costUSD
 	}

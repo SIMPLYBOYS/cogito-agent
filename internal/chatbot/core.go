@@ -392,7 +392,8 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	if office := newOfficeReporter(convID); office != nil {
 		office.Begin(prompt, workDir)
 		// done 帶本次真實花費增量——外殼收工列印的數字與聊天端「本次花費 $x」是同一份帳
-		defer func() { office.End(taskErr, session.CostUSD()-startCost); office.Close() }()
+		// 花費與模型一起送：$0.0231 沒有分母就只是個數字（haiku 跑十輪還是 opus 跑兩輪？）
+		defer func() { office.End(taskErr, session.CostUSD()-startCost, session.ModelUsed()); office.Close() }()
 		rep = engine.MultiReporter{rep, office}
 	}
 	eng := c.factory(session, rep)
@@ -520,6 +521,13 @@ func (c *Core) Capabilities(channelID string) ([]schema.ToolDefinition, []ctxpkg
 	sess := c.sessionFor(c.convID(channelID))
 	eng := c.factory(sess, nil)
 	return eng.AvailableTools(), ctxpkg.NewSkillLoader(c.workDir).List()
+}
+
+// SetChannelModel 設定某個頻道要用的模型（空＝還原成啟動預設）。供 office HTTP 入口在派工時
+// 帶上——像素辦公室把「用哪個模型」當成【員工的屬性】（老徐做架構判斷、小樺做資料彙整，
+// 本來就該是不同等級），而不是每次派工要重講的參數。與聊天端的 `model` 指令改的是同一個地方。
+func (c *Core) SetChannelModel(channelID, model string) {
+	c.sessionFor(c.convID(channelID)).SetModel(strings.TrimSpace(model))
 }
 
 // ResumeInterrupted 在行程啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍

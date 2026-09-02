@@ -35,10 +35,11 @@ func TestOfficeBindDenied(t *testing.T) {
 func TestOfficeTaskHandler(t *testing.T) {
 	var gotChannel, gotUser, gotText string
 	var dispatched int
+	models := map[string]string{}
 	h := officeTaskHandler("s3cret", "office-web", func(channelID, userID, text string) {
 		dispatched++
 		gotChannel, gotUser, gotText = channelID, userID, text
-	})
+	}, func(channelID, model string) { models[channelID] = model })
 
 	do := func(method, auth, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "/task", strings.NewReader(body))
@@ -131,5 +132,28 @@ func TestOfficeCapsHandler(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("回應缺少 %s：%s", want, body)
 		}
+	}
+}
+
+// 模型是【員工的屬性】：辦公室派工可帶 model，落到該頻道的 session 上（下一個任務生效）。
+// 沒帶就【不動】現有設定——否則每次派工都會把聊天端 `model` 指令設的覆蓋掉。
+func TestOfficeTaskHandler_Model(t *testing.T) {
+	models := map[string]string{}
+	calls := 0
+	h := officeTaskHandler("s3cret", "office-web", func(string, string, string) {},
+		func(channelID, model string) { models[channelID] = model; calls++ })
+
+	post := func(body string) {
+		r := httptest.NewRequest(http.MethodPost, "/task", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer s3cret")
+		h(httptest.NewRecorder(), r)
+	}
+	post(`{"agent":"p19","text":"做事","model":"claude-opus-5"}`)
+	if models["p19"] != "claude-opus-5" {
+		t.Errorf("帶了 model 應設到該頻道，got %q", models["p19"])
+	}
+	post(`{"agent":"p19","text":"再做一件"}`)
+	if calls != 1 {
+		t.Errorf("沒帶 model 不該動現有設定（會蓋掉 `model` 指令設的），呼叫了 %d 次", calls)
 	}
 }
