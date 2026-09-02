@@ -85,6 +85,10 @@ func main() {
 	//（子 agent 的 bash 同樣要過審批，不留後門）。
 	// 政策檔（.claw/policy.json，選填）：可宣告 deny/ask/allow 覆蓋內建判斷。載入失敗直接退出——
 	// 靜默忽略會讓人以為有保護、其實整份政策沒生效。
+	// 自訂單價（<root>/.claw/pricing.json，內建表當預設）：官方 API 不給價格，只能自己維護，
+	// 但不該每次新模型發布都要改程式重編。檔案改了就生效（與 config.json 同款）。
+	observability.SetPricingRoot(rootDir)
+
 	pol, errPol := policy.Load(policy.ConfigPath(rootDir))
 	if errPol != nil {
 		log.Fatalf("[policy] 載入失敗（修好或移除 %s 再啟動）：%v", policy.ConfigPath(rootDir), errPol)

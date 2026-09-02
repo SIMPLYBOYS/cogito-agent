@@ -39,10 +39,10 @@ var datedModel = regexp.MustCompile(`-\d{8}$`)
 // modelKey 把模型 id 正規化成計價表的鍵。
 func modelKey(model string) string { return datedModel.ReplaceAllString(model, "") }
 
-// IsRegistered 回報這個模型有沒有登記單價。沒有＝它的花費是【估的】（fallback 估價），
-// 呼叫端要據此標示——估計值長得跟實價一樣，就是另一種「假的成功」。
+// IsRegistered 回報這個模型有沒有登記單價（內建表 or .claw/pricing.json）。沒有＝它的花費
+// 是【估的】（fallback 估價），呼叫端要據此標示——估計值長得跟實價一樣，就是另一種「假的成功」。
 func IsRegistered(model string) bool {
-	_, ok := PricingModel[modelKey(model)]
+	_, ok := priceOf(model)
 	return ok
 }
 
@@ -70,14 +70,14 @@ func envFloatOr(key string, def float64) float64 {
 // 抽成函式是因為有兩個消費者——tracker 記帳與 dashboard 的逐步成本顯示。公式只能有一份，
 // 否則兩處遲早算出不同的錢。
 func CostOf(model string, u schema.Usage) float64 {
-	price, ok := PricingModel[modelKey(model)]
+	price, ok := priceOf(model)
 	if !ok {
-		price.InputPrice, price.OutputPrice = fallbackInputPrice, fallbackOutputPrice
+		price.Input, price.Output = fallbackInputPrice, fallbackOutputPrice
 	}
-	return (float64(u.PromptTokens)*price.InputPrice +
-		float64(u.CacheReadTokens)*price.InputPrice*0.1 +
-		float64(u.CacheCreationTokens)*price.InputPrice*1.25 +
-		float64(u.CompletionTokens)*price.OutputPrice) / 1e6
+	return (float64(u.PromptTokens)*price.Input +
+		float64(u.CacheReadTokens)*price.Input*0.1 +
+		float64(u.CacheCreationTokens)*price.Input*1.25 +
+		float64(u.CompletionTokens)*price.Output) / 1e6
 }
 
 // CostTracker 用 decorator 模式包裹一個 LLMProvider：它本身也實現 LLMProvider 介面，

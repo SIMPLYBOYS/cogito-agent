@@ -290,6 +290,7 @@ cp .env.example .env
 | `COGITO_ALLOWED_USERS` | **（伺服器端務必設）** 可驅動 agent 的 user id 白名單（逗號分隔）。不設＝fail-closed 拒絕所有入站。Telegram＝數字 id、Slack＝`U` 開頭 |
 | `COGITO_ADMIN_USERS` | （選填）可 `approve`/`reject` 高危操作者（逗號分隔）；不設＝回退為 `COGITO_ALLOWED_USERS`。設它以做到「發起者≠批准者」 |
 | `COGITO_USER_LINK` | （選填）**DM 跨平台連續性**：宣告同一人在各平台的 user id（`=` 連接一組、逗號分隔多組，如 `771163423=U0AABBCC`）。設了之後這個人在 Telegram / Slack 的**私聊**共用同一份對話狀態（session/工作目錄/忙碌鎖）——Telegram 問到一半換 Slack 接著問，歷史都在；回覆與審批通知送到最後說話的平台。群組不合併（頻道 context 屬於頻道）。必須顯式設定——這是信任宣告，系統不猜 |
+| `.claw/pricing.json`（不是環境變數） | （選填）**自訂單價**（每百萬 token 美元）：`{"claude-x": {"input": 10, "output": 50}}`。內建表當預設，這個檔疊在上面——官方 `/v1/models` **不回價格**，只能自己維護，但不必為了新模型改程式重編。改了不必重啟。單價必須為正數（0 會讓 `MaxCostUSD` 熔斷永不觸發，會被略過）。放 `.claw/` 是因為那裡已擋掉 agent 寫入——能改價就等於能解除自己的成本上限 |
 | `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | （選填）未登記模型的 fallback 估價（美元/百萬 token），讓成本熔斷對非 Claude 端點仍生效；不設＝opus 級 5/25 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |

@@ -88,6 +88,8 @@ func main() {
 
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(*sessionPtr, workDir)
 
+	observability.SetPricingRoot(workDir) // 自訂單價：<workDir>/.claw/pricing.json（內建表當預設）
+
 	// 用 CostTracker 包裹 provider 自動記賬；trace 由 engine.Run 內部自動導出
 	trackedProvider := observability.NewCostTracker(realProvider, modelName, sess)
 	// 背景反思用便宜模型（COGITO_REFLECT_MODEL）；未設＝沿用主 provider。CostTracker 的
