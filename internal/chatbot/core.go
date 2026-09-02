@@ -24,6 +24,7 @@ import (
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
@@ -393,7 +394,12 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		office.Begin(prompt, workDir)
 		// done 帶本次真實花費增量——外殼收工列印的數字與聊天端「本次花費 $x」是同一份帳
 		// 花費與模型一起送：$0.0231 沒有分母就只是個數字（haiku 跑十輪還是 opus 跑兩輪？）
-		defer func() { office.End(taskErr, session.CostUSD()-startCost, session.ModelUsed()); office.Close() }()
+		defer func() {
+			m := session.ModelUsed()
+			office.End(engine.TaskEnd{Err: taskErr, CostUSD: session.CostUSD() - startCost,
+				Model: m, CostEst: m != "" && !observability.IsRegistered(m)})
+			office.Close()
+		}()
 		rep = engine.MultiReporter{rep, office}
 	}
 	eng := c.factory(session, rep)

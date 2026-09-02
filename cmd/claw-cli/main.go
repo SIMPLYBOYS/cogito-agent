@@ -147,8 +147,9 @@ func main() {
 		runErr = eng.Run(context.Background(), sess, reporter)
 	}
 	if office != nil {
-		office.End(runErr, sess.CostUSD(), sess.ModelUsed()) // CLI 一次一個任務，session 累計＝本次花費
-		office.Close()                                       // 排空投影事件，退出前保 done 送達
+		office.End(engine.TaskEnd{Err: runErr, CostUSD: sess.CostUSD(), Model: sess.ModelUsed(),
+			CostEst: !observability.IsRegistered(sess.ModelUsed())}) // CLI 一次一個任務，session 累計＝本次花費
+		office.Close() // 排空投影事件，退出前保 done 送達
 	}
 
 	// Tier 4 技能自生成（opt-in）：任務【成功】後反思軌跡，把可複用流程寫成「提案技能」到暫存區。

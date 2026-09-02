@@ -103,3 +103,37 @@ func TestCostTracker_NoUsageDoesNotPanic(t *testing.T) {
 	tr := &CostTracker{modelName: "claude-opus-4-8"}
 	tr.account(&schema.Message{Role: schema.RoleAssistant}, time.Second)
 }
+
+// 計價表漏登記＝那個模型的花費是【估的】（fallback 預設 opus 級單價）。實際踩到：
+// persona 把老徐設成 claude-opus-5，而表裡只有 opus-4-8/4-7——花費碰巧接近正確，
+// 但那是運氣不是機制；換成便宜模型就會高估五倍，而卡片上看起來跟真的一樣。
+func TestPricingCoversCurrentModels(t *testing.T) {
+	for _, m := range []string{
+		"claude-fable-5", "claude-mythos-5", "claude-opus-5", "claude-opus-4-8",
+		"claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-5", "claude-sonnet-4-6",
+		"claude-haiku-4-5",
+	} {
+		if !IsRegistered(m) {
+			t.Errorf("%s 沒登記定價，它的花費會是 fallback 估價", m)
+		}
+	}
+	if IsRegistered("某個真的沒登記的模型") {
+		t.Error("沒登記的不該被當成有登記")
+	}
+}
+
+// 帶日期尾綴的 id（API 常見）要對得上同一筆單價——否則 haiku 會被當 opus 記帳、
+// 貴五倍，成本熔斷提早觸發。
+func TestPricingIgnoresDateSuffix(t *testing.T) {
+	if !IsRegistered("claude-haiku-4-5-20251001") {
+		t.Fatal("帶日期尾綴的 id 應對得上計價表")
+	}
+	u := schema.Usage{PromptTokens: 1_000_000}
+	plain, dated := CostOf("claude-haiku-4-5", u), CostOf("claude-haiku-4-5-20251001", u)
+	if plain != dated {
+		t.Errorf("同一個模型兩種寫法算出不同的錢：$%.4f vs $%.4f", plain, dated)
+	}
+	if plain != 1.0 {
+		t.Errorf("haiku 每百萬輸入 tk 應為 $1.00，得到 $%.4f（走了 fallback？）", plain)
+	}
+}

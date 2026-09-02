@@ -48,6 +48,19 @@ type officeEvent struct {
 	// 只在 done 帶。沒有它，花費數字就沒有分母——$0.0231 是 haiku 跑很多輪還是 opus 跑兩輪，
 	// 看不出來。子 agent 可能各用各的模型，那些不在這裡（措辭要講「主 agent」）。
 	Model string `json:"model,omitempty"`
+	// CostEst＝這筆花費的【單價是估的】：該模型沒登記在 PricingModel，走了 fallback 估價。
+	// token 數是真的，但乘上去的單價是猜的——可能差好幾倍（把 haiku 當 opus 就貴五倍）。
+	// 不標出來的話，估計值長得跟實價一模一樣，那是另一種「假的成功」。
+	CostEst bool `json:"cost_est,omitempty"`
+}
+
+// TaskEnd 是一次任務收尾的事實集合。用結構而不是一路加參數——這是第四個欄位了，
+// 而 End(err, 0.02, "claude-opus-5", true) 在呼叫端已經看不出哪個 bool 是什麼。
+type TaskEnd struct {
+	Err     error   // nil＝成功
+	CostUSD float64 // 本次花費（呼叫端算增量）；≤0＝未知，不送
+	Model   string  // 主 agent 實際跑的模型；空＝未知，不送
+	CostEst bool    // 上面那筆花費的單價是估的（模型未登記定價）
 }
 
 type OfficeReporter struct {
@@ -235,15 +248,14 @@ func (r *OfficeReporter) Begin(task, workDir string) {
 	r.push("start", schema.TruncRunes(task, 80, "…"), workDir)
 }
 
-// End 收工。costUSD 是本次任務的真實花費（呼叫端算增量）；≤0＝未知，不送（見 Cost 欄位）。
-// model 是主 agent 實際跑的模型 id，空＝未知（例如還沒呼叫過模型就失敗了），一樣不送。
-func (r *OfficeReporter) End(err error, costUSD float64, model string) {
-	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: "done", Label: "ok", Model: model}
-	if costUSD > 0 {
-		ev.Cost = costUSD
+// End 收工。未知的欄位一律不送（見各欄位註解）——寧可空白，不要讓人以為我們知道。
+func (r *OfficeReporter) End(e TaskEnd) {
+	ev := officeEvent{V: officeProtocolVersion, Agent: r.agent, Kind: "done", Label: "ok", Model: e.Model}
+	if e.CostUSD > 0 {
+		ev.Cost, ev.CostEst = e.CostUSD, e.CostEst
 	}
-	if err != nil {
-		ev.Label, ev.Detail = "error", schema.TruncRunes(err.Error(), 120, "…")
+	if e.Err != nil {
+		ev.Label, ev.Detail = "error", schema.TruncRunes(e.Err.Error(), 120, "…")
 	}
 	r.pushEv(ev)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -20,10 +21,29 @@ var PricingModel = map[string]struct {
 	OutputPrice float64
 }{
 	"claude-fable-5":    {InputPrice: 10.0, OutputPrice: 50.0},
+	"claude-mythos-5":   {InputPrice: 10.0, OutputPrice: 50.0},
+	"claude-opus-5":     {InputPrice: 5.0, OutputPrice: 25.0},
 	"claude-opus-4-8":   {InputPrice: 5.0, OutputPrice: 25.0},
 	"claude-opus-4-7":   {InputPrice: 5.0, OutputPrice: 25.0},
+	"claude-opus-4-6":   {InputPrice: 5.0, OutputPrice: 25.0},
+	"claude-sonnet-5":   {InputPrice: 3.0, OutputPrice: 15.0},
 	"claude-sonnet-4-6": {InputPrice: 3.0, OutputPrice: 15.0},
 	"claude-haiku-4-5":  {InputPrice: 1.0, OutputPrice: 5.0},
+}
+
+// datedModel 認 API 常見的日期尾綴（claude-haiku-4-5-20251001）。沒有它，帶日期的 id
+// 一律當未登記走 fallback（預設 opus 級單價）——haiku 會被當成 opus 記帳、貴五倍，
+// 於是成本熔斷提早觸發，卡片上的花費也是錯的。查表前先剝掉。
+var datedModel = regexp.MustCompile(`-\d{8}$`)
+
+// modelKey 把模型 id 正規化成計價表的鍵。
+func modelKey(model string) string { return datedModel.ReplaceAllString(model, "") }
+
+// IsRegistered 回報這個模型有沒有登記單價。沒有＝它的花費是【估的】（fallback 估價），
+// 呼叫端要據此標示——估計值長得跟實價一樣，就是另一種「假的成功」。
+func IsRegistered(model string) bool {
+	_, ok := PricingModel[modelKey(model)]
+	return ok
 }
 
 // fallbackInputPrice/fallbackOutputPrice：模型不在 PricingModel 時的保守估價（每百萬 token USD）。
@@ -50,7 +70,7 @@ func envFloatOr(key string, def float64) float64 {
 // 抽成函式是因為有兩個消費者——tracker 記帳與 dashboard 的逐步成本顯示。公式只能有一份，
 // 否則兩處遲早算出不同的錢。
 func CostOf(model string, u schema.Usage) float64 {
-	price, ok := PricingModel[model]
+	price, ok := PricingModel[modelKey(model)]
 	if !ok {
 		price.InputPrice, price.OutputPrice = fallbackInputPrice, fallbackOutputPrice
 	}
@@ -138,7 +158,7 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 		cacheRead := respMsg.Usage.CacheReadTokens
 		cacheCreation := respMsg.Usage.CacheCreationTokens
 
-		if _, exists := PricingModel[t.modelName]; !exists {
+		if !IsRegistered(t.modelName) {
 			// 未登記模型：CostOf 會走 fallback 估價，讓成本熔斷仍生效（而非靜默 0）。每個 model 只警告一次。
 			if _, dup := warnedModels.LoadOrStore(t.modelName, true); !dup {
 				log.Printf("[Tracker] ⚠️ 模型 %q 未登記定價，改用 fallback 估價（in $%.1f / out $%.1f 每百萬 tk）；如需精確請在 PricingModel 登記或設 COGITO_PRICE_INPUT_USD/COGITO_PRICE_OUTPUT_USD。\n", t.modelName, fallbackInputPrice, fallbackOutputPrice)

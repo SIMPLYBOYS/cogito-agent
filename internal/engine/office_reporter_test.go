@@ -36,7 +36,7 @@ func TestOfficeReporterContract(t *testing.T) {
 	r.OnToolResult(ctx, "bash", "3 處", false)
 	r.OnToolResult(ctx, "bash", "boom", true)
 	r.OnMessage(ctx, "完成")
-	r.End(errors.New("網路中斷"), 0.0231, "claude-opus-5")
+	r.End(TaskEnd{Err: errors.New("網路中斷"), CostUSD: 0.0231, Model: "claude-opus-5"})
 	r.Close() // 排空後 got 即完整
 
 	want := []officeEvent{
@@ -66,7 +66,7 @@ func TestOfficeReporterContract(t *testing.T) {
 func TestOfficeReporterBridgeDown(t *testing.T) {
 	r := NewOfficeReporter("http://127.0.0.1:1", "p17") // 連線秒拒
 	r.Begin("x", "")
-	r.End(nil, 0, "")
+	r.End(TaskEnd{})
 	r.Close() // 卡住即測試逾時失敗
 }
 
@@ -84,7 +84,7 @@ func TestOfficeReporterOmitsUnknownCost(t *testing.T) {
 	defer srv.Close()
 
 	r := NewOfficeReporter(srv.URL, "p05")
-	r.End(nil, 0, "")
+	r.End(TaskEnd{})
 	r.Close()
 	if len(bodies) != 1 || strings.Contains(bodies[0], `"cost"`) {
 		t.Fatalf("cost 未知卻上了線: %v", bodies)
@@ -92,6 +92,36 @@ func TestOfficeReporterOmitsUnknownCost(t *testing.T) {
 	// 模型同理：沒跑過模型就失敗的任務，寧可空白也不要編一個 id 上去
 	if strings.Contains(bodies[0], `"model"`) {
 		t.Fatalf("model 未知卻上了線: %v", bodies)
+	}
+}
+
+// 花費的【單價】是估的（模型未登記定價）時要標出來——token 數是真的，但乘上去的單價
+// 可能差好幾倍。不標的話，估計值長得跟實價一模一樣，那是另一種「假的成功」。
+func TestOfficeReporterMarksEstimatedCost(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	r := NewOfficeReporter(srv.URL, "p05")
+	r.End(TaskEnd{CostUSD: 0.5, Model: "某個沒登記的模型", CostEst: true})
+	r.End(TaskEnd{CostUSD: 0.5, Model: "claude-opus-5"}) // 有登記＝實價，不標
+	r.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("要 2 筆，得到 %d", len(bodies))
+	}
+	if !strings.Contains(bodies[0], `"cost_est":true`) {
+		t.Errorf("估價沒被標出來: %s", bodies[0])
+	}
+	if strings.Contains(bodies[1], "cost_est") {
+		t.Errorf("實價不該帶 cost_est: %s", bodies[1])
 	}
 }
 
@@ -133,14 +163,14 @@ func TestOfficeReporterCloseIsSafe(t *testing.T) {
 
 	r := NewOfficeReporter(srv.URL, "p01")
 	r.Begin("任務", "/tmp/x")
-	r.End(nil, 0, "")
+	r.End(TaskEnd{})
 	r.Close()
 
 	// Close 後仍有事件到（模擬殘留的 goroutine）：必須靜默丟棄，不 panic
 	r.OnToolCall(context.Background(), "bash", "ls")
 	r.OnMessage(context.Background(), "遲到的訊息")
 	r.OnTurn(context.Background(), 7)
-	r.End(errors.New("遲到的收工"), 0, "")
+	r.End(TaskEnd{Err: errors.New("遲到的收工")})
 
 	// 重複 Close：必須冪等，不 panic
 	r.Close()
@@ -197,7 +227,7 @@ func TestOfficeReporter_CriticalNotDroppedUnderBubbleFlood(t *testing.T) {
 			r.OnToolResult(ctx, "spawn_subagent:planner", "完成", false)
 		}
 	}
-	r.End(nil, 0, "")
+	r.End(TaskEnd{})
 	r.Close()
 
 	if d := r.DroppedCritical(); d != 0 {
