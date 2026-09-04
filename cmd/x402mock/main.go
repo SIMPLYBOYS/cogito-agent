@@ -39,6 +39,6 @@ func main() {
 		PriceAtomic: atomic, PayTo: *payTo, Network: *network, Asset: *asset,
 		Secret: []byte(*secret), Timeout: *timeout, SettleDelay: *delay,
 	})
-	log.Printf("[x402mock] 監聯 %s：每次 $%s %s → %s（%s）；facilitator /verify /settle", *addr, *price, *asset, *payTo, *network)
+	log.Printf("[x402mock] 監聽 %s：每次 $%s %s → %s（%s）；facilitator /verify /settle", *addr, *price, *asset, *payTo, *network)
 	log.Fatal(http.ListenAndServe(*addr, m.Handler()))
 }
