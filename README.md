@@ -25,6 +25,56 @@
 
 ▶ 完整版（高畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
+## Hackathon 繳交說明（FUTUREMODE 2026 · 請購單 for Agents）
+
+> **Agent 是第一種 commit 那一刻沒有人的公司支出。誰批准、憑哪條規則、留不留得下證據。**
+> 這一節給評審：不必買像素素材、不必開 Unity，支付授權層本身可以獨立驗。
+
+### 免 Unity 執行方式（3 分鐘）
+
+```bash
+# 1) 裁決矩陣、x402 wire／mock、請購單工具——全部離線，含 replay／預算／逾時不重付
+go test ./internal/policy/ ./internal/x402/ ./internal/payment/
+
+# 2) 本地 402 資源伺服器 ＋ facilitator（VALIDATE→MATCH→RESERVE→SETTLE）
+go run ./cmd/x402mock -addr 127.0.0.1:4021 -price 0.05 &
+curl -s -D - -o /dev/null http://127.0.0.1:4021/premium-data | grep -i "^HTTP\|^payment-required"
+#    → HTTP/1.1 402 Payment Required ＋ PAYMENT-REQUIRED: <base64 v2 報價>
+
+# 3) 整套（cogito 只開 office 入口、不連 Slack/TG ＋ 像素辦公室橋）：見 unity_demo/tools/demo_stack.sh
+```
+
+`policy.json` 的 `payment` 區塊（六欄位請購單的政策）：
+
+```jsonc
+{ "payment": {
+    "merchants": ["localhost:4021"], "assets": ["USDC"], "networks": ["eip155:84532"],
+    "auto_below": "0.10", "ask_below": "5.00",   // 小額靜默放行、中額找人、超過擋掉
+    "budget": "10.00", "window_sec": 86400, "velocity": 20 } }
+```
+
+### 這次做了什麼、什麼是活動前就有的（揭露）
+
+**活動前即開源的基礎設施**（本 repo 主體，2026-07 起）：ReAct harness、工具權限模型 Deny>Ask>Allow、
+人在迴路審批、成本熔斷、記憶／技能自我進化、像素辦公室投影協定。像素辦公室（Unity ＋ FastAPI 橋）
+在姊妹 repo `unity_demo`。
+
+**9/4–9/6 現場增量**（`git log --since=2026-09-04`）：
+
+| commit | 內容 |
+|---|---|
+| `4177757` | `payment` 規則型：六欄位請購單、九條確定性檢查、微美元整數、Decide 不記帳 Commit 才記、漏設定往安全倒 |
+| `a9d9f8b` | `request_payment` 工具（agent 只能提單）、x402 v2 wire ＋ 本地 402/facilitator mock（RESERVE／nonce／逾時不重付）、派工權／審批權分離（第二把鑰匙、office 不繼承 admin）、金流稽核帳（Deny 也落） |
+| `beecc8c` | Slack 改 opt-in：只開 office 入口即可跑 demo |
+| `unity_demo` 9/4– | 橋與外殼：審批鑰匙分開送、審批卡長成請購單、金流稽核面板、demo 一鍵腳本；另有辦公室狀態徽章等投影改進 |
+
+### 已知邊界（不藏）
+
+- **結算是 mock**：真上鏈是 SDK 一個 wrapper；x402 明說 custody／預算／policy 在協議外，我們做的正是那三件
+- 金鑰只做到兩層（出納 ＋ 權限分離），沒有可撤銷的 session key
+- 稽核帳的 approver 目前記 `admin` 不記人名；`done` 事件不帶 tx（回執在工具結果裡）
+- `upto` 的用量爭議是開放問題
+
 ## Features
 
 **核心引擎**
