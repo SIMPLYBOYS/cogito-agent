@@ -8,6 +8,8 @@ package chatbot
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -160,13 +162,20 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 	senders.Store(platform, rawSend)
 	allowed := parseUserSet(os.Getenv("COGITO_ALLOWED_USERS"))
 	admins := parseUserSet(os.Getenv("COGITO_ADMIN_USERS"))
-	if len(admins) == 0 {
-		admins = allowed // 未單獨設 admin：可對話者即可審批（fail-closed 已把陌生人擋在門外）
+	if len(admins) == 0 && platform != "office" {
+		// IM 平台：可對話者即可審批（fail-closed 已把陌生人擋在門外）——那些身分是人。
+		//
+		// office 平台【刻意不繼承】：它的派工者是 COGITO_HTTP_USER（預設 office-web），一個
+		// 機器身分（橋）。繼承下去就是「持 token 者可自我放行」——派工權與審批權落在同一把
+		// 鑰匙上。在指令情境只是麻煩，在支付情境是致命的：agent 提單、橋核准、沒有人在迴路裡。
+		// 所以 office 要審批，必須【顯式】設 COGITO_ADMIN_USERS，而且那個身分該跟派工者不同
+		// （見 cmd/claw/office.go 的 approver token）。
+		admins = allowed
 	}
 	if len(allowed) == 0 {
 		log.Printf("[%s] ⚠️ 未設 COGITO_ALLOWED_USERS，已 fail-closed 拒絕所有入站任務。請設環境變數（逗號分隔 user id）授權可用者。", platform)
 	}
-	return &Core{
+	c := &Core{
 		platform:     platform,
 		workDir:      workDir,
 		factory:      factory,
@@ -179,6 +188,10 @@ func NewCore(platform, workDir string, factory EngineFactory, rawSend func(chann
 		userLink:        parseUserLink(os.Getenv("COGITO_USER_LINK")),
 		memScopeChannel: os.Getenv("COGITO_MEMORY_SCOPE") == "channel",
 	}
+	// 上面 NewCore 的回退與 authz.Store.Sets() 的回退是【同一條語意的兩份】：這裡不繼承，
+	// Store 也要不繼承，否則 isAdmin() 走 Store 那條又把權限撿回來（實際踩到：只改一邊測試照紅）。
+	c.authz.SetNoInheritAdmin(platform == "office")
+	return c
 }
 
 // parseUserLink 解析 COGITO_USER_LINK：逗號分隔多組，每組用 = 連接「同一人」在各平台的 user id，
@@ -402,6 +415,11 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		}()
 		rep = engine.MultiReporter{rep, office}
 	}
+	// 這一次派工的身分。比 session 細（session 是 per-channel 跨任務累加）、比一次工具呼叫粗。
+	// 支付授權的 task binding 綁的就是它——錢包層做不到，因為只有 harness 知道這個粒度存在。
+	// 【不】讓 agent 自己填：被帶偏的 agent 可以宣稱「這是為了 T1」；從 ctx 來它就改不了。
+	ctx = tools.WithTask(ctx, tools.TaskContext{AgentID: convID, TaskID: newTaskID()})
+
 	eng := c.factory(session, rep)
 
 	goalContinues := 0 // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
@@ -1503,3 +1521,10 @@ func isWide(r rune) bool {
 func (r *reporter) OnTurn(ctx context.Context, turn int) {}
 
 var _ engine.Reporter = (*reporter)(nil)
+
+// newTaskID 產生一次派工的 id。可讀優先（時間），尾巴補幾個隨機位避免同秒撞號。
+func newTaskID() string {
+	var b [3]byte
+	_, _ = rand.Read(b[:])
+	return "T-" + time.Now().Format("0102-150405") + "-" + hex.EncodeToString(b[:])
+}

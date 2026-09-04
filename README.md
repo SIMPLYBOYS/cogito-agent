@@ -308,7 +308,9 @@ cp .env.example .env
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
 | `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
 | `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
-| `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。⚠️ 若沒單獨設 `COGITO_ADMIN_USERS`，此身分會連帶取得審批權＝「持 token 者可自我放行」 |
+| `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。**office 平台不再繼承 `ALLOWED` 為 `ADMIN`**：這個身分永遠沒有審批權，「持 token 者可自我放行」的洞已封 |
+| `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | （選填）**審批身分**（預設 `office-boss`）與它專用的 token。派工與審批是【兩把鑰匙】：橋送 approve/reject 時帶 `X-Approver-Token`，才以 approver 身分進 Core；審批身分**只能** approve/reject（拿它派工回 403）。approver 須同時列在 `COGITO_ALLOWED_USERS` 與 `COGITO_ADMIN_USERS`（建議 `office:office-boss`）。兩把 token 相同會被視為未分離、審批權停用 |
+| `X402_MOCK_SECRET` / `X402_PAYER` | （選填）支付授權層（`policy.json` 的 `payment` 區塊存在時才註冊 `request_payment`）的出納簽名秘密（mock，HMAC）與付款方地址。agent 只能提請購單，簽名在工具內部、它碰不到。裁決 Deny>Ask>Allow，Ask 走與工具審批同一條迴圈；每筆（含被拒）落 `.claw/audit/payments.jsonl` |
 
 > **平台限定（`COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK` 通用）**：名單條目可寫 `platform:id`（只在該平台生效）或裸 `id`（任何平台皆生效，向後相容既有設定）。**建議加前綴**——裸 id 在每個平台都生效，今天安全只因 Telegram（純數字）與 Slack（`U` 開頭）的 ID 空間恰好不重疊；接入第三個平台那天（如 Discord 的 snowflake 也是純數字），一個同號的陌生人就會**直接通過授權閘**。例：`COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`。注意 `COGITO_USER_LINK` 改用前綴會換掉 session key，既有共享 session 不會自動搬移。
 

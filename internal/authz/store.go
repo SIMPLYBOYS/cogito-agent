@@ -62,6 +62,8 @@ type Store struct {
 	stamp  fileStamp // 對應的檔案指紋；不符即重讀
 	valid  bool      // 是否有可用的快取（含「檔案不存在」這個合法狀態）
 
+	opts storeOpts // 見 SetNoInheritAdmin
+
 	// pmu 保護待審配對檔（見 pair.go）。與 mu 分開：ApprovePair 會先改待審再改授權記錄，
 	// 共用一把鎖會在 mutate 內層重入而自我死鎖。持有順序一律 pmu → mu，不得反向。
 	pmu sync.Mutex
@@ -83,6 +85,17 @@ type fileStamp struct {
 func New(clawDir string, envAllowed, envAdmin map[string]bool) *Store {
 	return &Store{path: filepath.Join(clawDir, FileName), envAllowed: envAllowed, envAdmin: envAdmin}
 }
+
+// NoInheritAdmin 開著時，「未單獨設 admin ⇒ 可對話者即可審批」的回退【不】生效：admin 只來自
+// 顯式的 env 與記錄檔裡 role=admin 的條目。
+//
+// 為什麼要有這個開關：那條回退的前提是「可對話者是人」。office 平台的可對話者是橋的機器身分
+// （COGITO_HTTP_USER），繼承下去就是派工權與審批權落在同一把鑰匙上——持 token 者可自我放行。
+// 在支付情境這是致命的：agent 提單、橋核准、迴路裡沒有人。IM 平台維持原行為。
+type storeOpts struct{ noInheritAdmin bool }
+
+// SetNoInheritAdmin 設定上面那個開關（建構後設一次；不放進 New 的簽名是為了不動既有呼叫端）。
+func (s *Store) SetNoInheritAdmin(v bool) { s.opts.noInheritAdmin = v }
 
 // stampOf 取檔案當下的指紋。os.Stat 不讀內容，是本快取便宜的關鍵。
 func (s *Store) stampOf() fileStamp {
@@ -142,8 +155,8 @@ func (s *Store) readLocked() ([]Record, error) {
 // 悄悄放行任何人，也不該悄悄撤銷所有人（那會把 bootstrap admin 一起鎖在門外，沒人能修）。
 func (s *Store) Sets() (allowed, admin map[string]bool, err error) {
 	allowed, admin = copySet(s.envAllowed), copySet(s.envAdmin)
-	if len(admin) == 0 {
-		admin = copySet(allowed) // 對齊既有語意：未單獨設 admin 時，可對話者即可審批
+	if len(admin) == 0 && !s.opts.noInheritAdmin {
+		admin = copySet(allowed) // 對齊既有語意：未單獨設 admin 時，可對話者即可審批（IM 平台）
 	}
 
 	recs, err := s.Records()

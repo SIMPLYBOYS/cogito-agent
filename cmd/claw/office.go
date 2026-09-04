@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
@@ -37,6 +38,23 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 	user := os.Getenv("COGITO_HTTP_USER")
 	if user == "" {
 		user = "office-web"
+	}
+	// ② 派工權／審批權分離。派工者（user）是橋的機器身分；審批要用【另一個】身分＋【另一把】token。
+	// 沒設 approver token ＝ 這個入口沒有審批權：approve/reject 會以派工者身分送進去，然後被
+	// tryResolveApproval 的 isAdmin 擋下（office 平台不再繼承 allowed 為 admins，見 NewCore）。
+	// 這正是 README 那個洞的修法：持派工 token 的人再也不能自我放行。
+	approver := os.Getenv("COGITO_HTTP_APPROVER")
+	if approver == "" {
+		approver = "office-boss"
+	}
+	approverToken := os.Getenv("COGITO_HTTP_APPROVER_TOKEN")
+	switch {
+	case approverToken == "":
+		log.Printf("[office] ⚠️ 未設 COGITO_HTTP_APPROVER_TOKEN：這個入口【沒有審批權】，approve/reject 會被拒。"+
+			"要能核准，設一把與 COGITO_HTTP_TOKEN 不同的 token，並把 %q 列進 COGITO_ADMIN_USERS 與 COGITO_ALLOWED_USERS。", approver)
+	case approverToken == token:
+		log.Printf("[office] ⛔ COGITO_HTTP_APPROVER_TOKEN 與 COGITO_HTTP_TOKEN 相同——派工與審批同一把鑰匙，等於沒分離。已停用審批權。")
+		approverToken = ""
 	}
 	bridge := os.Getenv("COGITO_OFFICE_URL")
 	client := &http.Client{Timeout: 3 * time.Second}
@@ -68,7 +86,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 	core.ResumeInterrupted() // 跨重啟續跑（需 AUTO_RESUME + SESSION_DIR），同 Slack/TG
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/task", officeTaskHandler(token, user, core.Dispatch, core.SetChannelModel))
+	mux.HandleFunc("/task", officeTaskHandlerSoD(token, user, approver, approverToken, core.Dispatch, core.SetChannelModel))
 	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities, gw))
 	mux.HandleFunc("/models", officeModelsHandler(token, llm))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
@@ -177,7 +195,24 @@ func officeBindDenied(addr string, insecure bool) bool {
 // 這是全系統最強的一道入口（能跑任意 bash／寫檔），auth 與輸入把關值得有測試釘住。
 func officeTaskHandler(token, user string, dispatch func(channelID, userID, text string),
 	setModel func(channelID, model string)) http.HandlerFunc {
+	return officeTaskHandlerSoD(token, user, "", "", dispatch, setModel)
+}
+
+// officeTaskHandlerSoD 是帶職務分離的 /task：
+//   - 一般文字：以派工者 user 送進去（Bearer token）。
+//   - approve/reject：只有帶 X-Approver-Token（且等於 approverToken）才以 approver 身分送進去；
+//     沒帶就仍以派工者身分送（Core 會拒），帶錯直接 401。
+//   - approver 身分【只准】approve/reject：拿審批鑰匙派工一律 403——鑰匙分兩把，各自只開一扇門。
+//
+// approverToken 為空＝這個入口沒有審批權（X-Approver-Token 一律當錯）。
+func officeTaskHandlerSoD(token, user, approver, approverToken string, dispatch func(channelID, userID, text string),
+	setModel func(channelID, model string)) http.HandlerFunc {
 	wantAuth := []byte("Bearer " + token)
+	wantApprover := []byte(approverToken)
+	isDecision := func(text string) bool {
+		t := strings.ToLower(strings.TrimSpace(text))
+		return t == "approve" || t == "reject" || strings.HasPrefix(t, "approve ") || strings.HasPrefix(t, "reject ")
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -199,7 +234,20 @@ func officeTaskHandler(token, user string, dispatch func(channelID, userID, text
 		if in.Model != "" && setModel != nil {
 			setModel(in.Agent, in.Model) // 下一個任務（也就是這個）生效
 		}
-		dispatch(in.Agent, user, in.Text) // channelID = persona id（p17）→ conv "office:p17"
+		who := user
+		if at := r.Header.Get("X-Approver-Token"); at != "" {
+			// 常數時間比較；approverToken 為空時 wantApprover 是空片、任何非空 at 都不等
+			if len(wantApprover) == 0 || subtle.ConstantTimeCompare([]byte(at), wantApprover) != 1 {
+				http.Error(w, "approver unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if !isDecision(in.Text) {
+				http.Error(w, "審批身分只能 approve/reject，不能派工", http.StatusForbidden)
+				return
+			}
+			who = approver
+		}
+		dispatch(in.Agent, who, in.Text) // channelID = persona id（p17）→ conv "office:p17"
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}

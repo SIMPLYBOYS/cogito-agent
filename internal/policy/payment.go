@@ -324,3 +324,32 @@ func contains(list []string, v string) bool {
 	}
 	return false
 }
+
+// ── 與 x402 atomic units 的換算 ─────────────────────────────────────────────
+// x402 報價的金額是 atomic units；USDC 是 6 位小數，所以 atomic == 微美元，換算只是字串形狀的事。
+// 兩個函式都不做任何算術，就不會有換算誤差可以藏。
+
+// ParseUSDAtomic 把 "0.05" 這種美元字串轉成 atomic units 的十進位字串（"50000"）。
+func ParseUSDAtomic(usd string) (string, error) {
+	v, err := parseUSD(usd)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprint(v), nil
+}
+
+// USDFromAtomic 把 atomic units 字串（"50000"）轉回美元字串（"0.050000"），給 Intent.MaxAmount 用。
+// 不是數字就原樣回傳——讓 parseUSD 在裁決時報「金額無法解析」，而不是在這裡靜默變 0。
+func USDFromAtomic(atomic string) string {
+	var v int64
+	for _, r := range strings.TrimSpace(atomic) {
+		if r < '0' || r > '9' {
+			return atomic
+		}
+		v = v*10 + int64(r-'0')
+		if v > 1<<50 {
+			return atomic
+		}
+	}
+	return USD(v)
+}
