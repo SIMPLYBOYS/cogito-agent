@@ -120,7 +120,7 @@ func main() {
 		}
 		return chatbot.GlobalApprovalMgr.WaitForApproval(call.ID, channelID, call.Name, string(call.Arguments), func(text string) {
 			if channelID != "" {
-				bot.SendMessage(channelID, text)
+				chatbot.SendMessage(channelID, text) // 按 session.ID 路由回對的平台；不依賴 Slack bot 存在
 			}
 		})
 	}
@@ -135,7 +135,7 @@ func main() {
 		id := "pay-" + tk.TaskID + "-" + in.Nonce
 		ok, why := chatbot.GlobalApprovalMgr.WaitForApproval(id, tk.AgentID, "request_payment", card, func(text string) {
 			if tk.AgentID != "" {
-				bot.SendMessage(tk.AgentID, text)
+				chatbot.SendMessage(tk.AgentID, text)
 			}
 		})
 		// 誰批的：approval 迴圈目前只回「有人批了」，身分由 tryResolveApproval 的 isAdmin 保證。
@@ -258,7 +258,20 @@ func main() {
 		return eng
 	}
 
-	bot = slackbot.NewSlackBot(factory, rootDir)
+	// Slack 改 opt-in，與 Telegram／office 入口同款：兩個 token 都設才開。先前 NewSlackBot 缺 token
+	// 直接 log.Fatal，於是「只想開 office 入口跑辦公室 demo」也得先連上 Slack——一個平台的設定
+	// 綁死整個行程。三個入口都沒設才 Fatal：那是真的沒東西可服務，不該安靜地空轉。
+	slackOn := os.Getenv("SLACK_BOT_TOKEN") != "" && os.Getenv("SLACK_APP_TOKEN") != ""
+	officeOn := os.Getenv("COGITO_HTTP_ADDR") != "" && os.Getenv("COGITO_HTTP_TOKEN") != ""
+	tgOn := os.Getenv("TELEGRAM_BOT_TOKEN") != ""
+	if !slackOn && !officeOn && !tgOn {
+		log.Fatal("沒有任何入口：請至少設 Slack（SLACK_BOT_TOKEN＋SLACK_APP_TOKEN）、Telegram（TELEGRAM_BOT_TOKEN）或 office HTTP（COGITO_HTTP_ADDR＋COGITO_HTTP_TOKEN）其一")
+	}
+	if slackOn {
+		bot = slackbot.NewSlackBot(factory, rootDir)
+	} else {
+		log.Printf("[Slack] 未設 SLACK_BOT_TOKEN／SLACK_APP_TOKEN，Slack 入口未啟用（office=%v telegram=%v）", officeOn, tgOn)
+	}
 
 	// Tier 4 自我進化（opt-in）：任務成功後反思軌跡。安全鐵律一致——產物只進【暫存區】、不自動生效，
 	// 須人工 review（技能用 skillgate 晉升；提案記憶 apply 後放行為 .claw/memory/ 記錄才生效）。
@@ -372,7 +385,9 @@ func main() {
 	// 【入口平權】鉤子組一次、每個入口掛同一包——先前是三個 setter × 三個入口＝九處要記得接，
 	// office HTTP 就漏了兩個（那邊派的工跑完不反思）。整包傳遞讓漏接變成編譯期問題。
 	hooks := chatbot.Hooks{PostRun: postRun, PostFailure: postFailure, Learn: learnHook, Reconcile: reconcileHook}
-	bot.SetHooks(hooks)
+	if bot != nil {
+		bot.SetHooks(hooks)
+	}
 
 	// 像素辦公室 Web 外殼的 HTTP 派工入口（COGITO_HTTP_ADDR + COGITO_HTTP_TOKEN 都設定才開）。
 	// 【必須在 hooks 組好之後】——先前擺在前面，結構上就不可能掛到鉤子。
@@ -399,8 +414,10 @@ func main() {
 	go cron.New(rootDir, &botCronRunner{factory: factory, workDir: rootDir}, "bot").Run(ctx.Done())
 
 	// Slack 走 Socket Mode（outbound websocket，免公開 URL）。兩平台都不需要對外連接埠，零基建。
-	go bot.Start(ctx)
-	bot.ResumeInterrupted() // 跨重啟續跑：續上次被硬砍中斷的 Slack 任務（需 AUTO_RESUME + SESSION_DIR）
+	if bot != nil {
+		go bot.Start(ctx)
+		bot.ResumeInterrupted() // 跨重啟續跑：續上次被硬砍中斷的 Slack 任務（需 AUTO_RESUME + SESSION_DIR）
+	}
 
 	<-ctx.Done()
 	log.Println("收到關閉信號，優雅關閉中...")
