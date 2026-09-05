@@ -6,7 +6,8 @@ package x402
 // ＋ base64 JSON，自己寫比拉 SDK 穩。它 mock 的是【軌道】（結算），不是【控制層】——後者在 policy。
 //
 // 【結算路徑照工作坊 §5.4】VALIDATE（version／scheme／network）→ MATCH（amount／asset／payTo）→
-// RESERVE（nonce）→ SETTLE。nonce 是 server 在 402 時發的：同一張報價只能結一次，重放直接擋。
+// RESERVE（nonce）→ SETTLE。nonce 由付款方產（EIP-3009）：第一次見到就 RESERVE，同一個再來就是 replay。
+// mock 會在報價 extra 裡順手多給一個 nonce 讓 demo 的 replay 節拍可控——真伺服器不給，client 自產。
 // 「Timeout 是未知結果，不是再付一次的許可」——所以 RESERVE 之後就算 client 逾時沒收到回應，
 // 這個 nonce 也已經用掉了，第二次來會被當 replay 擋下，而不是再扣一次。
 //
