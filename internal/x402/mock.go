@@ -108,12 +108,24 @@ func (m *Mock) handleResource(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": res.ErrorReason})
 		return
 	}
-	// 付了就給資源。內容是假的研究資料——demo 裡 agent 真的會拿它繼續做事
+	// 付了就給資源。內容是【標明為範例】的小資料集——demo 裡 agent 真的會拿它做摘要。
+	// 先前只回一句佔位字串，agent 誠實地回報「沒有實質資料可摘要」（實際發生）——投影誠實沒錯，
+	// 但影片裡評審會被這句分心。給它一份能摘要的東西，並在欄位裡寫明是 mock 樣本。
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"resource": r.URL.Path,
-		"data":     fmt.Sprintf("premium dataset for %s（paid %s atomic %s）", r.URL.Path, pp.Payload.Authorization.Value, m.cfg.Asset),
-		"tx":       res.Transaction,
+		"note":     "x402 mock 樣本資料（非真實市場數據）；付費才看得到這段",
+		"paid":     map[string]string{"amount_atomic": pp.Payload.Authorization.Value, "asset": m.cfg.Asset, "tx": res.Transaction},
+		"dataset": map[string]any{
+			"title":  "Agent payment rails — adoption snapshot (sample)",
+			"period": "2026-Q2",
+			"rows": []map[string]any{
+				{"rail": "x402 (HTTP 402)", "settled_payments_m": 100, "avg_ticket_usd": 0.004, "note": "v2 released 2025-12; >100M payments since 2025-05"},
+				{"rail": "Cloudflare Monetization Gateway", "settled_payments_m": 0, "avg_ticket_usd": 0.003, "note": "per-request bound only; sequence budget left to app"},
+				{"rail": "Card-network agent tokens", "settled_payments_m": 0, "avg_ticket_usd": 12.5, "note": "Visa/Mastercard pilots; limits at card layer"},
+			},
+			"takeaway": "Every rail bounds a single payment; none knows which task the spend belongs to — task binding lives in the harness.",
+		},
 	})
 }
 
