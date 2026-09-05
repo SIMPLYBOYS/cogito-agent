@@ -17,6 +17,8 @@ package payment
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -127,22 +129,7 @@ func (t *RequestPaymentTool) Execute(ctx context.Context, args json.RawMessage) 
 	}
 
 	// ③ BIND INTENT：六欄位請購單。TaskID 從 ctx 來，不從 agent 的參數來
-	intent := policy.Intent{
-		TaskID:    task.TaskID,
-		Resource:  in.URL,
-		Merchant:  u.Host,
-		MaxAmount: policy.USDFromAtomic(acc.MaxAmountRequired),
-		Asset:     acc.Asset,
-		Network:   acc.Network,
-		Scheme:    acc.Scheme,
-		Nonce:     fmt.Sprint(acc.Extra["nonce"]),
-		ExpiresAt: time.Now().Add(time.Duration(acc.MaxTimeoutSeconds) * time.Second),
-	}
-	if exp, ok := acc.Extra["expiresAt"].(string); ok {
-		if ts, err := time.Parse(time.RFC3339, exp); err == nil {
-			intent.ExpiresAt = ts
-		}
-	}
+	intent := BindIntent(pr, acc, in.URL, u.Host, task.TaskID)
 
 	// ④ POLICY
 	d := t.gate.Decide(intent, task.TaskID)
@@ -174,7 +161,7 @@ func (t *RequestPaymentTool) Execute(ctx context.Context, args json.RawMessage) 
 	// ⑤ SIGN：出納簽確切條款。agent 到這裡為止都沒碰過 signer
 	now := time.Now().Unix()
 	auth := x402.Authorization{
-		From: t.signer.From(), To: acc.PayTo, Value: acc.MaxAmountRequired,
+		From: t.signer.From(), To: acc.PayTo, Value: acc.AmountAtomic(),
 		ValidAfter: now - 5, ValidBefore: intent.ExpiresAt.Unix(), Nonce: intent.Nonce,
 	}
 	sig, err := t.signer.Sign(auth)
@@ -183,7 +170,7 @@ func (t *RequestPaymentTool) Execute(ctx context.Context, args json.RawMessage) 
 		t.audit(entry)
 		return "", fmt.Errorf("出納簽名失敗：%w", err)
 	}
-	pp := x402.PaymentPayload{X402Version: x402.Version, Scheme: acc.Scheme, Network: acc.Network, Accepted: acc}
+	pp := x402.PaymentPayload{X402Version: x402.Version, Scheme: acc.Scheme, Network: acc.Network, Accepted: acc, Resource: pr.Resource}
 	pp.Payload.Signature, pp.Payload.Authorization = sig, auth
 	encPP, _ := x402.Encode(pp)
 
@@ -222,6 +209,52 @@ func (t *RequestPaymentTool) audit(e policy.AuditEntry) {
 	if err := t.ledger.Append(e); err != nil {
 		log.Printf("[payment] ⚠ 稽核帳寫入失敗（支付流程不受影響，但這筆沒留證據）：%v", err)
 	}
+}
+
+// BindIntent 把一張 402 報價綁成請購單（純函式，供 live 測試不付款就能驗到這一步）。
+//
+// 【nonce 由付款方產】EIP-3009 的 nonce 是 payer 選的 32 bytes（真伺服器不會在報價裡給）。
+// 第一版照自己 mock 的設計去讀 extra.nonce，對著真伺服器會讀成 "<nil>"。現在：伺服器若真的
+// 給了（我們 mock 為了 demo 的 replay 節拍會給）就用它，否則自己產。replay 保護在 policy 的
+// nonce 表與 facilitator 的 RESERVE 表兩邊都成立，跟 nonce 是誰產的無關。
+//
+// 【金額】v2 叫 amount、v1 叫 maxAmountRequired，AmountAtomic 兩者都吃。
+// 【資源】v2 在頂層 resource.url；沒有就用請求的 URL。
+func BindIntent(pr x402.PaymentRequired, acc x402.Accept, reqURL, merchant, taskID string) policy.Intent {
+	resource := reqURL
+	if pr.Resource != nil && pr.Resource.URL != "" {
+		resource = pr.Resource.URL
+	}
+	nonce := ""
+	if v, ok := acc.Extra["nonce"].(string); ok && v != "" {
+		nonce = v
+	} else {
+		nonce = clientNonce()
+	}
+	in := policy.Intent{
+		TaskID:    taskID,
+		Resource:  resource,
+		Merchant:  merchant,
+		MaxAmount: policy.USDFromAtomic(acc.AmountAtomic()),
+		Asset:     acc.Asset,
+		Network:   acc.Network,
+		Scheme:    acc.Scheme,
+		Nonce:     nonce,
+		ExpiresAt: time.Now().Add(time.Duration(acc.MaxTimeoutSeconds) * time.Second),
+	}
+	if exp, ok := acc.Extra["expiresAt"].(string); ok {
+		if ts, err := time.Parse(time.RFC3339, exp); err == nil {
+			in.ExpiresAt = ts
+		}
+	}
+	return in
+}
+
+// clientNonce 產 EIP-3009 形狀的 nonce：0x ＋ 32 bytes hex。
+func clientNonce() string {
+	var b [32]byte
+	_, _ = rand.Read(b[:])
+	return "0x" + hex.EncodeToString(b[:])
 }
 
 // pickAccept 選第一個我們能簽的選項。

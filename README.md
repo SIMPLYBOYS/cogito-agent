@@ -70,7 +70,10 @@ curl -s -D - -o /dev/null http://127.0.0.1:4021/premium-data | grep -i "^HTTP\|^
 
 ### 已知邊界（不藏）
 
-- **結算是 mock**：真上鏈是 SDK 一個 wrapper；x402 明說 custody／預算／policy 在協議外，我們做的正是那三件
+- **結算是 mock，wire 不是**：client 讀得懂野生的 x402 v2——`internal/x402/testdata/` 是 2026-09-06 從
+  test402.com 抓的真實 402 報價，`TestDecodesRealV2Quote`／`TestBindIntentFromRealQuote` 釘住它；
+  `X402_LIVE=1 go test ./internal/payment -run Live` 會真的打那個端點走到裁決（不付款）。
+  付款那半仍是 mock：HMAC 代 EIP-712，真上鏈是 Signer 換實作；x402 明說 custody／預算／policy 在協議外，我們做的正是那三件
 - 金鑰只做到兩層（出納 ＋ 權限分離），沒有可撤銷的 session key
 - 稽核帳的 approver 目前記 `admin` 不記人名；`done` 事件不帶 tx（回執在工具結果裡）
 - `upto` 的用量爭議是開放問題

@@ -220,6 +220,68 @@ func TestFreeResourcePassthrough(t *testing.T) {
 	}
 }
 
+// TestBindIntentFromRealQuote：拿真伺服器的報價（fixture）綁請購單——金額、商家、nonce 自產都要對。
+// 這是 client 對真世界的相容性；mock 是自己寫的，自己一定解得開，不算證據。
+func TestBindIntentFromRealQuote(t *testing.T) {
+	raw, err := os.ReadFile("../x402/testdata/test402_payment_required.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pr x402.PaymentRequired
+	if err := json.Unmarshal(raw, &pr); err != nil {
+		t.Fatal(err)
+	}
+	acc, ok := pickAccept(pr.Accepts)
+	if !ok {
+		t.Fatal("真報價裡的 exact 該被選到")
+	}
+	in := BindIntent(pr, acc, "https://test402.com/api/x402", "test402.com", "T1")
+	if in.MaxAmount != "0.000100" {
+		t.Fatalf("100 atomic ＝ $0.000100，實得 %q（第一版會讀成空字串）", in.MaxAmount)
+	}
+	if in.Resource != "https://test402.com/api/x402" || in.Merchant != "test402.com" || in.Network != "eip155:84532" {
+		t.Fatalf("欄位綁錯: %+v", in)
+	}
+	if !strings.HasPrefix(in.Nonce, "0x") || len(in.Nonce) != 66 {
+		t.Fatalf("伺服器沒給 nonce 時要自產 32 bytes（0x＋64 hex），實得 %q", in.Nonce)
+	}
+	// 政策層看得懂這張單：白名單放 test402.com、asset 放合約地址
+	g, err := policy.NewPaymentGate(policy.PaymentConfig{Merchants: []string{"test402.com"},
+		Assets: []string{acc.Asset}, Networks: []string{"eip155:84532"}, AutoBelow: "0.10", AskBelow: "5.00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := g.Decide(in, "T1"); d.Action != policy.Allow {
+		t.Fatalf("$0.0001 該自動放行，實得 %s（%s）", d.Action, d.Reason)
+	}
+}
+
+// TestLiveChallengeFromTest402：X402_LIVE=1 才跑——真的打 test402.com 拿一張 402，走到裁決為止【不付款】。
+// 證明的是「我們的 client 讀得懂野生的 402」。付款那半仍是 mock：HMAC 簽名對真 facilitator 無效。
+func TestLiveChallengeFromTest402(t *testing.T) {
+	if os.Getenv("X402_LIVE") != "1" {
+		t.Skip("設 X402_LIVE=1 才打真端點")
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get("https://test402.com/api/x402")
+	if err != nil {
+		t.Skipf("連不上 test402.com：%v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("要 402，實得 %d", resp.StatusCode)
+	}
+	var pr x402.PaymentRequired
+	if err := x402.Decode(resp.Header.Get(x402.HeaderRequired), &pr); err != nil {
+		t.Fatalf("真 402 的 PAYMENT-REQUIRED 解不開: %v", err)
+	}
+	acc, ok := pickAccept(pr.Accepts)
+	if !ok || acc.AmountAtomic() == "" {
+		t.Fatalf("真報價要有能簽的 accept 且金額非空: %+v", pr)
+	}
+	in := BindIntent(pr, acc, "https://test402.com/api/x402", "test402.com", "T1")
+	t.Logf("live 請購單：$%s %s @ %s → %s（nonce %s…）", in.MaxAmount, in.Asset[:10], in.Network, in.Merchant, in.Nonce[:10])
+}
+
 // TestLedgerIsAppendOnlyJSONL：帳本是一行一筆的 JSONL，落在 <root>/.claw/audit/payments.jsonl。
 func TestLedgerIsAppendOnlyJSONL(t *testing.T) {
 	root := t.TempDir()

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -129,7 +130,9 @@ func (m *Mock) handleResource(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// challenge 發 402：報價裡帶一個新 nonce，記進 RESERVE 表（未結算狀態）。
+// challenge 發 402，形狀對齊真 v2 伺服器（test402.com 實測）：resource 在頂層、每格叫 amount、
+// extra 帶 EIP-712 domain。額外多放一個 nonce 讓 demo 的 replay 節拍可控——真伺服器不會給，
+// client 遇到沒有就自己產（EIP-3009 本來就是付款方選 nonce），所以多這個欄位不影響相容性。
 func (m *Mock) challenge(w http.ResponseWriter, r *http.Request, why string) {
 	nonce := newNonce()
 	now := time.Now()
@@ -139,17 +142,16 @@ func (m *Mock) challenge(w http.ResponseWriter, r *http.Request, why string) {
 	req := PaymentRequired{
 		X402Version: Version,
 		Error:       why,
+		Resource:    &Resource{URL: "http://" + r.Host + r.URL.Path, Description: "premium research data", MimeType: "application/json"},
 		Accepts: []Accept{{
 			Scheme:            SchemeExact,
 			Network:           m.cfg.Network,
-			MaxAmountRequired: m.cfg.PriceAtomic,
-			Resource:          r.URL.Path,
-			Description:       "premium research data",
-			MimeType:          "application/json",
+			Amount:            m.cfg.PriceAtomic,
 			PayTo:             m.cfg.PayTo,
 			MaxTimeoutSeconds: int(m.cfg.Timeout / time.Second),
 			Asset:             m.cfg.Asset,
-			Extra:             map[string]any{"nonce": nonce, "expiresAt": now.Add(m.cfg.Timeout).Format(time.RFC3339)},
+			Extra: map[string]any{"name": m.cfg.Asset, "version": "2", "assetTransferMethod": "eip3009",
+				"nonce": nonce, "expiresAt": now.Add(m.cfg.Timeout).Format(time.RFC3339)},
 		}},
 	}
 	enc, _ := Encode(req)
@@ -180,10 +182,14 @@ func (m *Mock) Verify(pp PaymentPayload, resource string) string {
 	if pp.Accepted.Asset != m.cfg.Asset {
 		return "資產不符"
 	}
-	if resource != "" && pp.Accepted.Resource != resource {
+	if resource != "" && signedPath(pp) != resource {
 		return "資源不符：簽的不是這個路徑"
 	}
-	switch pp.Scheme {
+	scheme := pp.Accepted.Scheme
+	if scheme == "" {
+		scheme = pp.Scheme
+	}
+	switch scheme {
 	case SchemeExact:
 		if a.Value != m.cfg.PriceAtomic {
 			return fmt.Sprintf("金額不符：要 %s，簽 %s", m.cfg.PriceAtomic, a.Value)
@@ -198,14 +204,15 @@ func (m *Mock) Verify(pp PaymentPayload, resource string) string {
 	if a.ValidAfter > now || (a.ValidBefore > 0 && a.ValidBefore < now) {
 		return "授權不在有效區間"
 	}
-	// nonce 要是我發的、沒過期、沒用過（用過的在 settle 那步擋，這裡只看存在與效期）
+	if a.Nonce == "" {
+		return "授權沒有 nonce"
+	}
+	// nonce 是付款方產的（EIP-3009）。伺服器不驗「是不是我發的」——那是第一版 mock 自己發明的規則，
+	// 真伺服器沒有——只驗：沒過期、沒結過。若是我在報價裡順手給的那個，效期以報價為準。
 	m.mu.Lock()
 	st, ok := m.nonces[a.Nonce]
 	m.mu.Unlock()
-	if !ok {
-		return "nonce 不是本伺服器發的"
-	}
-	if time.Now().After(st.expires) {
+	if ok && time.Now().After(st.expires) {
 		return "報價已過期"
 	}
 	// 簽名
@@ -224,7 +231,11 @@ func (m *Mock) verifyAndSettle(pp PaymentPayload, resource string) SettleRespons
 	// RESERVE：原子地把 nonce 標成已用。第二個拿同一個 nonce 來的，在這裡被擋——
 	// 不管第一個之後有沒有成功回到 client 手上。這就是「逾時不重付」的實作。
 	m.mu.Lock()
-	st := m.nonces[nonce]
+	st, ok := m.nonces[nonce]
+	if !ok { // client 自產的 nonce：第一次見到就登記（RESERVE），之後同一個就是 replay
+		st = &nonceState{issued: time.Now(), expires: time.Now().Add(m.cfg.Timeout)}
+		m.nonces[nonce] = st
+	}
 	if st.settled {
 		m.mu.Unlock()
 		return SettleResponse{Success: false, ErrorReason: "replay：這張報價已經結算過", Network: m.cfg.Network}
@@ -282,6 +293,17 @@ func Sign(secret []byte, a Authorization) string {
 func (m *Mock) checkSig(a Authorization, sig string) bool {
 	want := Sign(m.cfg.Secret, a)
 	return hmac.Equal([]byte(want), []byte(sig))
+}
+
+// signedPath 取 payload 裡「簽的是哪個資源」的路徑：v2 在頂層 resource.url，v1 在 accepted.resource。
+func signedPath(pp PaymentPayload) string {
+	if pp.Resource != nil && pp.Resource.URL != "" {
+		if u, err := url.Parse(pp.Resource.URL); err == nil {
+			return u.Path
+		}
+		return pp.Resource.URL
+	}
+	return pp.Accepted.Resource
 }
 
 func newNonce() string {

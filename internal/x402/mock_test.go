@@ -16,8 +16,8 @@ func newTestMock(t *testing.T, delay time.Duration) (*Mock, *httptest.Server) {
 	return m, srv
 }
 
-// 拿一張報價，順手解出 nonce。
-func challenge(t *testing.T, srv *httptest.Server) Accept {
+// 拿一張報價（整張，含頂層 resource）。
+func challengeReq(t *testing.T, srv *httptest.Server) PaymentRequired {
 	t.Helper()
 	resp, err := http.Get(srv.URL + "/premium-data")
 	if err != nil {
@@ -34,17 +34,28 @@ func challenge(t *testing.T, srv *httptest.Server) Accept {
 	if pr.X402Version != Version || len(pr.Accepts) == 0 {
 		t.Fatalf("報價形狀不對: %+v", pr)
 	}
-	return pr.Accepts[0]
+	// 對齊真 v2：金額叫 amount、resource 在頂層
+	if pr.Accepts[0].Amount == "" || pr.Resource == nil || pr.Resource.URL == "" {
+		t.Fatalf("mock 要吐真 v2 形狀（amount＋頂層 resource）: %+v", pr)
+	}
+	return pr
 }
 
-// 照報價簽一張合法的 payload。
+func challenge(t *testing.T, srv *httptest.Server) Accept { return challengeReq(t, srv).Accepts[0] }
+
+// 照報價簽一張合法的 payload。nonce 由付款方自產（EIP-3009 的規則；真伺服器不會給）。
 func signFor(acc Accept, secret string, mut func(*Authorization)) string {
-	a := Authorization{From: "0xAGENT", To: acc.PayTo, Value: acc.MaxAmountRequired,
-		ValidAfter: time.Now().Unix() - 5, ValidBefore: time.Now().Unix() + 60, Nonce: acc.Extra["nonce"].(string)}
+	return signForRes(acc, "/premium-data", secret, mut)
+}
+
+func signForRes(acc Accept, path, secret string, mut func(*Authorization)) string {
+	a := Authorization{From: "0xAGENT", To: acc.PayTo, Value: acc.AmountAtomic(),
+		ValidAfter: time.Now().Unix() - 5, ValidBefore: time.Now().Unix() + 60, Nonce: "0x" + newNonce()}
 	if mut != nil {
 		mut(&a)
 	}
-	pp := PaymentPayload{X402Version: Version, Scheme: acc.Scheme, Network: acc.Network, Accepted: acc}
+	pp := PaymentPayload{X402Version: Version, Scheme: acc.Scheme, Network: acc.Network, Accepted: acc,
+		Resource: &Resource{URL: "http://mock" + path}}
 	pp.Payload.Authorization = a
 	pp.Payload.Signature = Sign([]byte(secret), a)
 	enc, _ := Encode(pp)
@@ -96,6 +107,17 @@ func TestReplayBlocked(t *testing.T) {
 	}
 }
 
+// TestServerIssuedNonceStillWorks：mock 為了 demo 節拍在 extra 裡順手給的 nonce，client 用它也要能結算
+// （它是【額外】的方便，不是協定要求；真 client 自產 nonce 走上面那條路）。
+func TestServerIssuedNonceStillWorks(t *testing.T) {
+	_, srv := newTestMock(t, 0)
+	acc := challenge(t, srv)
+	sig := signFor(acc, "s", func(x *Authorization) { x.Nonce = acc.Extra["nonce"].(string) })
+	if resp, sr := pay(t, srv, "/premium-data", sig); resp.StatusCode != http.StatusOK || !sr.Success {
+		t.Fatalf("用伺服器給的 nonce 該過: %d %+v", resp.StatusCode, sr)
+	}
+}
+
 // TestVerifyMatrix：MATCH 那幾條——金額／收款方／網路／資源／簽名，任一不合都不結算。
 func TestVerifyMatrix(t *testing.T) {
 	cases := []struct {
@@ -106,8 +128,8 @@ func TestVerifyMatrix(t *testing.T) {
 		{"金額改小", func(a Accept) string { return signFor(a, "s", func(x *Authorization) { x.Value = "1" }) }, "/premium-data"},
 		{"收款方換人", func(a Accept) string { return signFor(a, "s", func(x *Authorization) { x.To = "0xEVIL" }) }, "/premium-data"},
 		{"簽名用錯 secret", func(a Accept) string { return signFor(a, "wrong", nil) }, "/premium-data"},
-		{"nonce 不是伺服器發的", func(a Accept) string { return signFor(a, "s", func(x *Authorization) { x.Nonce = "made-up" }) }, "/premium-data"},
-		{"簽的資源路徑不對", func(a Accept) string { return signFor(a, "s", nil) }, "/other-data"},
+		{"沒有 nonce", func(a Accept) string { return signFor(a, "s", func(x *Authorization) { x.Nonce = "" }) }, "/premium-data"},
+		{"簽的資源路徑不對", func(a Accept) string { return signForRes(a, "/premium-data", "s", nil) }, "/other-data"},
 		{"授權已過期", func(a Accept) string {
 			return signFor(a, "s", func(x *Authorization) { x.ValidBefore = time.Now().Unix() - 1 })
 		}, "/premium-data"},

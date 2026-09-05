@@ -27,25 +27,50 @@ const (
 	SchemeUpto  = "upto"  // 上限授權，實際用量 ≤ cap 計費
 )
 
-// Accept 是報價裡的一個可付選項（工作坊 §2.4）。Client 從中選一個「它能簽、facilitator 能結算」的。
-type Accept struct {
-	Scheme            string         `json:"scheme"`
-	Network           string         `json:"network"`           // CAIP-2，如 eip155:84532（Base Sepolia）
-	MaxAmountRequired string         `json:"maxAmountRequired"` // atomic units，十進位字串
-	Resource          string         `json:"resource"`
-	Description       string         `json:"description,omitempty"`
-	MimeType          string         `json:"mimeType,omitempty"`
-	PayTo             string         `json:"payTo"`
-	MaxTimeoutSeconds int            `json:"maxTimeoutSeconds"`
-	Asset             string         `json:"asset"`
-	Extra             map[string]any `json:"extra,omitempty"` // mock 用它帶 nonce／expiresAt
+// Resource 是 v2 報價頂層的資源描述（v1 把它塞在每個 accept 裡；v2 抽到頂層）。
+type Resource struct {
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
 }
 
-// PaymentRequired 是 402 回應的 header 內容。
+// Accept 是報價裡的一個可付選項（工作坊 §2.4）。Client 從中選一個「它能簽、facilitator 能結算」的。
+//
+// 【欄位名是對著真伺服器量的】2026-09-06 拿 test402.com（x402 v2）的 402 逐鍵比對：
+// 每格的金額叫 `amount`，不是 v1 的 `maxAmountRequired`；resource 不在 accept 裡而在頂層；
+// extra 帶的是 EIP-712 domain（name／version）與 assetTransferMethod。第一版照印象寫成 v1 形狀，
+// 對著真伺服器會把金額讀成空——這正是「mock 是自己寫的，所以自己一定解得開」的盲點。
+// fixture 在 testdata/test402_payment_required.json，wire_test 釘住它。
+type Accept struct {
+	Scheme            string         `json:"scheme"`
+	Network           string         `json:"network"`                     // CAIP-2，如 eip155:84532（Base Sepolia）
+	Amount            string         `json:"amount,omitempty"`            // v2：atomic units，十進位字串
+	MaxAmountRequired string         `json:"maxAmountRequired,omitempty"` // v1 舊名；讀取時當備援
+	PayTo             string         `json:"payTo"`
+	MaxTimeoutSeconds int            `json:"maxTimeoutSeconds"`
+	Asset             string         `json:"asset"` // v2 真伺服器給的是合約地址（0x036C…＝Base Sepolia USDC）
+	Extra             map[string]any `json:"extra,omitempty"`
+	// 以下三個是 v1 殘留：v2 伺服器不會給。留著 omitempty 只為讀舊格式不炸。
+	Resource    string `json:"resource,omitempty"`
+	Description string `json:"description,omitempty"`
+	MimeType    string `json:"mimeType,omitempty"`
+}
+
+// AmountAtomic 回這格的金額（atomic units）：v2 的 amount 優先，沒有才退到 v1 的 maxAmountRequired。
+func (a Accept) AmountAtomic() string {
+	if a.Amount != "" {
+		return a.Amount
+	}
+	return a.MaxAmountRequired
+}
+
+// PaymentRequired 是 402 回應的 header 內容（v2）。
 type PaymentRequired struct {
-	X402Version int      `json:"x402Version"`
-	Error       string   `json:"error,omitempty"`
-	Accepts     []Accept `json:"accepts"`
+	X402Version int            `json:"x402Version"`
+	Error       string         `json:"error,omitempty"`
+	Resource    *Resource      `json:"resource,omitempty"`
+	Accepts     []Accept       `json:"accepts"`
+	Extensions  map[string]any `json:"extensions,omitempty"`
 }
 
 // Authorization 對應 EIP-3009 transferWithAuthorization 的欄位（工作坊 §3.1）：
@@ -62,10 +87,12 @@ type Authorization struct {
 // PaymentPayload 是 PAYMENT-SIGNATURE 的內容：選定的條款 ＋ 對它的簽名。
 // ⚠ Accepted 必須與 server 驗證的 requirement 完全一致（防報價替換，工作坊 §2.5）。
 type PaymentPayload struct {
-	X402Version int    `json:"x402Version"`
-	Scheme      string `json:"scheme"`
-	Network     string `json:"network"`
-	Accepted    Accept `json:"accepted"`
+	X402Version int            `json:"x402Version"`
+	Scheme      string         `json:"scheme,omitempty"`  // 便利欄位；權威在 Accepted.Scheme
+	Network     string         `json:"network,omitempty"` // 同上
+	Resource    *Resource      `json:"resource,omitempty"`
+	Accepted    Accept         `json:"accepted"`
+	Extensions  map[string]any `json:"extensions,omitempty"`
 	Payload     struct {
 		Signature     string        `json:"signature"`
 		Authorization Authorization `json:"authorization"`
