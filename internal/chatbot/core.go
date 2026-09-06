@@ -8,8 +8,6 @@ package chatbot
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -415,11 +413,6 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		}()
 		rep = engine.MultiReporter{rep, office}
 	}
-	// 這一次派工的身分。比 session 細（session 是 per-channel 跨任務累加）、比一次工具呼叫粗。
-	// 支付授權的 task binding 綁的就是它——錢包層做不到，因為只有 harness 知道這個粒度存在。
-	// 【不】讓 agent 自己填：被帶偏的 agent 可以宣稱「這是為了 T1」；從 ctx 來它就改不了。
-	ctx = tools.WithTask(ctx, tools.TaskContext{AgentID: convID, TaskID: newTaskID()})
-
 	eng := c.factory(session, rep)
 
 	goalContinues := 0 // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
@@ -1521,10 +1514,3 @@ func isWide(r rune) bool {
 func (r *reporter) OnTurn(ctx context.Context, turn int) {}
 
 var _ engine.Reporter = (*reporter)(nil)
-
-// newTaskID 產生一次派工的 id。可讀優先（時間），尾巴補幾個隨機位避免同秒撞號。
-func newTaskID() string {
-	var b [3]byte
-	_, _ = rand.Read(b[:])
-	return "T-" + time.Now().Format("0102-150405") + "-" + hex.EncodeToString(b[:])
-}

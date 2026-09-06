@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/SIMPLYBOYS/cogito-agent/internal/payment"
 	"log"
 	"os"
 	"os/signal"
@@ -94,22 +93,6 @@ func main() {
 	if errPol != nil {
 		log.Fatalf("[policy] 載入失敗（修好或移除 %s 再啟動）：%v", policy.ConfigPath(rootDir), errPol)
 	}
-	// 支付授權層（policy.json 的 "payment" 區塊，選填）。沒有這塊＝這個部署不開 request_payment。
-	// 有但解析不過一樣 Fatal：一個門檻解析成 0 等於把保護悄悄關掉（見 NewPaymentGate）。
-	var payGate *policy.PaymentGate
-	if raw, err := os.ReadFile(policy.ConfigPath(rootDir)); err == nil {
-		if payGate, err = policy.LoadPayment(raw); err != nil {
-			log.Fatalf("[policy] payment 區塊載入失敗：%v", err)
-		}
-	}
-	var payLedger *policy.Ledger
-	if payGate != nil {
-		var err error
-		if payLedger, err = policy.NewLedger(rootDir); err != nil {
-			log.Fatalf("[policy] 金流稽核帳開不起來：%v", err)
-		}
-		log.Printf("[policy] 支付授權層已開：帳本 %s", policy.LedgerPath(rootDir))
-	}
 
 	// 詢問人類：把審批請求推回觸發它的 Slack 頻道（session.ID == channelID），等管理員回
 	// approve/reject。排程任務走 policy.WithUnattended 的 ctx，Guard 不會呼叫這裡（沒人可問）。
@@ -123,24 +106,6 @@ func main() {
 				chatbot.SendMessage(channelID, text) // 按 session.ID 路由回對的平台；不依賴 Slack bot 存在
 			}
 		})
-	}
-
-	// 請購單的 Ask 走【同一條】審批迴圈——卡片投到同一個頻道、同一扇老闆房門、同一組 approve/reject。
-	// 不另開一套：兩套審批遲早一套沒人看。卡片內容就是請購單本身（六欄位＋裁決理由），
-	// 給核准的人看的是【policy 要簽的確切參數】，不是模型的自然語言理由（OWASP ASI09）。
-	askPayment := func(ctx context.Context, in policy.Intent, d policy.Decision) (bool, string, string) {
-		tk := tools.TaskFromContext(ctx)
-		card := fmt.Sprintf("💳 請購單｜任務 %s｜%s｜$%s %s｜%s\n裁決：%s（%s）",
-			tk.TaskID, in.Merchant, in.MaxAmount, in.Asset, in.Resource, d.Rule, d.Reason)
-		id := "pay-" + tk.TaskID + "-" + in.Nonce
-		ok, why := chatbot.GlobalApprovalMgr.WaitForApproval(id, tk.AgentID, "request_payment", card, func(text string) {
-			if tk.AgentID != "" {
-				chatbot.SendMessage(tk.AgentID, text)
-			}
-		})
-		// 誰批的：approval 迴圈目前只回「有人批了」，身分由 tryResolveApproval 的 isAdmin 保證。
-		// 帳上先記 "admin"；要記到人名得讓 ResolveApproval 帶 userID 回來（下一刀）。
-		return ok, "admin", why
 	}
 
 	// 守門 middleware（環繞式）：Deny > Ask > Allow。抽成變數以便主工具池與子 agent只讀池共用
@@ -185,15 +150,6 @@ func main() {
 			registry.Register(tools.NewConsolidateTool(reflectProv, rootDir, memDir, sess)) // 技能提案共享、記憶提案隨 scope
 		}
 		agentkit.RegisterMCPTools(registry, mcpGateway) // 外部 MCP 工具經 gateway 漸進式暴露
-		if payGate != nil {
-			// 出納（signer）在這裡建、只交給工具內部持有——agent 的工具參數與回傳都碰不到它。
-			// mock 用 HMAC 共用秘密；接真鏈換 EIP-712 signer，介面不變。
-			signer := payment.HMACSigner{
-				Secret: []byte(envOr("X402_MOCK_SECRET", "demo")),
-				Addr:   envOr("X402_PAYER", "0xAGENT-FUNDING-WALLET"),
-			}
-			registry.Register(payment.NewRequestPaymentTool(payGate, payLedger, askPayment, signer))
-		}
 		// 背景任務工具（bash_background/task_output/task_kill/task_list）：每會話一個 TaskManager
 		// （session 級作用域），rooted 在該會話 WorkDir、共用同一沙箱 executor。
 		tm := tools.NewTaskManager(executor, sess.WorkDir)
@@ -484,12 +440,4 @@ func selfEvolveEnabled() bool {
 	return os.Getenv("COGITO_SKILL_SYNTH") == "1" ||
 		os.Getenv("COGITO_MEMORY_SYNTH") == "1" ||
 		os.Getenv("COGITO_KG_SYNTH") == "1"
-}
-
-// envOr 讀環境變數，空就用預設。
-func envOr(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

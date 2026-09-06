@@ -25,59 +25,6 @@
 
 ▶ 完整版（高畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
-## Hackathon 繳交說明（FUTUREMODE 2026 · 請購單 for Agents）
-
-> **Agent 是第一種 commit 那一刻沒有人的公司支出。誰批准、憑哪條規則、留不留得下證據。**
-> 這一節給評審：不必買像素素材、不必開 Unity，支付授權層本身可以獨立驗。
-
-### 免 Unity 執行方式（3 分鐘）
-
-```bash
-# 1) 裁決矩陣、x402 wire／mock、請購單工具——全部離線，含 replay／預算／逾時不重付
-go test ./internal/policy/ ./internal/x402/ ./internal/payment/
-
-# 2) 本地 402 資源伺服器 ＋ facilitator（VALIDATE→MATCH→RESERVE→SETTLE）
-go run ./cmd/x402mock -addr 127.0.0.1:4021 -price 0.05 &
-curl -s -D - -o /dev/null http://127.0.0.1:4021/premium-data | grep -i "^HTTP\|^payment-required"
-#    → HTTP/1.1 402 Payment Required ＋ PAYMENT-REQUIRED: <base64 v2 報價>
-
-# 3) 整套（cogito 只開 office 入口、不連 Slack/TG ＋ 像素辦公室橋）：見 unity_demo/tools/demo_stack.sh
-```
-
-`policy.json` 的 `payment` 區塊（六欄位請購單的政策）：
-
-```jsonc
-{ "payment": {
-    "merchants": ["localhost:4021"], "assets": ["USDC"], "networks": ["eip155:84532"],
-    "auto_below": "0.10", "ask_below": "5.00",   // 小額靜默放行、中額找人、超過擋掉
-    "budget": "10.00", "window_sec": 86400, "velocity": 20 } }
-```
-
-### 這次做了什麼、什麼是活動前就有的（揭露）
-
-**活動前即開源的基礎設施**（本 repo 主體，2026-07 起）：ReAct harness、工具權限模型 Deny>Ask>Allow、
-人在迴路審批、成本熔斷、記憶／技能自我進化、像素辦公室投影協定。像素辦公室（Unity ＋ FastAPI 橋）
-在姊妹 repo `unity_demo`。
-
-**9/4–9/6 現場增量**（`git log --since=2026-09-04`）：
-
-| commit | 內容 |
-|---|---|
-| `4177757` | `payment` 規則型：六欄位請購單、九條確定性檢查、微美元整數、Decide 不記帳 Commit 才記、漏設定往安全倒 |
-| `a9d9f8b` | `request_payment` 工具（agent 只能提單）、x402 v2 wire ＋ 本地 402/facilitator mock（RESERVE／nonce／逾時不重付）、派工權／審批權分離（第二把鑰匙、office 不繼承 admin）、金流稽核帳（Deny 也落） |
-| `beecc8c` | Slack 改 opt-in：只開 office 入口即可跑 demo |
-| `unity_demo` 9/4– | 橋與外殼：審批鑰匙分開送、審批卡長成請購單、金流稽核面板、demo 一鍵腳本；另有辦公室狀態徽章等投影改進 |
-
-### 已知邊界（不藏）
-
-- **結算是 mock，wire 不是**：client 讀得懂野生的 x402 v2——`internal/x402/testdata/` 是 2026-09-06 從
-  test402.com 抓的真實 402 報價，`TestDecodesRealV2Quote`／`TestBindIntentFromRealQuote` 釘住它；
-  `X402_LIVE=1 go test ./internal/payment -run Live` 會真的打那個端點走到裁決（不付款）。
-  付款那半仍是 mock：HMAC 代 EIP-712，真上鏈是 Signer 換實作；x402 明說 custody／預算／policy 在協議外，我們做的正是那三件
-- 金鑰只做到兩層（出納 ＋ 權限分離），沒有可撤銷的 session key
-- 稽核帳的 approver 目前記 `admin` 不記人名；`done` 事件不帶 tx（回執在工具結果裡）
-- `upto` 的用量爭議是開放問題
-
 ## Features
 
 **核心引擎**
@@ -363,7 +310,6 @@ cp .env.example .env
 | `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
 | `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。**office 平台不再繼承 `ALLOWED` 為 `ADMIN`**：這個身分永遠沒有審批權，「持 token 者可自我放行」的洞已封 |
 | `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | （選填）**審批身分**（預設 `office-boss`）與它專用的 token。派工與審批是【兩把鑰匙】：橋送 approve/reject 時帶 `X-Approver-Token`，才以 approver 身分進 Core；審批身分**只能** approve/reject（拿它派工回 403）。approver 須同時列在 `COGITO_ALLOWED_USERS` 與 `COGITO_ADMIN_USERS`（建議 `office:office-boss`）。兩把 token 相同會被視為未分離、審批權停用 |
-| `X402_MOCK_SECRET` / `X402_PAYER` | （選填）支付授權層（`policy.json` 的 `payment` 區塊存在時才註冊 `request_payment`）的出納簽名秘密（mock，HMAC）與付款方地址。agent 只能提請購單，簽名在工具內部、它碰不到。裁決 Deny>Ask>Allow，Ask 走與工具審批同一條迴圈；每筆（含被拒）落 `.claw/audit/payments.jsonl` |
 
 > **平台限定（`COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK` 通用）**：名單條目可寫 `platform:id`（只在該平台生效）或裸 `id`（任何平台皆生效，向後相容既有設定）。**建議加前綴**——裸 id 在每個平台都生效，今天安全只因 Telegram（純數字）與 Slack（`U` 開頭）的 ID 空間恰好不重疊；接入第三個平台那天（如 Discord 的 snowflake 也是純數字），一個同號的陌生人就會**直接通過授權閘**。例：`COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`。注意 `COGITO_USER_LINK` 改用前綴會換掉 session key，既有共享 session 不會自動搬移。
 
