@@ -9,7 +9,12 @@ import (
 )
 
 type PromptComposer struct {
-	workDir      string
+	workDir string
+	// ChannelDir：這一條對話自己的工作目錄（bot 各頻道是 workDir 的子目錄）。設了就把它底下的 AGENTS.md
+	// 疊在共享根的 AGENTS.md 之後——辦公室的人設就是靠這個檔進 system prompt。2026-09-07 才發現：
+	// 橋一直把人設寫進 channels/office_<id>/AGENTS.md，但 composer 只讀 AssetsDir(根)，那些檔從來沒被讀過。
+	// 空或等於 workDir ＝ 只讀根那份，CLI／demo 單一目錄行為不變。
+	ChannelDir   string
 	planMode     bool // Plan Mode 開關（狀態外部化強制規範）
 	skillLoader  *SkillLoader
 	memoryLoader *MemoryLoader
@@ -94,6 +99,14 @@ func (c *PromptComposer) Build() schema.Message {
 		promptBuilder.WriteString("\n# 項目專屬指南 (來自 AGENTS.md)\n```markdown\n")
 		promptBuilder.WriteString(string(content))
 		promptBuilder.WriteString("\n```\n")
+	}
+	// 頻道自己的 AGENTS.md：疊在共享根之後（後者是全 bot 的慣例，前者是「這個人／這條對話」的設定）。
+	if c.ChannelDir != "" && filepath.Clean(c.ChannelDir) != filepath.Clean(c.workDir) {
+		if ch, err := os.ReadFile(filepath.Join(c.ChannelDir, "AGENTS.md")); err == nil {
+			promptBuilder.WriteString("\n# 這個對話頻道的專屬指南 (來自頻道工作目錄的 AGENTS.md)\n```markdown\n")
+			promptBuilder.WriteString(string(ch))
+			promptBuilder.WriteString("\n```\n")
+		}
 	}
 
 	skillsContent := c.skillLoader.LoadIndex()

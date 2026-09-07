@@ -104,7 +104,7 @@ flowchart TB
 
   subgraph WS["工作區 per-channel 隔離"]
     ASSETS["共享資產<br/>AGENTS.md 與 skills"]
-    PROJ["各頻道目錄<br/>項目程式碼與日誌"]
+    PROJ["各頻道目錄<br/>項目程式碼與日誌<br/>＋頻道自己的 AGENTS.md（疊在共享根之後）"]
     STATE["狀態外部化<br/>PLAN.md 與 TODO.md"]
   end
 
@@ -140,7 +140,7 @@ flowchart TB
 flowchart TB
   subgraph SRC["來源"]
     HIST[("session.history<br/>完整歷史（持久化）")]
-    AGENTS["AGENTS.md 專案指南"]
+    AGENTS["AGENTS.md 專案指南<br/>共享根 ▸ 頻道工作目錄（有就疊上）"]
     SKILLS[".claw/skills 技能"]
     MEM[(".claw/memory<br/>長期記憶（離散記錄）")]
   end

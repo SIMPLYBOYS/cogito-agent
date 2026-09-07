@@ -112,12 +112,13 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 	defer rootSpan.EndSpan()
 
 	// 資產（AGENTS.md / 技能）從 AssetsDir 讀；未設定則回退到工具的工作目錄（CLI/demo 等
-	// 單一目錄場景行為不變）。
+	// 單一目錄場景行為不變）。頻道工作目錄自己的 AGENTS.md 另外疊上去（見 PromptComposer.ChannelDir）。
 	assetsDir := e.AssetsDir
 	if assetsDir == "" {
 		assetsDir = session.WorkDir
 	}
 	composer := ctxpkg.NewPromptComposer(assetsDir, e.MemoryDir, e.PlanMode) // MemoryDir 空＝沿用 assetsDir
+	composer.ChannelDir = session.WorkDir                                    // 頻道自己的 AGENTS.md（辦公室人設）疊在共享根之後；同目錄時 no-op
 	systemMsg := composer.Build()
 
 	// per-task 成本熔斷的基準：快照本次 Run 進入時 session 的累計花費。成本檢查只比較
