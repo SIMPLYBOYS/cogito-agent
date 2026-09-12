@@ -116,7 +116,7 @@ flowchart TB
     BACKEND["Jaeger or Langfuse"]
   end
 
-  HUMAN -->|commands & approvals| IM
+  HUMAN -->|commands and approvals| IM
   IM -->|events| LOOP
   COMPOSER -->|inject context| LOOP
   LOOP -->|Thinking Action| LLM
@@ -130,7 +130,7 @@ flowchart TB
   ASSETS -->|loaded at startup| COMPOSER
   PRIM -->|physical IO| PROJ
   PRIM --> STATE
-  HUMAN -->|read & intervene anytime| STATE
+  HUMAN -->|read and intervene anytime| STATE
   LOOP -.->|span| OTEL
   OTEL --> BACKEND
 ```
@@ -165,20 +165,20 @@ flowchart TB
   WB["session.Append → write back to history<br/>thinking+action merged ▸ tool results ▸ loop reminders"]
 
   AGENTS --> COMPOSER
-  SKILLS -->|progressive: index only, bodies on demand| COMPOSER
-  MEM -->|index resident (capped), bodies on demand| COMPOSER
+  SKILLS -->|progressive - index only, bodies on demand| COMPOSER
+  MEM -->|index resident and capped, bodies on demand| COMPOSER
   COMPOSER --> SYS
   HIST --> WIN
   SYS --> ASSEMBLE
   WIN --> ASSEMBLE
   ASSEMBLE --> COMPACT
   COMPACT --> LLM
-  TOOLS -.out-of-band.-> LLM
+  TOOLS -.out of band.-> LLM
   LLM -->|Usage.PromptTokens| CAL
   CAL -.feedback.-> COMPACT
   LLM --> WB
   WB --> HIST
-  LLM -.recall fetches a connected subgraph (k-hop neighborhood + relations, hits update LRU).-> MEM
+  LLM -.recall fetches a connected subgraph, k-hop neighborhood + relations, hits update LRU.-> MEM
 ```
 
 - **Static layer** ([composer.go](internal/context/composer.go)): identity/discipline hard-coded, layered with Plan Mode, `AGENTS.md`, the skills index and the memory index (all progressive — tables of contents, no bodies) — built once per Execute.
