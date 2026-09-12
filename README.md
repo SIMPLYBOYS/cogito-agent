@@ -3,265 +3,268 @@
 </p>
 
 <p align="center">
-  <a href="https://simplyboys.github.io/cogito-agent/"><b>官網</b></a> ·
-  <a href="docs/eval-results.md">評測結果</a> ·
-  <a href="DESIGN.md">設計取捨</a> ·
-  <a href="SECURITY.md">安全模型</a>
+  <a href="https://simplyboys.github.io/cogito-agent/"><b>Website</b></a> ·
+  <a href="docs/eval-results.md">Eval Results</a> ·
+  <a href="DESIGN.md">Design Trade-offs</a> ·
+  <a href="SECURITY.md">Security Model</a> ·
+  <a href="README.zh-TW.md">繁體中文</a>
 </p>
+
+<p align="center"><sub>Deep-dive docs (DESIGN.md, SECURITY.md, everything under docs/) are currently written in Traditional Chinese.</sub></p>
 
 # cogito-agent
 
-> 用 Go 寫的極簡自主 Agent 框架：把 Claude 驅動的 ReAct 引擎接進 Slack / Telegram，在鎖定的工作區內自主跑「思考 → 呼叫工具 → 觀察」的迴圈，讀寫檔案、執行指令，完成程式開發任務。
+> A minimal autonomous agent framework in Go: it plugs a Claude-driven ReAct engine into Slack / Telegram and runs the think → tool call → observe loop autonomously inside a locked workspace — reading and writing files, executing commands, finishing real development tasks.
 
-`cogito-agent` 讓你在 Slack / Telegram 上 @它或私聊交辦任務，它就在鎖定的工作目錄裡自主執行，把每一步思考、工具呼叫與結果即時回推到對話——全程透明，你隨時能介入。
+`cogito-agent` lets you @-mention or DM it on Slack / Telegram to hand over a task. It works autonomously inside its locked working directory and streams every thought, tool call and result back into the conversation — fully transparent, and you can step in at any time.
 
-把它當成一名**進駐團隊的數位員工**：常駐你的 IM、記得你們聊過的事（session 跨重啟持久 + 長期記憶）、做危險操作前會請示（審批）、花了多少錢有帳可查（成本追蹤）；接到複雜任務時，它會派出自己的專家隊——planner、code-reviewer、security-auditor、implementer 等[具名子 agent](#具名子-agentclawagentsmd)——並行分工、審查糾錯，最後整合回報。一個員工，背後一整隊專才。
+Think of it as a **digital employee embedded in your team**: it lives in your IM, remembers what you've discussed (sessions persist across restarts + long-term memory), asks before doing anything dangerous (approvals), and keeps an auditable record of what it spent (cost tracking). Given a complex task, it dispatches its own team of specialists — planner, code-reviewer, security-auditor, implementer and other [named subagents](#named-subagents-clawagentsmd) — working in parallel, reviewing and correcting each other, then reporting back an integrated result. One employee, a whole team of specialists behind it.
 
-> 這個專案是什麼、不是什麼，以及它的差異化與發展優先序，見 [POSITIONING.md](POSITIONING.md)。
+> What this project is and is not — its differentiation and development priorities — is laid out in [POSITIONING.md](POSITIONING.md).
 
 ## Demo
 
 ![cogito-agent demo](docs/brag.gif)
 
-▶ 完整版（高畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
+▶ Full version (HD, pausable): [docs/brag.mp4](docs/brag.mp4) — dangerous-command approval interception → cost/trace → self-evolution gated on your approval.
 
 ## Features
 
-**核心引擎**
-- 🤖 **自主 Agent 迴圈**：Thinking → Action → Observation 的多輪 ReAct，跑到任務完成。
-- 🧠 **多 Provider**：統一 `LLMProvider` 介面，預設 Claude，可一鍵切到任何 OpenAI 相容端點（OpenAI / vLLM / Ollama / OpenRouter / Groq…）。
+**Core engine**
+- 🤖 **Autonomous agent loop**: multi-turn ReAct (Thinking → Action → Observation) that runs until the task is done.
+- 🧠 **Multi-provider**: one `LLMProvider` interface; Claude by default, one switch away from any OpenAI-compatible endpoint (OpenAI / vLLM / Ollama / OpenRouter / Groq…).
 
-**內建工具**（全在鎖定的工作區內執行）
-- `read_file` / `write_file` / `edit_file` / `bash`（30s 逾時、合併 stdout/stderr）四個極簡原語。
-- 🧭 **`spawn_subagent`**：把子任務委派給隔離的子 agent，上下文隔離、可並行派多路；可綁定技能進子 context。支援**具名 agent**（`agent_type`）——在 `.claw/agents/<name>.md` 用 frontmatter 定義角色/工具集（code-reviewer、planner、security-auditor…），不指定則為預設探路者。
-- ⏱️ **背景任務**：長命令（dev server、長建置/訓練）丟背景跑、跨輪查輸出/終止；每會話獨立、有並發上限、走同一危險審批。
-- 🔎 **`search_sessions`**：關鍵字檢索**過去的對話**（跨 session／跨頻道，中英皆可），回**有界**摘要——何時、哪個會話、花了多少、命中片段。「這件事以前處理過嗎／上次怎麼解的」不必再自己 grep 整份 session JSON。
-- 🔌 **可插拔註冊表 + 環繞式中間件**：實現 `BaseTool` 即註冊，中間件掛審批 / 計時等。
+**Built-in tools** (all confined to the locked workspace)
+- `read_file` / `write_file` / `edit_file` / `bash` (30s timeout, merged stdout/stderr) — four minimal primitives.
+- 🧭 **`spawn_subagent`**: delegate a subtask to an isolated subagent — isolated context, parallel dispatch, skills can be bound into the sub-context. Supports **named agents** (`agent_type`) — define roles/toolsets in `.claw/agents/<name>.md` frontmatter (code-reviewer, planner, security-auditor…); leave it unset and you get the default scout.
+- ⏱️ **Background tasks**: throw long commands (dev servers, long builds/training) into the background; poll output or kill them across turns; per-session pools, a concurrency cap, and the same dangerous-command approvals.
+- 🔎 **`search_sessions`**: keyword search over **past conversations** (cross-session / cross-channel, Chinese and English), returning **bounded** digests — when, which session, how much it cost, matching snippets. "Have we handled this before / how did we solve it last time?" no longer means grepping raw session JSON yourself.
+- 🔌 **Pluggable registry + wrap-around middleware**: implement `BaseTool` and it's registered; middleware hooks in approvals / timing and more.
 
-**駕馭工程（失控控制）**
-- 📄 **[SECURITY.md](SECURITY.md)——防什麼、更重要的是[不防什麼](SECURITY.md#-不防什麼)**：prompt injection 明確不防、命令黑名單可繞過（附實際事故記錄）、host 模式 bash ＝ 宿主機 RCE 路徑。上線前請照該文最後一節設定。
-- 🔒 **入口授權（fail-closed）**：Slack/Telegram 只有 `COGITO_ALLOWED_USERS` 名單內的 user id 能驅動 agent；不設＝拒絕所有人。高危審批限 `COGITO_ADMIN_USERS`，杜絕「發起者自我放行」。**上線前務必設白名單**（見 [.env.example](.env.example)）——bot 入口 + 工具執行不設限＝未授權者可 RCE。
-- 🛡️ **危險指令人工審批（HITL）**：命中黑名單（`rm -rf` / `sudo` / `kill`…）的呼叫掛起，推回 Slack 等 `approve` / `reject` 才放行（僅管理員）。檔案工具（read/write/edit）在工具層硬擋逃出工作區——`..` 穿越、絕對路徑、**以及 symlink**（解析到最深的已存在祖先後重驗前綴），不依賴可被繞過的審批。
-- 📦 **可插拔沙箱（OS 級硬隔離）**：`bash` 可改用 Docker 執行器，每會話一容器、只掛該會話目錄、`--network none` 斷網、限記憶體/CPU/PID。
-- 🚦 **失控熔斷**：回合上限、per-task 成本熔斷（兩道硬斷路）＋ 無窮迴圈指紋探測（軟干預：命中即注入「跳出重試」提醒，不中止）；人工介入也有階梯——看到走偏可先 `/steer` 插話糾正方向（不作廢已燒的錢），`stop` 是最後一階。
-- ⚡ **工具併發限流** ＋ 🩹 **錯誤自愈**：報錯時注入「下一步怎麼做」的救援指南。
+**Harness engineering (runaway control)**
+- 📄 **[SECURITY.md](SECURITY.md) — what it defends against and, more importantly, [what it does not](SECURITY.md#-不防什麼)**: prompt injection is explicitly out of scope, the command blacklist is bypassable (with a real incident on record), and host-mode bash is an RCE path onto the host. Follow the last section of that doc before going live.
+- 🔒 **Entry authorization (fail-closed)**: only user ids on `COGITO_ALLOWED_USERS` may drive the agent from Slack/Telegram; unset = deny everyone. High-risk approvals are restricted to `COGITO_ADMIN_USERS`, so a requester can never self-approve. **Set the allowlist before going live** (see [.env.example](.env.example)) — an unrestricted bot entry plus tool execution equals RCE for anyone.
+- 🛡️ **Human-in-the-loop approval for dangerous commands**: calls matching the blacklist (`rm -rf` / `sudo` / `kill`…) are suspended and pushed to Slack until an admin replies `approve` / `reject`. File tools (read/write/edit) hard-block workspace escapes at the tool layer — `..` traversal, absolute paths, **and symlinks** (resolved to the deepest existing ancestor, then prefix re-verified) — no reliance on approvals that could be bypassed.
+- 📦 **Pluggable sandbox (OS-level hard isolation)**: `bash` can run under a Docker executor — one container per session, mounting only that session's directory, `--network none`, memory/CPU/PID limits.
+- 🚦 **Runaway circuit breakers**: a turn cap and a per-task cost cap (two hard breakers) + infinite-loop fingerprint detection (a soft intervention: on a hit, inject a "break out and try differently" reminder instead of aborting). Human intervention is a ladder too — when you see it drifting, `/steer` interjects a correction first (without discarding the money already burned); `stop` is the last rung.
+- ⚡ **Tool concurrency limits** + 🩹 **error self-healing**: on tool errors, a "here's what to do next" rescue guide is injected.
 
-**上下文工程**
-- 🗜️ **自適應壓縮**：壓縮水位按模型真實上下文窗口設定，並用每次回傳的 `PromptTokens` 自校準。
-- 🪟 **滑動窗口 + System Prompt 組裝**：組裝身份/紀律/`AGENTS.md`/技能；支援 **Plan Mode**（狀態外部化到 `PLAN.md` / `TODO.md`、可斷點續傳）與**漸進式技能載入**（只放索引、正文按需載入）。
-- 👤 **使用者畫像層（常駐）**：標了 `tags: [user]` 的記憶【正文每輪常駐】，不走 `recall`——「他不吃某種寫法」這種事，等模型想起來要查時通常已經寫完了。額度封頂（12 條 / 2000 字）、依名稱穩定排序（凍結前綴、不打掉 prompt cache）、超額寧可整條不放（截斷會把「不要 X」切成「要 X」）。反思時順手從同一次 LLM 呼叫分流出來，不多花錢。
-- 🧠 **可檢索長期記憶（知識圖譜）**：記憶存成離散記錄、System Prompt 只常駐索引（封頂）；`recall` 回**連通子圖**——命中記憶 + 其 `[[連結]]` 鄰域 + 它們之間的關係（中文 bigram 選種子、k 跳擴張），讓模型做多跳關係推理。命中更新 LRU、超量自動歸檔（可復原非刪除）。取代「`AGENTS.md` 整檔全載」，對齊 CoALA 長期語意層。
-- 💾 **Session 持久化（可選）**：對話歷史/費用落地磁碟，重啟後按 ID 復原；並成為 `search_sessions` 的檢索母體——過去的對話從「只能續接」變成「可以回頭查」。
-- 🧬 **自我進化（可選，預設關閉）**：成功的流程反思成可複用技能、成敗的經驗反思成專案記憶與調參提案——但**一律只寫進暫存區、不自動生效**，須過確定性把關（結構 + 危險指令/憑證掃描）並經人工放行才晉升。唯一例外是可選的 `COGITO_MEMORY_AUTOAPPLY`：四判準全中的窄新增記憶自動放行，掛 72 小時撤回窗＋一提案一 git commit 可回滾。
+**Context engineering**
+- 🗜️ **Adaptive compression**: the compression watermark is set from the model's true context window and self-calibrates each round from the returned `PromptTokens`.
+- 🪟 **Sliding window + system prompt assembly**: identity / discipline / `AGENTS.md` / skills; supports **Plan Mode** (state externalized to `PLAN.md` / `TODO.md`, resumable after interruption) and **progressive skill loading** (index only; bodies on demand).
+- 👤 **User profile layer (always resident)**: memories tagged `tags: [user]` keep their **bodies in the prompt every round** instead of waiting for `recall` — by the time the model thinks to look up "he hates that pattern", the code is usually already written. Quota-capped (12 entries / 2000 chars), stable name ordering (a frozen prefix that doesn't break the prompt cache), and over-quota entries are dropped whole rather than truncated (truncation can turn "don't do X" into "do X"). Distilled as a side stream of the same reflection LLM call — no extra spend.
+- 🧠 **Retrievable long-term memory (knowledge graph)**: memories are discrete records; the system prompt holds only a capped index; `recall` returns a **connected subgraph** — the hits + their `[[link]]` neighborhoods + the relations among them (Chinese-bigram seeding, k-hop expansion), enabling multi-hop relational reasoning. Hits update the LRU; overflow auto-archives (recoverable, not deleted). Replaces "load all of `AGENTS.md` every round"; aligned with CoALA's long-term semantic layer.
+- 💾 **Session persistence (optional)**: conversation history and costs land on disk and are restored by ID after a restart; the same store is the corpus behind `search_sessions` — past conversations go from "can only be continued" to "can be looked up".
+- 🧬 **Self-evolution (optional, off by default)**: successful flows are reflected into reusable skills; successes and failures into project memories and tuning proposals — but **everything lands in a staging area and nothing takes effect on its own**: deterministic gating (structure + dangerous-command/credential scans) plus human approval to promote. The one exception is opt-in `COGITO_MEMORY_AUTOAPPLY`: narrow additive memories that pass all four criteria auto-apply, with a 72-hour undo window and one git commit per proposal for rollback.
 
-- 📚 **可查證的架構文件**：`verify_citations` 讓 agent 寫的 `docs/wiki/` 引用【驗得過】——引用格式自帶錨點（`〔路徑:行號 · 那幾行該有的字串〕`），工具逐條打開檔案比對，行號錯了直接回報**實際在第幾行**。搭 `repo-wiki` 技能（章節樹＋概念→程式實體對映表＋mermaid＋只更新被改動影響的頁）。**為什麼需要**：實測某雲端服務對真實 repo 生成的架構文件，`file:line` 是模型猜的——宣稱某函式在 438 行、實際在 498 行（438 行是一張 SVG）。它人不在 repo 裡情有可原；你的 agent 就在 repo 裡，沒有理由猜。
+- 📚 **Verifiable architecture docs**: `verify_citations` makes the citations in agent-written `docs/wiki/` **checkable** — the citation format carries its own anchor (`〔path:line · a string those lines must contain〕`); the tool opens each file and compares, and a wrong line number is reported with the **actual** line. Pairs with the `repo-wiki` skill (chapter tree + concept→code-entity map + mermaid + only regenerate pages a change actually affects). **Why it exists**: we watched a cloud service generate architecture docs for a real repo where the `file:line` references were guessed — it claimed a function at line 438 when it lives at 498 (line 438 was an SVG). Forgivable for something outside the repo; your agent lives inside the repo — it has no excuse to guess.
 
-**接入與可觀測性**
-- 💬 **多平台整合（Slack + Telegram）**：傳輸無關核心（`internal/chatbot`）＋薄傳輸層；Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者皆 outbound、**免公開 URL / ngrok**。可同行程同時跑，會話/工作目錄**預設**靠 `platform:` 前綴命名空間隔開（設了 `COGITO_USER_LINK` 則刻意例外，見下）；每頻道工作區隔離 + per-WorkDir 鎖（同目錄序列化、不同頻道並行，且跨平台生效）。
-  - **定址行為兩邊語意一致**：私聊/DM 每則都當任務；頻道/群組只在 **@機器人**（或 Telegram 裡回覆機器人）時才觸發，並自動剝掉 @
-- 🔗 **DM 跨平台連續性**（`COGITO_USER_LINK`）：宣告同一人的各平台 id 後，在 Telegram 私聊問到一半換 Slack 也能接著問——同一份 session 歷史，回覆與審批通知送到最後說話的那個平台。僅私聊生效，群組不合併。
-- 📡 **即時進度回推** ＋ 💰 **成本追蹤**：思考 / 工具 / 成敗 / 最終回答即時推到聊天平台（Slack / Telegram），並按會話累計 token 與 USD；設了 `COGITO_OFFICE_URL` 時，收工事件帶**本次真實花費**投影到像素辦公室的任務卡（0/未知不送——不畫 $0 假裝免費）。
-- 🧊 **Prompt caching 三斷點**：`tools` / `system` / **對話尾端**各掛一個 ephemeral 斷點 ＋ 錨定式窗口（`EnableSummary` 開時吃全量，前綴 append-only 才穩定命中），長對話的全價輸入從數千 tk 降到**每輪 2 tk**。[結構圖](docs/diagrams/caching-breakpoints.svg)
-- 🔭 **OpenTelemetry 鏈路追蹤**：OTLP → Jaeger / Langfuse / Collector，LLM span 帶 `gen_ai.*`；未設定端點時零成本 no-op。
-- 🧩 **MCP 整合（stdio + Streamable HTTP）**：載入 `.mcp.json` 接外部 MCP 工具伺服器（本地 stdio 或遠端 HTTP，如 Twinkle Hub）；經 gateway 漸進式暴露，不把 N 個完整 schema 塞進每輪 context。
-- 🛠️ **Operator Dashboard**（`cmd/claw-dashboard`）：綁 loopback 的維運面板——執行樹回放、用量切片、技能／排程／MCP／金鑰輪替／權限政策，以及可就地驅動 agent 的內嵌 chat（逐字串流）。
-- ⏰ **內建 cron**：到點自動派任務給 agent，標準 cron 運算式 + 時區設定；結果推播 Slack／Telegram（含執行來源）。排程住常駐行程，bot 與面板各跑一個、靠檔案鎖仲裁不重複執行。
-- 📊 **三層評測（有實測數字，含負面結果）**：SWE-bench 測的是「模型 × harness」的乘積、分不開兩者的貢獻，故另有兩層評自己的機制。**檢索** `hit@k` 完全不呼叫 LLM——keyword 0.50 → embedding 0.58 → **加 KG 1.00**（向量檢索補跑後只到 0.58，證明贏的是「沿關係擴張」而非更好的相似度函數）；**A/B 消融**固定模型、只切換一個功能——記憶讓任務 **8→3 回合、省 66%**，技能讓通過率 **7/20→15/20**（Fisher **p=0.0248 達顯著**，補到 n=20 才成立）；**SWE-bench** 5 題子集 opus resolved **4**、haiku 1——但 **n=5、p=0.206 未達顯著，照實標成觀察不寫成分數**。顯著性檢定**內建在工具裡**（`-ab-n`），且樣本門檻先於 p 值。[結果與判讀 →](docs/eval-results.md)
+**Integrations & observability**
+- 💬 **Multi-platform (Slack + Telegram)**: a transport-agnostic core (`internal/chatbot`) + thin transport layers; Slack over **Socket Mode**, Telegram over **getUpdates long polling** — both outbound, **no public URL / ngrok needed**. Both can run in one process; sessions/workdirs are namespaced by `platform:` prefix **by default** (with a deliberate exception under `COGITO_USER_LINK`, below); per-channel workspace isolation + per-WorkDir locks (same directory serializes, different channels run in parallel, effective across platforms).
+  - **Addressing semantics match on both platforms**: DMs treat every message as a task; channels/groups only trigger on **@mention** (or a reply to the bot on Telegram), with the @ stripped automatically.
+- 🔗 **Cross-platform DM continuity** (`COGITO_USER_LINK`): declare one person's per-platform ids and a DM conversation started on Telegram can continue on Slack — same session history, with replies and approval prompts routed to whichever platform they spoke on last. DMs only; groups never merge.
+- 📡 **Live progress streaming** + 💰 **cost tracking**: thinking / tools / outcomes / final answers stream to the chat platform in real time, with tokens and USD accumulated per session; with `COGITO_OFFICE_URL` set, completion events carry the **actual cost** onto the pixel-office task card (zero/unknown is not sent — no painting $0 to pretend it's free).
+- 🧊 **Three prompt-caching breakpoints**: one ephemeral breakpoint each on `tools` / `system` / **the conversation tail**, plus an anchored window (full history while `EnableSummary` is on; an append-only prefix is what makes cache hits stable) — long conversations drop from thousands of full-price input tokens to **2 tk per round**. [Diagram](docs/diagrams/caching-breakpoints.svg)
+- 🔭 **OpenTelemetry tracing**: OTLP → Jaeger / Langfuse / Collector, LLM spans carry `gen_ai.*`; a zero-cost no-op when no endpoint is configured.
+- 🧩 **MCP integration (stdio + Streamable HTTP)**: load a `.mcp.json` to attach external MCP tool servers (local stdio or remote HTTP, e.g. Twinkle Hub); a gateway exposes them progressively instead of stuffing N full schemas into every round's context.
+- 🛠️ **Operator Dashboard** (`cmd/claw-dashboard`): a loopback-bound ops panel — run-tree replay, usage slicing, skills / cron / MCP / key rotation / permission policy, plus an embedded chat that drives the agent in place (token streaming).
+- ⏰ **Built-in cron**: dispatches tasks to the agent on schedule, with standard cron expressions + timezone; results push to Slack/Telegram (tagged with the execution source). The scheduler lives inside resident processes — the bot and the dashboard each run one, arbitrated by a file lock so only one actually fires.
+- 📊 **Three-layer evals (real numbers, negative results included)**: SWE-bench measures the model × harness product and cannot attribute credit between the two, so two extra layers evaluate the harness itself. **Retrieval** `hit@k` never calls an LLM — keyword 0.50 → embedding 0.58 → **keyword+KG 1.00** (a later vector-retrieval run only reached 0.58, proving the win is "expansion along relations", not a better similarity function). **A/B ablations** fix the model and toggle one feature — memory takes a task **from 8 to 3 turns, −66% cost**; skills lift pass rate **7/20 → 15/20** (Fisher **p=0.0248, significant** — only after expanding to n=20). **SWE-bench** on a 5-instance subset: opus resolved **4**, haiku 1 — but **n=5, p=0.206, not significant: reported as an observation, never written up as a score**. Significance testing is **built into the tool** (`-ab-n`), with a sample-size floor that comes before the p-value. [Results & interpretation →](docs/eval-results.md)
 
-**安全邊界**
-- 🛡️ **Deny > Ask > Allow 權限模型**：宣告式政策檔（`.claw/policy.json`）可讓某工具**永遠不准**；裁決與規則順序無關。**無人值守**（排程）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
-- 🔑 **金鑰不下放子行程**：agent 的 bash 與 MCP server 子行程只拿白名單環境變數，`ANTHROPIC_API_KEY` 等一律讀不到（MCP server 多是第三方 npx 套件，這條擋的是供應鏈曝險）。
-- 🚧 **控制面唯讀**：檔案工具不得寫入 `.claw/`（技能／記憶／護欄／排程）——否則 agent 可自行晉升技能、解除自己的成本上限、自己排程，整條人工放行的鏈就被繞過。
+**Safety boundaries**
+- 🛡️ **Deny > Ask > Allow permission model**: a declarative policy file (`.claw/policy.json`) can make a tool **never allowed**; verdicts are independent of rule order. **Unattended** runs (cron) treat Ask as Deny — when no one is there to answer, "waiting for an answer" is not safety.
+- 🔑 **Keys never reach child processes**: the agent's bash and MCP-server subprocesses receive only allowlisted environment variables; `ANTHROPIC_API_KEY` and friends are unreadable (MCP servers are mostly third-party npx packages — this closes a supply-chain exposure).
+- 🚧 **Read-only control plane**: file tools may not write into `.claw/` (skills / memory / guardrails / schedules) — otherwise the agent could promote its own skills, lift its own cost cap, and schedule itself, bypassing the entire human-approval chain.
 
 ## Architecture
 
-> 各設計維度的取捨、scoped 決定與對照主流 agent（Claude Code / Codex / Hermes），見 [DESIGN.md](DESIGN.md)；競品定位見 [POSITIONING.md](POSITIONING.md)。
+> Per-dimension trade-offs, scoped decisions, and comparisons against mainstream agents (Claude Code / Codex / Hermes) are in [DESIGN.md](DESIGN.md); competitive positioning in [POSITIONING.md](POSITIONING.md).
 
 ```mermaid
 flowchart TB
-  HUMAN["人類開發者與運維"]
-  IM["Slack/Telegram 與 CLI"]
+  HUMAN["Human developers & operators"]
+  IM["Slack/Telegram & CLI"]
 
-  subgraph ENGINE["cogito-agent 引擎"]
+  subgraph ENGINE["cogito-agent engine"]
     LLM["LLM Provider<br/>Claude Anthropic SDK"]
-    COST["CostTracker<br/>USD 成本記帳"]
-    LOOP["Main Loop ReAct<br/>回合熔斷 成本熔斷 併發限流"]
+    COST["CostTracker<br/>USD accounting"]
+    LOOP["Main Loop ReAct<br/>turn & cost breakers, concurrency limits"]
 
-    subgraph CTX["上下文工程"]
-      COMPOSER["PromptComposer<br/>Plan Mode 與技能組裝"]
-      COMPACT["自適應 Compactor<br/>真實窗口自校準"]
-      REMIND["ReminderInjector<br/>無窮迴圈指紋探測"]
-      RECOVER["RecoveryManager<br/>錯誤自愈"]
+    subgraph CTX["Context engineering"]
+      COMPOSER["PromptComposer<br/>Plan Mode & skill assembly"]
+      COMPACT["Adaptive Compactor<br/>self-calibrated to the real window"]
+      REMIND["ReminderInjector<br/>infinite-loop fingerprinting"]
+      RECOVER["RecoveryManager<br/>error self-healing"]
     end
 
-    subgraph TZ["工具與安全"]
-      REG["Tool Registry<br/>環繞式中間件鏈"]
-      MW["HITL 審批與計時中間件"]
-      PRIM["極簡原語<br/>read write edit bash"]
-      SUB["spawn_subagent<br/>並行探路 只讀沙箱"]
+    subgraph TZ["Tools & safety"]
+      REG["Tool Registry<br/>wrap-around middleware chain"]
+      MW["HITL approval & timing middleware"]
+      PRIM["Minimal primitives<br/>read write edit bash"]
+      SUB["spawn_subagent<br/>parallel scouts, read-only sandbox"]
     end
   end
 
-  subgraph WS["工作區 per-channel 隔離"]
-    ASSETS["共享資產<br/>AGENTS.md 與 skills"]
-    PROJ["各頻道目錄<br/>項目程式碼與日誌<br/>＋頻道自己的 AGENTS.md（疊在共享根之後）"]
-    STATE["狀態外部化<br/>PLAN.md 與 TODO.md"]
+  subgraph WS["Workspace: per-channel isolation"]
+    ASSETS["Shared assets<br/>AGENTS.md & skills"]
+    PROJ["Per-channel dirs<br/>project code & logs<br/>+ the channel's own AGENTS.md (layered after the shared root)"]
+    STATE["Externalized state<br/>PLAN.md & TODO.md"]
   end
 
-  subgraph OBS["可觀測性 OTel"]
+  subgraph OBS["Observability OTel"]
     OTEL["OTel SDK OTLP"]
-    BACKEND["Jaeger 或 Langfuse"]
+    BACKEND["Jaeger or Langfuse"]
   end
 
-  HUMAN -->|指令與審批| IM
-  IM -->|事件回推| LOOP
-  COMPOSER -->|注入 Context| LOOP
+  HUMAN -->|commands & approvals| IM
+  IM -->|events| LOOP
+  COMPOSER -->|inject context| LOOP
   LOOP -->|Thinking Action| LLM
   LLM --> COST
   COST --> LOOP
   LOOP -->|ToolCall| REG
-  REG -->|高危攔截審批| MW
-  MW -->|放行| PRIM
-  MW -->|放行| SUB
+  REG -->|high-risk interception| MW
+  MW -->|allow| PRIM
+  MW -->|allow| SUB
   SUB -.-> PRIM
-  ASSETS -->|啟動載入| COMPOSER
-  PRIM -->|物理 IO| PROJ
+  ASSETS -->|loaded at startup| COMPOSER
+  PRIM -->|physical IO| PROJ
   PRIM --> STATE
-  HUMAN -->|隨時干預閱讀| STATE
+  HUMAN -->|read & intervene anytime| STATE
   LOOP -.->|span| OTEL
   OTEL --> BACKEND
 ```
 
-### 上下文工程：一輪 prompt 怎麼組起來的
+### Context engineering: how each round's prompt is assembled
 
-每輪呼叫 LLM 前，context 層把 prompt 組成 **靜態系統層 + 動態滑動窗口**，過三道防線後送出；工具 schema 走帶外通道；回應寫回 history 供下一輪。
+Before every LLM call, the context layer assembles the prompt as a **static system layer + a dynamic sliding window**, passes it through three lines of defense, and sends it. Tool schemas travel out-of-band; the response is written back into history for the next round.
 
 ```mermaid
 flowchart TB
-  subgraph SRC["來源"]
-    HIST[("session.history<br/>完整歷史（持久化）")]
-    AGENTS["AGENTS.md 專案指南<br/>共享根 ▸ 頻道工作目錄（有就疊上）"]
-    SKILLS[".claw/skills 技能"]
-    MEM[(".claw/memory<br/>長期記憶（離散記錄）")]
+  subgraph SRC["Sources"]
+    HIST[("session.history<br/>full history (persisted)")]
+    AGENTS["AGENTS.md project guide<br/>shared root ▸ channel workdir (layered if present)"]
+    SKILLS[".claw/skills"]
+    MEM[(".claw/memory<br/>long-term memory (discrete records)")]
   end
 
-  subgraph STATIC["靜態系統層（每個 Execute 只建一次）"]
+  subgraph STATIC["Static system layer (built once per Execute)"]
     COMPOSER["PromptComposer.Build()"]
-    SYS["systemMsg：單一 system 訊息<br/>身份+紀律 ▸ Plan Mode ▸ AGENTS.md ▸ Skills 索引 ▸ 記憶索引"]
+    SYS["systemMsg: a single system message<br/>identity+discipline ▸ Plan Mode ▸ AGENTS.md ▸ skills index ▸ memory index"]
   end
 
-  subgraph DYN["動態層（每輪）"]
-    WIN["GetWorkingMemory(20)<br/>末 20 條 ▸ 剝孤兒 tool_result ▸ 首條補 user"]
+  subgraph DYN["Dynamic layer (every round)"]
+    WIN["GetWorkingMemory(20)<br/>last 20 ▸ strip orphan tool_results ▸ ensure a leading user turn"]
   end
 
-  ASSEMBLE["contextHistory = systemMsg ＋ workingMemory"]
-  COMPACT["Compactor.Compact()<br/>達 75% 窗口水位才折疊<br/>system 全留 ▸ 末 6 條保護 ▸ 早期 tool_result/思考折疊"]
-  TOOLS["availableTools（不入 messages，走 tools 參數）"]
+  ASSEMBLE["contextHistory = systemMsg + workingMemory"]
+  COMPACT["Compactor.Compact()<br/>folds only past 75% of the window<br/>system kept ▸ last 6 protected ▸ early tool_results/thinking folded"]
+  TOOLS["availableTools (not in messages; sent via the tools parameter)"]
   LLM["provider.Generate(context, tools)"]
-  CAL["Compactor.Calibrate()<br/>用真實 PromptTokens 校準 byte/token"]
-  WB["session.Append → 回寫 history<br/>thinking+action 併一條 ▸ tool 結果 ▸ 無窮迴圈提醒"]
+  CAL["Compactor.Calibrate()<br/>byte/token ratio from real PromptTokens"]
+  WB["session.Append → write back to history<br/>thinking+action merged ▸ tool results ▸ loop reminders"]
 
   AGENTS --> COMPOSER
-  SKILLS -->|漸進式：只放索引，正文按需載入| COMPOSER
-  MEM -->|索引常駐（封頂），正文按需| COMPOSER
+  SKILLS -->|progressive: index only, bodies on demand| COMPOSER
+  MEM -->|index resident (capped), bodies on demand| COMPOSER
   COMPOSER --> SYS
   HIST --> WIN
   SYS --> ASSEMBLE
   WIN --> ASSEMBLE
   ASSEMBLE --> COMPACT
   COMPACT --> LLM
-  TOOLS -.帶外.-> LLM
+  TOOLS -.out-of-band.-> LLM
   LLM -->|Usage.PromptTokens| CAL
-  CAL -.回饋.-> COMPACT
+  CAL -.feedback.-> COMPACT
   LLM --> WB
   WB --> HIST
-  LLM -.recall 取連通子圖（k 跳鄰域+關係，命中更新 LRU）.-> MEM
+  LLM -.recall fetches a connected subgraph (k-hop neighborhood + relations, hits update LRU).-> MEM
 ```
 
-- **靜態層**（[composer.go](internal/context/composer.go)）：身份/紀律寫死，疊上 Plan Mode、`AGENTS.md`、Skills 索引、記憶索引（皆漸進式，只放目錄不放正文）——整個 Execute 只建一次。
-- **長期記憶**（[memory.go](internal/context/memory.go)）：離散記錄存 `.claw/memory/`，索引常駐封頂、`recall` 工具按需取正文（中文 bigram）；命中更新 LRU、超量歸檔到 `.claw/memory-archive/`（可復原）。取代「`AGENTS.md` 整檔全載」。
-  - **兩級待遇**：`tags: [user]` 的記錄走**使用者畫像**——正文直接鋪進靜態層、每輪常駐（依名稱排序保前綴穩定）；其餘維持漸進式（只放索引、正文等 `recall`）。畫像額度用完的部分照樣在索引裡、`recall` 得到。
-- **過去的對話**（[session_search.go](internal/context/session_search.go)）：`search_sessions` 工具的核心。與 `recall` 共用同一套詞法（英數整詞 + CJK bigram），線性掃描落地的 session 評分，輸出**有界**（每會話 ≤3 段 × 160 字、預設 5 會話、上限 20）——要細節再自己讀那一檔。
-- **動態層**（[session.go](internal/context/session.go) `GetWorkingMemory`）：取末 20 條，剝孤兒 `tool_result`、首條補 `user` 以滿足 Anthropic 嚴格交替。
-- **三道防線**：Compactor 防總量（[75% 水位](internal/context/compactor.go)）、滑動窗口防條數、剝離/補位防協議；皆只動發出去的副本，不毀 `history`。
-- **自校準回饋**：每輪用真實 `PromptTokens` 修正 byte/token 比，估算隨 tokenizer 收斂，自動適配不同窗口的模型。
+- **Static layer** ([composer.go](internal/context/composer.go)): identity/discipline hard-coded, layered with Plan Mode, `AGENTS.md`, the skills index and the memory index (all progressive — tables of contents, no bodies) — built once per Execute.
+- **Long-term memory** ([memory.go](internal/context/memory.go)): discrete records in `.claw/memory/`, a capped resident index, and a `recall` tool that fetches bodies on demand (Chinese bigrams); hits update the LRU, overflow archives to `.claw/memory-archive/` (recoverable). Replaces "load all of `AGENTS.md`".
+  - **Two tiers**: records tagged `tags: [user]` go through the **user profile** — bodies inlined into the static layer, resident every round (name-sorted for a stable prefix); everything else stays progressive (index only, bodies on `recall`). Records beyond the profile quota remain in the index and reachable via `recall`.
+- **Past conversations** ([session_search.go](internal/context/session_search.go)): the core of `search_sessions`. It shares `recall`'s lexer (alphanumeric whole words + CJK bigrams), linearly scans persisted sessions, and returns **bounded** output (≤3 snippets × 160 chars per session, 5 sessions by default, 20 max) — read the session file itself when you need the details.
+- **Dynamic layer** ([session.go](internal/context/session.go) `GetWorkingMemory`): takes the last 20 messages, strips orphan `tool_result`s, and prepends a `user` turn if needed to satisfy Anthropic's strict alternation.
+- **Three lines of defense**: the Compactor guards volume (the [75% watermark](internal/context/compactor.go)), the sliding window guards count, and stripping/patching guards the protocol — all applied to the outgoing copy only; `history` is never mutilated.
+- **Self-calibrating feedback**: each round corrects the byte/token ratio using the real `PromptTokens`, so the estimate converges on the tokenizer and adapts to models with different windows.
 
-目錄結構：
+Directory layout:
 
 ```
 cmd/
-├── claw/                 伺服器端入口（生產用）：裝配 Provider/Registry/Engine + OTel，啟動 Slack Socket Mode（＋設了 token 則同時跑 Telegram 長輪詢）
-├── claw-cli/             通用命令列入口（-prompt / -dir / -session / -plan）
-├── claw-dashboard/       維運面板（綁 loopback）：執行樹回放、用量切片、技能/排程/MCP/金鑰/政策，內嵌 chat
-├── bench/                自動化評測 runner（-out JSON 報告、-min-pass-rate CI 門檻、-swebench SWE-bench、-ab-n 消融樣本數+Fisher、-dry-run）
-├── dashboard/            跑分結果視覺化（Go 服務自包含 HTML，讀 bench JSON 報告）
-├── skillgate/            提案技能把關/晉升（安全閘：結構+危險黑名單，過了才生效）
-├── ingest/               把 markdown 目錄結構式 ingest 成知識圖譜節點+邊（-src/-root，確定性不花錢）
-└── claw-demo-*/          教學/診斷 harness（mcp 診斷、oom 壓縮）——詳見下方 cmd/ 導覽
+├── claw/                 Server entrypoint (production): wires Provider/Registry/Engine + OTel, starts Slack Socket Mode (+ Telegram long polling when its token is set)
+├── claw-cli/             General-purpose CLI entrypoint (-prompt / -dir / -session / -plan)
+├── claw-dashboard/       Ops panel (loopback-bound): run-tree replay, usage slicing, skills/cron/MCP/keys/policy, embedded chat
+├── bench/                Automated eval runner (-out JSON reports, -min-pass-rate CI gate, -swebench SWE-bench, -ab-n ablation samples + Fisher, -dry-run)
+├── dashboard/            Bench-result visualizer (self-contained Go-served HTML reading bench JSON reports)
+├── skillgate/            Proposed-skill gating/promotion (safety gate: structure + dangerous-content blacklist; only what passes goes live)
+├── ingest/               Structurally ingests a markdown directory into knowledge-graph nodes+edges (-src/-root, deterministic, zero LLM cost)
+└── claw-demo-*/          Teaching/diagnostic harnesses (MCP diagnosis, OOM compression) — see the cmd/ guide below
 internal/
-├── engine/                  Agent 核心引擎
-│   ├── loop.go              主迴圈 + RunSub（子 agent）；回合/成本熔斷、併發限流、無窮迴圈探測接線
-│   ├── reminder.go          無窮迴圈探測（指紋參數正規化 + 同工具雙閾值）
-│   ├── reporter.go          進度上報介面 Reporter
-│   ├── terminal_reporter.go 終端 Reporter
-│   └── context.go           把 session 注入 ctx（供中間件取觸發頻道）
-├── context/                 上下文工程
-│   ├── composer.go          System Prompt 組裝（身份/紀律/Plan Mode/AGENTS.md/Skills）
-│   ├── skill.go             .claw/skills 技能漸進式載入（LoadIndex 索引 / ReadSkill 正文）
-│   ├── memory.go            可檢索長期記憶（LoadIndex 索引封頂 / Recall 關鍵字檢索 / LRU + 歸檔遺忘）
-│   ├── compactor.go         自適應上下文壓縮（按真實窗口 + PromptTokens 自校準）
-│   ├── recovery.go          工具錯誤自愈（救援指南注入）
-│   ├── session.go           會話歷史 + 滑動窗口 + 成本記帳（store 非 nil 時 write-through 持久化）
-│   └── session_store.go     SessionStore / FileSessionStore（一 session 一 JSON、原子寫、跨重啟復原）
-├── provider/                大模型 Provider 抽象
-│   ├── interface.go         LLMProvider（Generate + MaxContextTokens + ModelName）
-│   ├── factory.go           FromEnv 依 COGITO_PROVIDER 選 provider
-│   ├── claude.go            Anthropic Claude 實現
-│   └── openai.go            OpenAI 相容實現（可設 BaseURL：vLLM/Ollama/OpenRouter…）
-├── tools/                   工具集、註冊表與中間件
-│   ├── registry.go          註冊 / 發現 / 執行 + 環繞式中間件鏈
-│   ├── middleware.go        計時中間件（量測工具物理執行耗時）
-│   ├── read_file/write_file/edit_file/bash.go   內建工具
-│   ├── subagent.go          spawn_subagent（agent-as-tool）
-│   ├── task.go / task_tools.go  背景任務（TaskManager + bash_background/task_output/task_kill/task_list）
-│   ├── search_sessions.go   過去對話檢索（薄殼；評分在 context/session_search.go）
-│   ├── web_search.go        向外查證：web_search / fetch_url（需 TAVILY_API_KEY，見環境變數表）
-│   └── verify_citations.go  文件引用驗證：〔路徑:行號 · 錨點〕逐條打開檔案比對，錯的回報【實際在第幾行】
-├── sandbox/                 bash 執行器抽象：HostExecutor（宿主機）/ DockerExecutor（容器硬隔離）
-├── mcp/                     MCP 客戶端（stdio + Streamable HTTP 兩種 transport）+ gateway（漸進式暴露）
-├── chatbot/                 傳輸無關核心：指令閘/會話隔離/鎖/跑任務管線/進度回報 + HITL 審批 + 跨平台發送路由
-│   ├── core.go              Dispatch / handleAgentRun / 命名空間 / reporter
-│   └── approval.go          危險指令 HITL 審批（channel-based 單例）
-├── slackbot/                Slack 傳輸層：Socket Mode（outbound websocket，免公開 URL）+ @提及剝離 → core.Dispatch
-├── telegrambot/             Telegram 傳輸層：getUpdates 長輪詢（免公開 URL）→ core.Dispatch（DM 全收；群組 @我/回覆我 才觸發、自動剝 @提及）
-├── cmdutil/                 各 cmd 入口共用啟動樣板（Bootstrap：載入 .env + 初始化 OTel + 回傳 flush）
-├── observability/           可觀測性
-│   ├── trace.go / tracing.go  OTel 鏈路追蹤（OTLP → Jaeger/Langfuse）
-│   └── tracker.go           CostTracker（USD 成本記帳裝飾器）
-├── eval/                    評測框架（benchmark）：三段式 TestCase / RunSuite / Reflexion / swebench.go（SWE-bench 接入）/ abstats.go（Fisher 精確檢定＋樣本門檻）
-├── evolve/                  自我進化：SkillSynthesizer 技能自生成（寫提案技能、不自動啟用）
-└── schema/                 訊息與工具的通用資料結構
+├── engine/                  Core agent engine
+│   ├── loop.go              Main loop + RunSub (subagents); turn/cost breakers, concurrency limits, loop-detection wiring
+│   ├── reminder.go          Infinite-loop detection (fingerprint parameter normalization + dual per-tool thresholds)
+│   ├── reporter.go          Progress-reporting interface (Reporter)
+│   ├── terminal_reporter.go Terminal reporter
+│   └── context.go           Injects the session into ctx (so middleware can find the triggering channel)
+├── context/                 Context engineering
+│   ├── composer.go          System prompt assembly (identity/discipline/Plan Mode/AGENTS.md/skills)
+│   ├── skill.go             Progressive skill loading from .claw/skills (LoadIndex for the index / ReadSkill for bodies)
+│   ├── memory.go            Retrievable long-term memory (capped LoadIndex / keyword Recall / LRU + archival forgetting)
+│   ├── compactor.go         Adaptive context compression (real window + PromptTokens self-calibration)
+│   ├── recovery.go          Tool-error self-healing (rescue-guide injection)
+│   ├── session.go           Session history + sliding window + cost accounting (write-through persistence when a store is set)
+│   └── session_store.go     SessionStore / FileSessionStore (one JSON per session, atomic writes, restart recovery)
+├── provider/                LLM provider abstraction
+│   ├── interface.go         LLMProvider (Generate + MaxContextTokens + ModelName)
+│   ├── factory.go           FromEnv picks a provider from COGITO_PROVIDER
+│   ├── claude.go            Anthropic Claude implementation
+│   └── openai.go            OpenAI-compatible implementation (settable BaseURL: vLLM/Ollama/OpenRouter…)
+├── tools/                   Toolset, registry and middleware
+│   ├── registry.go          Register / discover / execute + wrap-around middleware chain
+│   ├── middleware.go        Timing middleware (measures physical tool execution time)
+│   ├── read_file/write_file/edit_file/bash.go   Built-in tools
+│   ├── subagent.go          spawn_subagent (agent-as-tool)
+│   ├── task.go / task_tools.go  Background tasks (TaskManager + bash_background/task_output/task_kill/task_list)
+│   ├── search_sessions.go   Past-conversation search (thin shell; scoring lives in context/session_search.go)
+│   ├── web_search.go        Outbound verification: web_search / fetch_url (needs TAVILY_API_KEY; see the env table)
+│   └── verify_citations.go  Doc-citation verification: 〔path:line · anchor〕checked file by file; mismatches report the actual line
+├── sandbox/                 bash executor abstraction: HostExecutor (host) / DockerExecutor (container hard isolation)
+├── mcp/                     MCP client (stdio + Streamable HTTP transports) + gateway (progressive exposure)
+├── chatbot/                 Transport-agnostic core: command gate / session isolation / locks / task pipeline / progress reporting + HITL approvals + cross-platform send routing
+│   ├── core.go              Dispatch / handleAgentRun / namespacing / reporter
+│   └── approval.go          Dangerous-command HITL approval (channel-based singleton)
+├── slackbot/                Slack transport: Socket Mode (outbound websocket, no public URL) + @mention stripping → core.Dispatch
+├── telegrambot/             Telegram transport: getUpdates long polling (no public URL) → core.Dispatch (DMs always; groups on @mention/reply, mention stripped)
+├── cmdutil/                 Startup boilerplate shared by cmd entrypoints (Bootstrap: load .env + init OTel + return flush)
+├── observability/           Observability
+│   ├── trace.go / tracing.go  OTel tracing (OTLP → Jaeger/Langfuse)
+│   └── tracker.go           CostTracker (USD accounting decorator)
+├── eval/                    Eval framework: three-phase TestCase / RunSuite / Reflexion / swebench.go (SWE-bench adapter) / abstats.go (Fisher exact test + sample floor)
+├── evolve/                  Self-evolution: SkillSynthesizer generates proposed skills (staged, never auto-enabled)
+└── schema/                 Shared message & tool data structures
 ```
 
-### 圖解（詳版流程圖）
+### Diagrams (detailed flowcharts)
 
-上面兩張 mermaid 是骨架；下面三張 draw.io 圖把三個關鍵子系統畫細（可編輯原始檔在連結裡，拖回 [draw.io](https://app.diagrams.net) 即可改）。
+The two mermaid charts above are the skeleton; the three draw.io figures below zoom into key subsystems (editable sources linked — drag them back into [draw.io](https://app.diagrams.net) to modify). Figure labels are in Traditional Chinese.
 
-**多 agent 編排流** — orchestrator 同一輪並行派三個窄專員各審一面向、隔離 context，整合成上線判斷；兩個護欄（工具邊界＝註冊表 Subset、政策 Deny＝目標終止）都是框架層而非 prompt 求來的。原始檔：[`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)
+**Multi-agent orchestration flow** — the orchestrator dispatches three narrow specialists in parallel within a single turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict; both guardrails (tool boundary = registry Subset, policy Deny = goal termination) are framework-level, not prompt-begged. Source: [`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)
 
-![多 agent 編排流：orchestrator → 同一輪並行三專員 → 整合上線判斷](demo/mission-control/diagrams/orchestration-flow.svg)
+![Multi-agent orchestration flow: orchestrator → three parallel specialists in one turn → integrated verdict](demo/mission-control/diagrams/orchestration-flow.svg)
 
-**Prompt caching 三斷點 + 錨定窗口** — payload 三層各掛一個 ephemeral 斷點，斷點③把可快取前綴延伸到對話尾端；長對話全價輸入從數千 tk 降到每輪 2 tk。原始檔：[`caching-breakpoints.drawio`](docs/diagrams/caching-breakpoints.drawio)
+**Three prompt-caching breakpoints + anchored window** — one ephemeral breakpoint per payload layer, with breakpoint ③ extending the cacheable prefix to the conversation tail; long conversations drop from thousands of full-price input tokens to 2 tk per round. Source: [`caching-breakpoints.drawio`](docs/diagrams/caching-breakpoints.drawio)
 
-![Prompt caching 三斷點與錨定窗口，含修復前後快取讀型態對照](docs/diagrams/caching-breakpoints.svg)
+![Prompt-caching breakpoints and anchored window, with before/after cache-read patterns](docs/diagrams/caching-breakpoints.svg)
 
-**多租戶隔離矩陣** — 硬租戶（一行程一租戶）vs 軟租戶（一行程內 per-conversation）逐維度對照：檔案/對話/成本天生隔離、技能/記憶/憑證/授權預設共享（記憶可 opt-in 隔離）。完整論述見 [docs/multi-tenancy.md](docs/multi-tenancy.md)。原始檔：[`tenancy-matrix.drawio`](docs/diagrams/tenancy-matrix.drawio)
+**Multi-tenancy isolation matrix** — hard tenancy (one process per tenant) vs soft tenancy (per-conversation within one process), dimension by dimension: files/conversations/costs isolated by construction; skills/memory/credentials/authorization shared by default (memory can opt into isolation). Full discussion in [docs/multi-tenancy.md](docs/multi-tenancy.md). Source: [`tenancy-matrix.drawio`](docs/diagrams/tenancy-matrix.drawio)
 
-![多租戶隔離矩陣：硬租戶 vs 軟租戶逐維度隔離／共享對照](docs/diagrams/tenancy-matrix.svg)
+![Multi-tenancy isolation matrix: hard vs soft tenancy, isolation/sharing per dimension](docs/diagrams/tenancy-matrix.svg)
 
 ## Install
 
-從原始碼建置：
+Build from source:
 
 ```bash
 git clone https://github.com/SIMPLYBOYS/cogito-agent.git
@@ -269,544 +272,543 @@ cd cogito-agent
 go build ./...
 ```
 
-需要 **Go 1.25 以上**。
+Requires **Go 1.25+**.
 
 ## Configuration
 
-複製環境變數範本並填入真實值（`.env` 已被 `.gitignore` 忽略，不會被提交）：
+Copy the environment template and fill in real values (`.env` is `.gitignore`d and never committed):
 
 ```bash
 cp .env.example .env
 ```
 
-要設定的變數：
+Variables:
 
-| 變數 | 說明 |
+| Variable | Description |
 |------|------|
-| `ANTHROPIC_API_KEY` | Anthropic 官方 API 金鑰，至 <https://console.anthropic.com> 取得 |
-| `SLACK_BOT_TOKEN` | （選填，與 `SLACK_APP_TOKEN` 同設才開 Slack；三個入口至少設一個）Slack Bot Token（`xoxb-` 開頭），所需 Scopes：`chat:write`、`app_mentions:read`、`im:history`、`files:write`（`get` 檔案取回用；後補 scope 需 Reinstall to Workspace） |
-| `SLACK_APP_TOKEN` | Slack App-Level Token（`xapp-` 開頭，scope `connections:write`），啟用 Socket Mode 後取得；走 outbound websocket 免公開 URL |
-| `TELEGRAM_BOT_TOKEN` | （選填，多平台）Telegram Bot Token，向 @BotFather 申請；設了就與 Slack 同行程跑 getUpdates 長輪詢 |
-| `COGITO_ALLOWED_USERS` | **（伺服器端務必設）** 可驅動 agent 的 user id 白名單（逗號分隔）。不設＝fail-closed 拒絕所有入站。Telegram＝數字 id、Slack＝`U` 開頭 |
-| `COGITO_ADMIN_USERS` | （選填）可 `approve`/`reject` 高危操作者（逗號分隔）；不設＝回退為 `COGITO_ALLOWED_USERS`。設它以做到「發起者≠批准者」 |
-| `COGITO_USER_LINK` | （選填）**DM 跨平台連續性**：宣告同一人在各平台的 user id（`=` 連接一組、逗號分隔多組，如 `771163423=U0AABBCC`）。設了之後這個人在 Telegram / Slack 的**私聊**共用同一份對話狀態（session/工作目錄/忙碌鎖）——Telegram 問到一半換 Slack 接著問，歷史都在；回覆與審批通知送到最後說話的平台。群組不合併（頻道 context 屬於頻道）。必須顯式設定——這是信任宣告，系統不猜 |
-| `.claw/pricing.json`（不是環境變數） | （選填）**自訂單價**（每百萬 token 美元）：`{"claude-x": {"input": 10, "output": 50}}`。內建表當預設，這個檔疊在上面——官方 `/v1/models` **不回價格**，只能自己維護，但不必為了新模型改程式重編。改了不必重啟。單價必須為正數（0 會讓 `MaxCostUSD` 熔斷永不觸發，會被略過）。放 `.claw/` 是因為那裡已擋掉 agent 寫入——能改價就等於能解除自己的成本上限 |
-| `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | （選填）未登記模型的 fallback 估價（美元/百萬 token），讓成本熔斷對非 Claude 端點仍生效；不設＝opus 級 5/25 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | （選填）OTLP 鏈路追蹤上報端點，指向 Jaeger / Langfuse / OTel Collector；未設則追蹤為 no-op |
-| `OTEL_EXPORTER_OTLP_HEADERS` | （選填）OTLP 認證標頭，如 Langfuse 的 `Authorization=Basic <base64(pk:sk)>` |
-| `OTEL_TRACES_EXPORTER` | （選填）設為 `console` 時把 span 印到終端（本地除錯，不需後端） |
-| `COGITO_MCP_CONFIG` | （選填）`.mcp.json` 路徑；載入並連接外部 MCP 工具伺服器 |
-| `COGITO_MCP_TIMEOUT` | （選填）單次 MCP 工具呼叫的秒數上限，預設 300（5 分鐘）。這是**防吊死的 backstop** 而非效能政策——遠端工具合法地可能很慢，但「接受連線卻不回應」的 server 會永久佔住引擎的併發令牌（回合/成本熔斷只在回合**之間**檢查，救不了卡在單次呼叫裡的任務）。設 `0` = 不限（回到舊行為） |
-| `COGITO_SESSION_DIR` | （選填）session 落地目錄；設了才跨重啟續傳、面板 `/runs` 才看得到 bot 的執行樹（斷點粒度＝回合） |
-| `COGITO_AUTO_RESUME` | （選填）`1`＝自動續跑：行程活著時暫時性中斷退避重試；被硬砍後重啟掃出未完成任務續跑（各上限 3 次防迴圈）。跨重啟需一併設 `COGITO_SESSION_DIR` |
-| `COGITO_SUMMARY` | （選填）`off` 關閉對話式入口的滾動摘要（預設開）。**注意**：開著才會走[錨定式窗口](#上下文工程一輪-prompt-怎麼組起來的)，那是 prompt caching 斷點③命中的前提 |
-| `COGITO_MEMORY_SCOPE` | （選填）`channel`＝長期記憶 **per-conversation 隔離**（技能仍共享）；預設 `global` 跨對話共享。見 [docs/multi-tenancy.md](docs/multi-tenancy.md) |
-| `COGITO_REFLECT_MODEL` | （選填）**背景反思改用便宜模型**（技能/記憶/KG 蒸餾）。它們在任務結束後才跑、沒人在等、產物還要人工放行——沒必要燒主模型。刻意**不**涵蓋 goal judge（那道驗收影響任務結果） |
-| `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | （選填）`1` 開啟自我進化的三種反思：提案技能／提案記憶（成功慣例 + 失敗教訓）／提案 KG 關係。**產物一律只進暫存區，需人工放行** |
-| `TAVILY_API_KEY` | （選填）設了才註冊 `web_search`／`fetch_url` 兩顆向外查證工具（Tavily；抓頁走其 /extract——抓取發生在遠端，內網位址拿不到，SSRF 整類排除），並注入紀律第 10 條「輸入不足先查證再動工」。未設＝不註冊也不注入——工具清單與紀律不擺用不了的東西。查詢封頂 400 字防夾帶外滲，夾機密片段（.env/id_rsa…）走審批 |
-| `COGITO_MEMORY_AUTOAPPLY` | （選填）`1`＝提案記憶中【四判準全中】的自動放行：①純風格不改決策行為（LLM 判，fail-closed）②純新增（刪改永遠人審）③單行 ≤100 字 ④與既有記憶零衝突。放行的掛 **72 小時撤回窗**（`undo memory` 一鍵撤回），且**一提案一 git commit**（workspace 是 git repo 時；revert 即回滾單條）。其餘照舊留給人審 |
-| `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
-| `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
-| `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
-| `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。**office 平台不再繼承 `ALLOWED` 為 `ADMIN`**：這個身分永遠沒有審批權，「持 token 者可自我放行」的洞已封 |
-| `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | （選填）**審批身分**（預設 `office-boss`）與它專用的 token。派工與審批是【兩把鑰匙】：橋送 approve/reject 時帶 `X-Approver-Token`，才以 approver 身分進 Core；審批身分**只能** approve/reject（拿它派工回 403）。approver 須同時列在 `COGITO_ALLOWED_USERS` 與 `COGITO_ADMIN_USERS`（建議 `office:office-boss`）。兩把 token 相同會被視為未分離、審批權停用 |
+| `ANTHROPIC_API_KEY` | Anthropic API key, from <https://console.anthropic.com> |
+| `SLACK_BOT_TOKEN` | (optional; Slack starts only when set together with `SLACK_APP_TOKEN`; at least one of the three entrypoints must be configured) Slack Bot Token (`xoxb-`); required scopes: `chat:write`, `app_mentions:read`, `im:history`, `files:write` (for `get` file retrieval; scopes added later need Reinstall to Workspace) |
+| `SLACK_APP_TOKEN` | Slack App-Level Token (`xapp-`, scope `connections:write`), obtained after enabling Socket Mode; outbound websocket, no public URL |
+| `TELEGRAM_BOT_TOKEN` | (optional, multi-platform) Telegram Bot Token from @BotFather; when set, getUpdates long polling runs in the same process as Slack |
+| `COGITO_ALLOWED_USERS` | **(must be set on servers)** Comma-separated allowlist of user ids that may drive the agent. Unset = fail-closed, all inbound denied. Telegram = numeric id, Slack = ids starting with `U` |
+| `COGITO_ADMIN_USERS` | (optional) Who may `approve`/`reject` high-risk operations (comma-separated); unset = falls back to `COGITO_ALLOWED_USERS`. Set it to enforce "requester ≠ approver" |
+| `COGITO_USER_LINK` | (optional) **Cross-platform DM continuity**: declare one person's ids across platforms (`=` joins a group, commas separate groups, e.g. `771163423=U0AABBCC`). That person's **DMs** on Telegram / Slack then share one conversation state (session/workdir/busy lock) — start on Telegram, continue on Slack, history intact; replies and approval prompts go to the platform they last spoke on. Groups never merge (channel context belongs to the channel). Must be explicit — this is a trust declaration; the system never guesses |
+| `.claw/pricing.json` (a file, not an env var) | (optional) **Custom pricing** (USD per million tokens): `{"claude-x": {"input": 10, "output": 50}}`. The built-in table is the default; this file layers on top — the official `/v1/models` **returns no prices**, so you maintain them yourself, but new models no longer require a rebuild. Changes apply without restart. Prices must be positive (0 would make the `MaxCostUSD` breaker never fire, so it's skipped). It lives in `.claw/` because agent writes are already blocked there — the power to change prices is the power to lift your own cost cap |
+| `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | (optional) Fallback pricing for unregistered models (USD per million tokens), keeping the cost breaker effective on non-Claude endpoints; unset = opus-tier 5/25 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (optional) OTLP trace endpoint, pointing at Jaeger / Langfuse / an OTel Collector; unset = tracing is a no-op |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (optional) OTLP auth headers, e.g. Langfuse's `Authorization=Basic <base64(pk:sk)>` |
+| `OTEL_TRACES_EXPORTER` | (optional) `console` prints spans to the terminal (local debugging, no backend needed) |
+| `COGITO_MCP_CONFIG` | (optional) Path to a `.mcp.json`; loads and connects external MCP tool servers |
+| `COGITO_MCP_TIMEOUT` | (optional) Per-call MCP timeout in seconds, default 300 (5 min). A **hang backstop**, not a performance policy — remote tools may legitimately be slow, but a server that accepts the connection and never responds would hold an engine concurrency token forever (the turn/cost breakers only check **between** turns; they can't save a task stuck inside one call). `0` = unlimited (old behavior) |
+| `COGITO_SESSION_DIR` | (optional) Session persistence directory; required for restart resumption and for the panel's `/runs` to see the bot's run trees (checkpoint granularity = one turn) |
+| `COGITO_AUTO_RESUME` | (optional) `1` = auto-resume: transient interruptions retry with backoff while the process lives; after a hard kill, restart scans for unfinished tasks and resumes them (each capped at 3 attempts to prevent loops). Cross-restart resumption also needs `COGITO_SESSION_DIR` |
+| `COGITO_SUMMARY` | (optional) `off` disables the rolling summary for conversational entrypoints (on by default). **Note**: the summary is what enables the [anchored window](#context-engineering-how-each-rounds-prompt-is-assembled), which is the precondition for prompt-caching breakpoint ③ to hit |
+| `COGITO_MEMORY_SCOPE` | (optional) `channel` = long-term memory **isolated per conversation** (skills still shared); default `global` shares across conversations. See [docs/multi-tenancy.md](docs/multi-tenancy.md) |
+| `COGITO_REFLECT_MODEL` | (optional) **Run background reflection on a cheaper model** (skill/memory/KG distillation). It runs after the task ends, nobody is waiting, and the output still needs human approval — no reason to burn the main model. Deliberately does **not** cover the goal judge (that acceptance check affects task outcomes) |
+| `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | (optional) `1` enables the three kinds of self-evolution reflection: proposed skills / proposed memories (successful conventions + failure lessons) / proposed KG relations. **All output is staged and requires human approval** |
+| `TAVILY_API_KEY` | (optional) Registers the `web_search` / `fetch_url` outbound-verification tools (Tavily; page fetches go through its /extract — fetching happens remotely, internal addresses are unreachable, ruling out the whole SSRF class) and injects discipline rule 10 ("verify before acting when input is insufficient"). Unset = neither registered nor injected — the tool list and the discipline never advertise what can't be used. Queries are capped at 400 chars against exfiltration; queries containing secret-like fragments (.env/id_rsa…) go through approval |
+| `COGITO_MEMORY_AUTOAPPLY` | (optional) `1` = auto-approve proposed memories that pass **all four criteria**: ① style-only, no decision-behavior change (LLM-judged, fail-closed) ② purely additive (updates/deletes always go to a human) ③ single line ≤100 chars ④ zero conflict with existing memories. Auto-approved entries get a **72-hour undo window** (`undo memory`) and **one git commit per proposal** (when the workspace is a git repo; revert = single-entry rollback). Everything else still goes to a human |
+| `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | (optional) Embedding-based seed selection for the knowledge graph (OpenAI-compatible `/embeddings`); unset = `recall` seeds by keyword. When set, run `ingest -embed` to build the vector cache |
+| `COGITO_OFFICE_URL` | (optional) Pixel-office bridge address; execution events are projected there when set. Protocol: [docs/office-protocol.md](docs/office-protocol.md) |
+| `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | (optional) The office **HTTP task-dispatch entrypoint**; opens only when both are set. ⚠️ It can execute **arbitrary tasks**, so it binds **loopback only** by default — non-loopback refuses to start with a hint (escape hatch `COGITO_HTTP_INSECURE=1`, but use an SSH tunnel for remote access instead) |
+| `COGITO_HTTP_USER` | (optional) The dispatcher identity (default `office-web`); must be listed in `COGITO_ALLOWED_USERS`. **The office platform no longer inherits `ALLOWED` as `ADMIN`**: this identity never has approval rights — the "token holder can self-approve" hole is closed |
+| `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | (optional) The **approver identity** (default `office-boss`) and its dedicated token. Dispatch and approval are **two keys**: the bridge sends approve/reject with `X-Approver-Token` to enter Core as the approver; the approver identity can **only** approve/reject (dispatching with it returns 403). The approver must be listed in both `COGITO_ALLOWED_USERS` and `COGITO_ADMIN_USERS` (recommended: `office:office-boss`). Identical tokens are treated as non-separated and approval is disabled |
 
-> **平台限定（`COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK` 通用）**：名單條目可寫 `platform:id`（只在該平台生效）或裸 `id`（任何平台皆生效，向後相容既有設定）。**建議加前綴**——裸 id 在每個平台都生效，今天安全只因 Telegram（純數字）與 Slack（`U` 開頭）的 ID 空間恰好不重疊；接入第三個平台那天（如 Discord 的 snowflake 也是純數字），一個同號的陌生人就會**直接通過授權閘**。例：`COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`。注意 `COGITO_USER_LINK` 改用前綴會換掉 session key，既有共享 session 不會自動搬移。
+> **Platform scoping** (applies to `COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK`): entries may be `platform:id` (that platform only) or a bare `id` (any platform, backward compatible). **Prefer the prefix** — a bare id is valid on every platform, and it's only safe today because Telegram (numeric) and Slack (`U`-prefixed) id spaces happen not to overlap; the day a third platform lands (Discord snowflakes are numeric too), a stranger with a matching number would **walk straight through the authorization gate**. Example: `COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`. Note that switching `COGITO_USER_LINK` to prefixed form changes the session key; existing shared sessions do not migrate automatically.
 
-### MCP 工具伺服器（選填）
+### MCP tool servers (optional)
 
-設定 `COGITO_MCP_CONFIG` 指向一份 `.mcp.json`（格式與 Claude Desktop 同構），啟動時會連接其中的 stdio MCP 伺服器，把它們的工具以 `<server>__<tool>` 之名註冊進來：
+Point `COGITO_MCP_CONFIG` at a `.mcp.json` (same shape as Claude Desktop's). At startup, the stdio MCP servers inside are connected and their tools registered as `<server>__<tool>`:
 
 ```jsonc
 {
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      // 鎖版本：不寫版號或寫 @latest，等於每次重啟都拉當下最新——上游被投毒就自動吃進去
+      // Pin the version: no version (or @latest) means every restart pulls whatever is newest —
+      // if upstream is ever poisoned, you ingest it automatically.
       "args": ["-y", "@modelcontextprotocol/server-filesystem@2026.7.10", "/some/dir"]
     }
   }
 }
 ```
 
-> **供應鏈**：MCP server 多是第三方 npx/uvx 套件，等於把工具能力外包出去，請一律**鎖到確切版本**（升級前先看 changelog）。cogito 這端已做的：MCP server 子行程只拿白名單環境變數（`ANTHROPIC_API_KEY` 等一律讀不到），且 MCP 工具照樣過[權限守門](#工具權限政策deny--ask--allow)。
+> **Supply chain**: MCP servers are mostly third-party npx/uvx packages — you're outsourcing tool capability, so **pin exact versions** (read the changelog before upgrading). On cogito's side: MCP server subprocesses receive only allowlisted env vars (`ANTHROPIC_API_KEY` etc. are unreadable), and MCP tools go through the same [permission gate](#tool-permission-policy-deny--ask--allow).
 
 ```bash
 export COGITO_MCP_CONFIG=./.mcp.json
-go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem" 的 N 個工具」
+go run ./cmd/claw   # startup logs will show "[mcp] mounted N tools from server "filesystem""
 ```
 
-> **無頭瀏覽器**：cogito-agent 沒有原生瀏覽器工具，但掛上 [Playwright MCP](https://github.com/microsoft/playwright-mcp)（`@playwright/mcp --headless`，見 `.mcp.json.example`）即獲得導航 / 點擊 / 抓取 / 截圖等能力，工具以 `playwright__*` 註冊。
+> **Headless browser**: cogito-agent has no native browser tool, but attach [Playwright MCP](https://github.com/microsoft/playwright-mcp) (`@playwright/mcp --headless`, see `.mcp.json.example`) and you get navigate / click / scrape / screenshot, registered as `playwright__*`.
 
 ## Usage
 
-1. 設定好 `.env` 後，啟動服務：
+1. With `.env` configured, start the service:
 
    ```bash
    go run ./cmd/claw
    ```
 
-   Slack 走 **Socket Mode**、Telegram 走 **getUpdates 長輪詢**——兩者都是 outbound 連線，**不開對外連接埠、不需要公開 URL／ngrok**。
+   Slack uses **Socket Mode**, Telegram uses **getUpdates long polling** — both are outbound connections: **no open ports, no public URL, no ngrok**.
 
-2. 在 Slack App 後台啟用 **Socket Mode**（Settings → Socket Mode → Enable），產生一個 App-Level Token（`xapp-` 開頭，scope `connections:write`），填入 `SLACK_APP_TOKEN`；並在 **Event Subscriptions** 訂閱 `app_mention`、`message.im` 事件（Socket Mode 下無需填 Request URL）。
+2. In the Slack app admin, enable **Socket Mode** (Settings → Socket Mode → Enable), generate an App-Level Token (`xapp-`, scope `connections:write`) for `SLACK_APP_TOKEN`, and subscribe to `app_mention` and `message.im` under **Event Subscriptions** (no Request URL needed in Socket Mode).
 
-3. 在 Slack 中與機器人互動：
-   - 在頻道中 **@機器人** 並描述任務；
-   - 或直接給機器人發 **私聊（DM）** 訊息。
+3. Interact with the bot in Slack:
+   - **@mention** it in a channel and describe the task; or
+   - **DM** it directly.
 
-   除了任務，機器人也聽以下**內建口令**（即「失控控制 / 自我進化」的人工閘，皆會回覆確認；不佔用任務鎖）。**在聊天裡打 `help`（或 `指令`/`commands`）即顯示此清單**：
+   Besides tasks, the bot listens for these **built-in commands** (the human gates of "runaway control / self-evolution"; each replies with a confirmation and none holds the task lock). **Type `help` (or `指令`/`commands`) in chat to see this list**:
 
-   | 口令 | 作用 |
+   | Command | Effect |
    |---|---|
-   | `help` / `指令` / `commands` | 顯示指令一覽 |
-   | `goal <驗收標準>` | 設一個持久目標，agent 每輪完成後用 LLM judge 驗收、未達成自動續跑（封頂 5 次；受成本熔斷/回合上限保護）。`goal status`/`pause`/`resume`/`clear` 管理 |
-   | `stop` | 中止本頻道正在執行的任務（可取消 context，回合邊界即時停下）。連結身分（`COGITO_USER_LINK`）下，從任一平台都能中止同一份共享 session |
-| `/steer <一句話>` | 對**進行中**的任務插話糾正方向（別名 `steer`／`插話`）：塞進插話佇列、回合邊界收進對話——不打斷正在跑的那一步、不作廢已燒的錢。閒置時不代發成新任務（「糾正」不得靜默升級成「開工」）。這是 steer→constrain→stop 階梯的第一階；constrain 刻意未做（MaxTurns/MaxCostUSD 已是硬防線） |
-   | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
-   | `get <路徑>` | 把本頻道工作區裡的檔案傳回聊天（Telegram `sendDocument`／Slack 檔案上傳；上限 50 MB）。**user-pull**——只有人打指令才外傳，agent 沒有上傳工具（防 prompt injection 外滲） |
-   | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |
-   | `compress` | 手動摺疊 context（把舊訊息摺進滾動摘要），縮短歷史省成本 |
-   | `learn` | 從本次對話蒸餾一個【提案】技能（進暫存區，過 `skillgate` 把關才生效） |
-   | `approve` / `reject`（可帶 taskID） | 放行 / 拒絕被危險指令審批攔下的工具呼叫（僅 `COGITO_ADMIN_USERS`） |
-   | `memory list` | 列出提案記憶（含編號），供逐條審核。破壞性提案會標出**舊值/新值/理由**與 ⚠️ |
-   | `memory reconcile` | **整併長期記憶**：掃既有記錄找矛盾與過時的，產出可 diff 的 `UPDATE`/`DELETE`/`ADD` 提案（**不自動生效**，須 `apply memory`）。需 `COGITO_MEMORY_SYNTH=1` |
-   | `apply memory` / `reject memory`（可帶編號） | 放行 / 丟棄任務後反思出的**提案記憶**（放行＝存成可檢索的長期記憶記錄）。不帶編號＝整批；帶編號＝逐條，如 `apply memory 1 3`——反思是批次產出的，「大致有用但夾一條爛的」才是常態 |
-   | `undo memory`（可帶編號） | 列出 / 撤回 **72 小時窗內**自動放行的記憶（`COGITO_MEMORY_AUTOAPPLY`）：撤回＝歸檔（可復原）＋留 git commit |
-| `apply edges` / `reject edges` | 放行 / 丟棄 LLM 抽出的**提案 KG 關係**（放行＝過 gate 併入知識圖譜，下次 `recall` 生效） |
-   | `apply config` / `reject config` | 放行 / 丟棄 `cmd/bench -tune` 產出的**提案參數**（放行＝晉升為 `.claw/config.json`、下次任務起套用；套用時再 clamp 有界） |
-   | `plan on` / `plan off` / `plan status` | 切換**本頻道** Plan Mode（計畫外部化到 `PLAN.md`/`TODO.md` + 目標錨 + 確定性步驟跳過）。多步長任務建議開、閒聊免儀式；狀態隨 session 持久化 |
+   | `help` / `指令` / `commands` | Show the command list |
+   | `goal <acceptance criteria>` | Set a persistent goal; after each run an LLM judge checks acceptance and unmet goals auto-continue (capped at 5 attempts; protected by the cost breaker / turn cap). Manage with `goal status`/`pause`/`resume`/`clear` |
+   | `stop` | Abort the running task in this channel (cancelable context; stops at the next turn boundary). With linked identities (`COGITO_USER_LINK`), a shared session can be stopped from any platform |
+   | `/steer <one sentence>` | Interject a course correction into a **running** task (aliases `steer`/`插話`): queued, folded into the conversation at the turn boundary — doesn't interrupt the step in flight, doesn't discard money already burned. When idle it is not silently promoted into a new task ("correcting" must not silently escalate into "starting work"). First rung of the steer→constrain→stop ladder; constrain is deliberately unbuilt (MaxTurns/MaxCostUSD are already the hard lines) |
+   | `status` | Show this session's spend / tokens / history length / model / Plan / busy state |
+   | `get <path>` | Send a file from this channel's workspace back to the chat (Telegram `sendDocument` / Slack file upload; 50 MB cap). **User-pull** — files leave only when a human types the command; the agent has no upload tool (blocks prompt-injection exfiltration) |
+   | `model` / `model <id>` / `model reset` | View / switch / reset this channel's model (per-channel, via a `Configurable` provider; takes effect next task) |
+   | `compress` | Manually fold context (old messages into the rolling summary), shortening history to save cost |
+   | `learn` | Distill a **proposed** skill from this conversation (staged; only live after passing `skillgate`) |
+   | `approve` / `reject` (optionally with taskID) | Allow / deny a tool call intercepted by dangerous-command approval (admins in `COGITO_ADMIN_USERS` only) |
+   | `memory list` | List proposed memories (numbered) for item-by-item review. Destructive proposals show **old value/new value/reason** and a ⚠️ |
+   | `memory reconcile` | **Reconcile long-term memory**: scan existing records for contradictions and staleness, producing diffable `UPDATE`/`DELETE`/`ADD` proposals (**never auto-applied**; requires `apply memory`). Needs `COGITO_MEMORY_SYNTH=1` |
+   | `apply memory` / `reject memory` (optionally numbered) | Approve / discard **proposed memories** from post-task reflection (approve = stored as retrievable long-term records). No number = the whole batch; numbered = item by item, e.g. `apply memory 1 3` — reflection is batch-produced, and "mostly useful with one bad entry" is the norm |
+   | `undo memory` (optionally numbered) | List / revoke memories auto-approved within the **72-hour window** (`COGITO_MEMORY_AUTOAPPLY`): revoke = archive (recoverable) + a git commit trail |
+   | `apply edges` / `reject edges` | Approve / discard LLM-extracted **proposed KG relations** (approve = gated merge into the graph, effective on the next `recall`) |
+   | `apply config` / `reject config` | Approve / discard **proposed parameters** from `cmd/bench -tune` (approve = promoted to `.claw/config.json`, applied from the next task; clamped to bounds on apply) |
+   | `plan on` / `plan off` / `plan status` | Toggle **this channel's** Plan Mode (plans externalized to `PLAN.md`/`TODO.md` + goal anchor + deterministic step skipping). Recommended for long multi-step tasks; skip the ceremony for chit-chat. State persists with the session |
 
-   （`apply memory` / `apply edges` 需啟用對應的 `COGITO_*_SYNTH`；提案產生時機器人會主動通知。Plan Mode 為 per-channel、預設關。其餘能力用**自然語言**交辦：讀寫檔、bash、`recall` 長期記憶、派子 agent、畫長條圖、上網查證（web_search/fetch_url，需 `TAVILY_API_KEY`）、呼叫 MCP 工具…）
+   (`apply memory` / `apply edges` require the corresponding `COGITO_*_SYNTH`; the bot announces proposals as they appear. Plan Mode is per-channel, default off. Everything else is delegated in **natural language**: read/write files, bash, `recall` long-term memory, dispatch subagents, draw bar charts, verify online (web_search/fetch_url, needs `TAVILY_API_KEY`), call MCP tools…)
 
-   **CLI（`cmd/claw-cli`）旗標**：
+   **CLI (`cmd/claw-cli`) flags**:
 
-   | 旗標 | 預設 | 作用 |
+   | Flag | Default | Effect |
    |---|---|---|
-   | `-prompt` | （必填） | 交辦的任務；留空印用法並退出 |
-   | `-dir` | `./workspace` | 工作區目錄（子 agent 的 worktree 隔離需此為 git repo） |
-   | `-session` | `cli-session` | 會話 ID，配 `COGITO_SESSION_DIR` 可斷點續傳 |
-   | `-plan` | `false` | 開 Plan Mode |
-   | `-verify` | — | goal 迴圈：驗證 bash 指令（退出碼 0 = 達成），設了就跑到通過或用盡 |
-   | `-verify-judge` | — | goal 迴圈：用 LLM 依【自然語言標準】驗收（給寫文件/設計等 bash 難驗的任務）；與 `-verify` 二擇一 |
-   | `-max-attempts` | `5` | goal 迴圈最大嘗試次數 |
+   | `-prompt` | (required) | The task; empty prints usage and exits |
+   | `-dir` | `./workspace` | Workspace directory (subagent worktree isolation requires it to be a git repo) |
+   | `-session` | `cli-session` | Session ID; with `COGITO_SESSION_DIR`, enables resumption |
+   | `-plan` | `false` | Enable Plan Mode |
+   | `-verify` | — | Goal loop: a verification bash command (exit 0 = achieved); when set, runs until it passes or attempts run out |
+   | `-verify-judge` | — | Goal loop: LLM acceptance against **natural-language criteria** (for docs/design tasks bash can't verify); mutually exclusive with `-verify` |
+   | `-max-attempts` | `5` | Goal-loop attempt cap |
 
-機器人在工作區根目錄 `./workspace/` 下、**每個頻道各自隔離的子目錄** `channels/<頻道ID>/` 內完成任務（同頻道任務序列化、不同頻道並行）；技能與 `AGENTS.md` 則從根 `workspace/` 共享讀取。進度即時回覆到對應會話。
+The bot works under the workspace root `./workspace/`, inside **per-channel isolated subdirectories** `channels/<channel-id>/` (tasks within a channel serialize; different channels run in parallel); skills and `AGENTS.md` are read from the shared root `workspace/`. Progress streams back to the originating conversation.
 
-> **Telegram 論壇主題（Forum Topics）**：開了 Topics 的超級群組，**每個主題各自獨立 session／工作目錄**（一個群組、一個 bot、依 `message_thread_id` 分流），回覆也會落回原主題——「一個專員一個主題區」的最小前提。判準用 `is_topic_message`：一般群組的回覆串（非主題）**不**分家，避免把普通群組拆成一堆 session。
+> **Telegram Forum Topics**: in supergroups with Topics enabled, **each topic gets its own session/workdir** (one group, one bot, routed by `message_thread_id`), and replies land back in the originating topic — the minimal precondition for "one specialist per topic". The test is `is_topic_message`: plain reply threads in ordinary groups do **not** split, so a normal group isn't shattered into a pile of sessions.
 
-> ⚠️ **安全提示**：預設（`HostExecutor`）下 `bash` 會在服務所在機器上執行任意命令，`write_file` / `edit_file` 會修改檔案——請僅在隔離/受控環境中執行。**生產建議啟用 Docker 沙箱**取得 OS 級硬邊界：
+> ⚠️ **Security note**: under the default (`HostExecutor`), `bash` executes arbitrary commands on the machine running the service, and `write_file` / `edit_file` modify files — run only in isolated/controlled environments. **In production, enable the Docker sandbox** for an OS-level hard boundary:
 >
 > ```bash
 > docker build -t cogito-sandbox:latest -f docker/sandbox.Dockerfile .
-> export COGITO_SANDBOX=docker     # bash 命令改在隔離容器內執行
-> # 可調：COGITO_SANDBOX_IMAGE / _MEMORY（512m）/ _CPUS（1.0）/ _NETWORK（none）/ _PIDS（256）
-> # 子行程（agent 的 bash、MCP server）只拿到【白名單】環境變數，金鑰不外流。
-> # 自家工具鏈變數不夠用時補上：COGITO_SANDBOX_ENV_PASS=NODE_ENV,CARGO_HOME
+> export COGITO_SANDBOX=docker     # bash commands now run inside an isolated container
+> # Tunables: COGITO_SANDBOX_IMAGE / _MEMORY (512m) / _CPUS (1.0) / _NETWORK (none) / _PIDS (256)
+> # Subprocesses (the agent's bash, MCP servers) receive only ALLOWLISTED env vars — keys never leak.
+> # If your toolchain needs more, pass them explicitly: COGITO_SANDBOX_ENV_PASS=NODE_ENV,CARGO_HOME
 > ```
 >
-> **換技術棧＝換映像，不必改程式**：`docker/sandbox.Dockerfile` 只是**預設值**。預設映像以 Go 為基底、
-> 附 `python3`（無 `python` 別名、無 pip）；其他 runtime 不存在。要跑別的語言就指別的映像：
+> **Switching stacks = switching images, not code**: `docker/sandbox.Dockerfile` is only a **default**. The default image is Go-based
+> plus `python3` (no `python` alias, no pip); no other runtimes exist. To run another language, point at another image:
 >
 > ```bash
-> COGITO_SANDBOX_IMAGE=node:22-bookworm    # 或 rust:1.83 / ruby:3.3 / python:3.12
-> COGITO_SANDBOX_NETWORK=bridge            # 需要 npm/pip/cargo 抓套件時才開（預設 none 斷網）
+> COGITO_SANDBOX_IMAGE=node:22-bookworm    # or rust:1.83 / ruby:3.3 / python:3.12
+> COGITO_SANDBOX_NETWORK=bridge            # open only when npm/pip/cargo need to fetch (default none = no network)
 > ```
 >
-> 粒度是**一個行程一個映像**。要讓不同角色用不同技術棧，今天的做法是「一個員工一個目錄」
-> （見〈跑多個員工〉），各自設自己的 `COGITO_SANDBOX_IMAGE`。
+> Granularity is **one image per process**. For different roles on different stacks, today's answer is "one employee per directory"
+> (see [Running multiple employees](#running-multiple-employees-multi-instance-zero-code)), each with its own `COGITO_SANDBOX_IMAGE`.
 
-> 啟用後**每個 session 維持一個常駐容器**：首次 bash 呼叫時 `docker run -d ... sleep infinity` 拉起、之後都 `docker exec` 進去——省去每命令的容器啟動延遲，且容器內**安裝的套件 / 寫入的檔案 / 背景行程**在同 session 多次呼叫間持久保留。容器只掛入該 session 的 workDir、預設斷網、限資源；服務優雅關閉（或 CLI 退出）時自動 `docker rm -f` 清掉。容器名由 workDir 雜湊決定，崩潰重啟後可辨識並清理。
+> When enabled, **each session keeps one resident container**: the first bash call starts it with `docker run -d ... sleep infinity`, and subsequent calls `docker exec` into it — no per-command container startup latency, and **installed packages / written files / background processes persist** across calls within the session. The container mounts only that session's workDir, has no network by default, and is resource-limited; graceful shutdown (or CLI exit) runs `docker rm -f`. Container names derive from a workDir hash, so they're identifiable and cleanable after a crash.
 >
-> 持久的是**檔案系統層**的狀態（套件/檔案/行程）；**不含** shell 的 `export` 環境變數、`cd`、別名——因為每條 bash 是一條獨立的 `docker exec ... bash -c`，那是全新行程（與 host 模式「每次新 shell」一致）。要讓環境變數跨呼叫保留，寫進 `~/.bashrc` 等檔案。
+> What persists is **filesystem-level** state (packages/files/processes); **not** shell `export`s, `cd`, or aliases — each bash call is its own `docker exec ... bash -c`, a fresh process (matching host mode's "new shell every time"). To keep environment variables across calls, write them into `~/.bashrc` or similar.
 >
-> **隔離範圍（重要）**：容器關住的是 **`bash`**（含背景任務），**不是整個 agent**。`read_file` / `write_file` / `edit_file` 一律在**宿主機**執行——它們的邊界是工具層的工作區圍堵（`..`、絕對路徑、symlink 全擋），不是容器。這是刻意的分工：**容器擋「任意命令」，工具層擋「逃出工作區」**，兩者互補而非重疊。（正因如此，工具層的 symlink 解析是必要的：容器內的 bash 可以在掛載進來的 workDir 裡種一個指向宿主機的 symlink，宿主機上的檔案工具若不解 symlink 就會跟著寫出去。）審批 middleware 與兩者正交——高危命令即使在容器裡也照樣要人工放行。
+> **Isolation scope (important)**: the container encloses **`bash`** (including background tasks), **not the whole agent**. `read_file` / `write_file` / `edit_file` always run on the **host** — their boundary is the tool-layer workspace containment (`..`, absolute paths, symlinks all blocked), not the container. This is a deliberate division of labor: **the container blocks "arbitrary commands", the tool layer blocks "escaping the workspace"** — complementary, not redundant. (Which is exactly why tool-layer symlink resolution is necessary: bash inside the container can plant a symlink in the mounted workDir pointing at the host, and a host-side file tool that didn't resolve symlinks would follow it out.) The approval middleware is orthogonal to both — high-risk commands need human approval even inside the container.
 >
-> 注意：首次啟動容器若需拉映像會較慢（建議先 `docker build` 好本地映像）；目前一個 session 對應一個容器、不對單條命令再做細分。
+> Note: the first container start is slow if the image must be pulled (build a local image beforehand); currently one session maps to one container, with no per-command subdivision.
 
-### Session 持久化（跨重啟續傳）
+### Session persistence (resumption across restarts)
 
 ```bash
-export COGITO_SESSION_DIR=./workspace/sessions   # 設了才落地磁碟；未設＝純記憶體
-go run ./cmd/claw-cli -session task_001 -prompt "開始一個多步驟任務"
-# 重啟後同一 -session 接著跑，歷史與費用都還在：
-go run ./cmd/claw-cli -session task_001 -prompt "繼續"
+export COGITO_SESSION_DIR=./workspace/sessions   # persistence requires this; unset = memory only
+go run ./cmd/claw-cli -session task_001 -prompt "start a multi-step task"
+# After a restart, the same -session picks up where it left off — history and costs intact:
+go run ./cmd/claw-cli -session task_001 -prompt "continue"
 ```
 
-對 Slack（`cmd/claw`）同理：設 `COGITO_SESSION_DIR` 後各頻道記憶不因服務重啟而丟失。每個 session 一個 JSON 檔（含對話歷史），勿提交進版控（已加入 `.gitignore`）。
+Same for Slack (`cmd/claw`): with `COGITO_SESSION_DIR` set, per-channel memory survives service restarts. Each session is one JSON file (containing the conversation history); don't commit them (already in `.gitignore`).
 
-### Operator Dashboard（維運面板）
+### Operator Dashboard
 
 <table>
 <tr>
-<td width="50%"><img src="docs/dashboard/runs.png" alt="Runs：一次 query 的完整執行樹"><br>
-<b>Runs</b> — ReAct 迴圈逐步展開：思考、工具參數、子 agent 委派、最終回答</td>
-<td width="50%"><img src="docs/dashboard/metrics.png" alt="Metrics：各平台與各模型的用量切片"><br>
-<b>Metrics</b> — 總花費與 token，按平台／模型切片（自帶，不依賴 Langfuse）</td>
+<td width="50%"><img src="docs/dashboard/runs.png" alt="Runs: the full execution tree of one query"><br>
+<b>Runs</b> — the ReAct loop unfolded step by step: thinking, tool arguments, subagent delegation, final answer</td>
+<td width="50%"><img src="docs/dashboard/metrics.png" alt="Metrics: usage sliced by platform and model"><br>
+<b>Metrics</b> — total spend and tokens, sliced by platform/model (built in, no Langfuse dependency)</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/dashboard/cron.png" alt="Cron：排程任務"><br>
-<b>Cron</b> — 排程任務、下次／上次執行、失敗原因、結果推播設定</td>
-<td width="50%"><img src="docs/dashboard/policy.png" alt="工具權限政策"><br>
-<b>Policy</b> — Deny &gt; Ask &gt; Allow 的現行規則（唯讀檢視）</td>
+<td width="50%"><img src="docs/dashboard/cron.png" alt="Cron: scheduled tasks"><br>
+<b>Cron</b> — schedules, next/last run, failure reasons, result-push settings</td>
+<td width="50%"><img src="docs/dashboard/policy.png" alt="Tool permission policy"><br>
+<b>Policy</b> — current Deny &gt; Ask &gt; Allow rules (read-only view)</td>
 </tr>
 </table>
 
 ```bash
-go run ./cmd/claw-dashboard          # → http://127.0.0.1:8091（唯讀）
-COGITO_DASH_CHAT=1 go run ./cmd/claw-dashboard   # 額外開啟寫入能力（見下）
+go run ./cmd/claw-dashboard          # → http://127.0.0.1:8091 (read-only)
+COGITO_DASH_CHAT=1 go run ./cmd/claw-dashboard   # additionally enables write capability (see below)
 ```
 
-**綁 loopback、無認證**——遠端存取請走 SSH tunnel（`ssh -L 8091:127.0.0.1:8091 <host>`），綁非 loopback 位址會**拒絕啟動**（remote 認證尚未實作）。
+**Loopback-bound, no auth** — for remote access use an SSH tunnel (`ssh -L 8091:127.0.0.1:8091 <host>`); binding a non-loopback address **refuses to start** (remote auth is not implemented).
 
-| 頁面 | 內容 |
+| Page | Contents |
 |---|---|
-| **Runs** | 一次 query 的完整執行樹：ReAct 迴圈、工具呼叫、子 agent 協同，逐步可展開 |
-| **Metrics** | 總花費、各平台／各模型的 token 與成本切片（自帶，不依賴 Langfuse） |
-| **Skills** | 生效中的技能（`.claw/skills/`），可展開看正文 |
-| **Cron** | 排程任務：新增／編輯／立即執行／推播設定（見下節） |
-| **Governance** | 自我進化的提案佇列：技能晉升、記憶放行、調參套用 |
-| **Platform** | provider／模型／MCP servers／金鑰輪替／權限政策／護欄，多數可就地編輯 |
-| **Chat** | 內嵌 operator chat，就地驅動 agent（逐字串流） |
+| **Runs** | The full execution tree of one query: ReAct loop, tool calls, subagent collaboration, expandable step by step |
+| **Metrics** | Total spend, token and cost slices per platform/model (built in, no Langfuse dependency) |
+| **Skills** | Active skills (`.claw/skills/`), bodies expandable |
+| **Cron** | Schedules: create / edit / run now / push settings (next section) |
+| **Governance** | The self-evolution proposal queue: skill promotion, memory approval, parameter application |
+| **Platform** | Provider / model / MCP servers / key rotation / permission policy / guardrails, mostly editable in place |
+| **Chat** | Embedded operator chat driving the agent in place (token streaming) |
 
-`COGITO_DASH_CHAT=1` 才開啟**寫入能力**（chat 會真的跑 bash／寫檔；cron 也才會觸發）。需同時設 `COGITO_SESSION_DIR`。
+`COGITO_DASH_CHAT=1` enables **write capability** (chat really runs bash / writes files; cron only fires with it too). Also requires `COGITO_SESSION_DIR`.
 
-### Cron（排程任務）
+### Cron (scheduled tasks)
 
-到點自動把任務交給 agent 執行，標準 5-field cron 運算式。在面板 `/cron` 新增即可。
+Hands tasks to the agent on schedule, standard 5-field cron expressions. Create them on the panel's `/cron` page.
 
 ```bash
-CRON_TZ=Asia/Taipei                          # 排程解讀時區（雲端機器多為 UTC，建議明設）
-COGITO_CRON_NOTIFY=telegram:123456789        # 結果推播；多目標逗號分隔，可同時送 Slack
-COGITO_CRON_NOTIFY_ERRORS_ONLY=1             # 只在失敗時推播
+CRON_TZ=Asia/Taipei                          # scheduling timezone (cloud machines are usually UTC; set it explicitly)
+COGITO_CRON_NOTIFY=telegram:123456789        # result push; comma-separated multi-target, Slack included
+COGITO_CRON_NOTIFY_ERRORS_ONLY=1             # push only on failure
 ```
 
-排程器住在**常駐行程**：`cmd/claw`（bot）與 dashboard 各跑一個，共用 `.claw/cron.json`，靠檔案鎖（`flock`）仲裁——**同一輪只有一個真的執行**。因此關掉面板，只要 bot 還在，排程照跑。
+The scheduler lives in **resident processes**: `cmd/claw` (the bot) and the dashboard each run one, sharing `.claw/cron.json` and arbitrated by a file lock (`flock`) — **only one fires per tick**. Close the panel and schedules still run as long as the bot is up.
 
-- 錯過的排程**會補跑一次**（停三天也只補一次）；適合「每天提醒我」，不適合「定時輪詢」。
-- 執行結果推播含**來源標記**（bot／dashboard），執行樹在 `/runs/cron-<id>`。
-- 排程任務是**無人值守**的：需審批的高危操作會被自動拒絕（見下節）。
+- A missed schedule is **made up exactly once** (down three days = one make-up run); good for "remind me daily", not for "poll every N minutes".
+- Result pushes carry the **execution source** (bot/dashboard); run trees live at `/runs/cron-<id>`.
+- Scheduled tasks are **unattended**: operations that need approval are automatically rejected (next section).
 
-### 工具權限政策（Deny > Ask > Allow）
+### Tool permission policy (Deny > Ask > Allow)
 
-預設行為：命中內建高危黑名單 → 需人工審批（Slack 回 `approve`/`reject`）；其餘放行。
+Default behavior: hits on the built-in high-risk blacklist → human approval (reply `approve`/`reject` in Slack); everything else is allowed.
 
-要「某工具**永遠**不准」（不問任何人）才需要政策檔 `workspace/.claw/policy.json`：
+Only "tool X is **never** allowed (ask nobody)" needs a policy file, `workspace/.claw/policy.json`:
 
 ```json
 {"rules": [
-  {"tool": "bash", "action": "deny", "reason": "本部署禁用 shell"},
-  {"tool": "bash", "match": "curl .*\\| *sh", "action": "deny", "reason": "管道執行遠端腳本"},
+  {"tool": "bash", "action": "deny", "reason": "shell disabled in this deployment"},
+  {"tool": "bash", "match": "curl .*\\| *sh", "action": "deny", "reason": "piping remote scripts into a shell"},
   {"tool": "write_file", "action": "ask"}
 ]}
 ```
 
-- 裁決 **Deny > Ask > Allow**，**與規則順序無關**。
-- **無人值守**（排程任務）時 Ask 一律視為 Deny——沒有人可以問的時候，「等人回答」不是安全。
-- 政策檔格式或正則有錯 → **啟動即中止**，不靜默忽略（否則會以為有保護、其實沒載入）。
-- 面板 `/platform` 可檢視現行政策（唯讀；改檔需重啟）。
+- Verdicts follow **Deny > Ask > Allow**, **independent of rule order**.
+- **Unattended** runs (cron) treat Ask as Deny — when no one can answer, "waiting for an answer" is not safety.
+- A malformed policy file or bad regex → **abort at startup**, never silently ignored (otherwise you'd believe you're protected while nothing loaded).
+- The panel's `/platform` shows the active policy (read-only; file changes need a restart).
 
 ## Development
 
 ```bash
-go test ./...      # 執行測試
-go vet ./...       # 靜態檢查
-go build ./...     # 建置
+go test ./...      # run tests
+go vet ./...       # static checks
+go build ./...     # build
 ```
 
-### `cmd/` 導覽
+### A guide to `cmd/`
 
-| 目錄 | 是什麼 | 什麼時候用 |
+| Directory | What it is | When to use it |
 |---|---|---|
-| **`claw`** | 常駐 bot（Slack／Telegram）＋內建排程 | 正式跑一個「員工」 |
-| **`claw-cli`** | 一次性任務執行 | 腳本／OS crontab／CI |
-| **`claw-dashboard`** | 維運面板（loopback） | 回放執行樹、改技能／排程／政策／金鑰 |
-| **`bench`** | 評測跑分＋參數自調提案 | 改了 prompt／參數想知道有沒有變好 |
-| **`dashboard`** | bench 報告檢視器（另一支，埠 8090） | 看歷次跑分趨勢 |
-| **`ingest`** | 把 md 目錄 ingest 成知識圖譜 | 餵長期記憶語料 |
-| **`skillgate`** | 技能把關／晉升的 CLI 版 | 想寫進腳本時（面板 `/governance` 是 UI 版） |
-| **`claw-demo-mcp`** | 不經 LLM 直接連 MCP、列工具、`-call` 打一個 | **MCP 壞掉時二分問題在哪** |
-| `claw-demo-oom` | 上下文壓縮眼見為憑（自帶巨型檔 fixture） | 想看懂 Compactor 在幹嘛 |
+| **`claw`** | Resident bot (Slack/Telegram) + built-in scheduler | Running an "employee" for real |
+| **`claw-cli`** | One-shot task execution | Scripts / OS crontab / CI |
+| **`claw-dashboard`** | Ops panel (loopback) | Replaying run trees; editing skills/schedules/policy/keys |
+| **`bench`** | Eval runner + parameter-tuning proposals | You changed a prompt/parameter and want to know if it helped |
+| **`dashboard`** | Bench-report viewer (separate tool, port 8090) | Watching score trends across runs |
+| **`ingest`** | Ingest a markdown directory into the knowledge graph | Feeding long-term memory corpora |
+| **`skillgate`** | CLI for skill gating/promotion | When you want it scriptable (the panel's `/governance` is the UI version) |
+| **`claw-demo-mcp`** | Connect to MCP without an LLM, list tools, `-call` one | **Bisecting where the problem is when MCP breaks** |
+| `claw-demo-oom` | Context compression, seen with your own eyes (giant-file fixture included) | Understanding what the Compactor actually does |
 
-前七支是實用入口；後兩支是**教學／診斷** harness，各自演示一個難用嘴講清楚的機制。
-它們演示的能力都另有測試在守（`context/compactor_test.go`、`mcp/*_test.go`），
-所以是**輔助理解**，不是驗收路徑。
+The first seven are practical entrypoints; the last two are **teaching/diagnostic** harnesses, each demonstrating a mechanism that's hard to explain in words.
+The capabilities they demonstrate are guarded by real tests elsewhere (`context/compactor_test.go`, `mcp/*_test.go`),
+so they aid understanding — they are not acceptance paths.
 
-> 已移除的 demo：`claw-demo`（session 隔離）、`claw-demo-trace`（OTel span）、
-> `claw-demo-observability`（成本追蹤）、`claw-demo-subagent`（子 agent 隔離）。
-> 判準都是同一條——**有別的東西把同一件事呈現得更好**：面板的執行樹回放、Langfuse 的甘特圖、
-> 面板 Metrics 頁，以及（子 agent）執行樹的「subagent 協同」節點＋office 投影裡看得到
-> NPC 被徵用、回報、回座位。留下來的兩支則沒有替代品：壓縮在任何 UI 上都看不見，
-> MCP 診斷是唯一不經 LLM 的連線驗證路徑。
+> Removed demos: `claw-demo` (session isolation), `claw-demo-trace` (OTel spans),
+> `claw-demo-observability` (cost tracking), `claw-demo-subagent` (subagent isolation).
+> One criterion for all: **something else now shows the same thing better** — the panel's run-tree replay, Langfuse's Gantt view,
+> the panel's Metrics page, and (for subagents) the run tree's collaboration nodes plus the office projection where you can watch
+> NPCs get drafted, report back, and return to their desks. The two that remain have no substitute: compression is invisible in any UI,
+> and MCP diagnosis is the only LLM-free connection check.
 
-### 評測（eval）：分三層，因為它們測的不是同一件事
+### Evals: three layers, because they measure different things
 
-常見的誤解是「評測就是測模型能力」。SWE-bench 這類基準測的是**模型 × harness 的乘積**，
-單一分數**分不開兩者的貢獻**。所以這裡分三層——前兩層評自己的機制，第三層只當外部座標。
+A common misconception is "evals measure model capability". Benchmarks like SWE-bench measure the **model × harness product** —
+a single score **cannot attribute credit** between the two. Hence three layers: the first two evaluate our own mechanisms; the third is only an external reference point.
 
-| 層 | 測什麼 | 模型的角色 | 成本 | 實測結果 |
+| Layer | Measures | The model's role | Cost | Results |
 |---|---|---|---|---|
-| **① 檢索** `hit@k`/MRR | **純 harness** | **完全不參與** | $0 | keyword **0.50** → embedding **0.58** → keyword+KG **1.00** |
-| **② A/B 消融** | harness 的**邊際貢獻** | 固定，當背景 | ~$0.03/配對 | 見下 |
-| **③ SWE-bench** | 模型 × harness | 混在一起 | ~$0.24/題 | 5 題 astropy 子集：haiku resolved **1**、opus resolved **4**（errors 0；**n=5、p=0.206 未達顯著**） |
+| **① Retrieval** `hit@k`/MRR | **Pure harness** | **Not involved at all** | $0 | keyword **0.50** → embedding **0.58** → keyword+KG **1.00** |
+| **② A/B ablations** | The harness's **marginal contribution** | Fixed, held as background | ~$0.03/pair | Below |
+| **③ SWE-bench** | Model × harness | Entangled | ~$0.24/instance | 5-instance astropy subset: haiku resolved **1**, opus resolved **4** (errors 0; **n=5, p=0.206, not significant**) |
 
-**② 的兩個消融，改善的維度剛好相反**（模型固定 haiku）：
+**The two ablations in ② improve opposite dimensions** (model fixed at haiku):
 
-| | 通過率 | 回合中位數 | 成本中位數 | 證據強度 |
+| | Pass rate | Median turns | Median cost | Evidence strength |
 |---|---|---|---|---|
-| **記憶** off→on（n=5） | 5/5 → 5/5 | 8 → **3** | $0.0342 → **$0.0116**（−66%） | **高**：5/5 一致、on 側變異為 0 |
-| **技能** off→on（**n=20**） | **7/20 → 15/20** | 4 → 4 | $0.0145 → $0.0159（+9.7%） | **高**：Fisher **p=0.0248 達顯著** |
+| **Memory** off→on (n=5) | 5/5 → 5/5 | 8 → **3** | $0.0342 → **$0.0116** (−66%) | **High**: 5/5 consistent, zero variance on the on side |
+| **Skills** off→on (**n=20**) | **7/20 → 15/20** | 4 → 4 | $0.0145 → $0.0159 (+9.7%) | **High**: Fisher **p=0.0248, significant** |
 
-> **記憶改善效率、技能改善正確性——兩條現在都是結論，不是觀察。**
-> 技能那條原本 n=5（1/5→4/5、p=0.206 未達顯著）只能當觀察，2026-08-05 補到 n=20 後達顯著。
-> 補樣本同時推翻了 n=5 的三個幅度估計（回合 +1 的觀察消失、成本從 +35% 降到 +9.7%）——
-> **顯著性檢定內建在 `cmd/bench -ab-n` 裡**，不是事後手算。
+> **Memory improves efficiency, skills improve correctness — both are now conclusions, not observations.**
+> The skills row started at n=5 (1/5→4/5, p=0.206, not significant) and could only be an observation; expanded to n=20 on 2026-08-05, it reached significance.
+> The larger sample also overturned all three of the n=5 effect-size estimates (the "+1 turn" observation vanished; the cost penalty dropped from +35% to +9.7%) —
+> **significance testing is built into `cmd/bench -ab-n`**, not hand-computed after the fact.
 >
-> 逐次原始數據、n=5 與 n=20 的逐項對照、以及本輪犯過的方法論錯誤，見 **[docs/eval-results.md](docs/eval-results.md)**。
+> Raw per-run data, the n=5 vs n=20 item-by-item comparison, and the methodological mistakes made along the way: **[docs/eval-results.md](docs/eval-results.md)**.
 
 ```bash
-# ① 檢索評測（$0、十幾秒、完全不呼叫 LLM）
-#    embedding 那列需先建向量快取，否則該模式會整個跳過（顯示 N=0）
-go run ./cmd/ingest -root internal/eval/testdata/mem_multihop -embed   # 需 COGITO_EMBED_MODEL + 端點
+# ① Retrieval eval ($0, ~15 seconds, never calls an LLM)
+#    The embedding row needs a vector cache first, or that mode is skipped entirely (shows N=0)
+go run ./cmd/ingest -root internal/eval/testdata/mem_multihop -embed   # needs COGITO_EMBED_MODEL + endpoint
 go run ./cmd/ingest -root internal/eval/testdata/mem_multihop \
   -eval internal/eval/testdata/mem_multihop/labels.jsonl -k 3 -hops 1
 
-# ② A/B 消融：同一任務、同一模型，只切換一個 harness 功能
-go run ./cmd/bench -mem-ab                          # 有／無相關記憶
-go run ./cmd/bench -skill-ab                        # 有／無綁定技能（單次）
-go run ./cmd/bench -skill-ab -ab-n 20 -out ./bench-reports   # n=20：2×2 表 + Fisher p 值 + 原始資料落檔
+# ② A/B ablation: same task, same model, toggling exactly one harness feature
+go run ./cmd/bench -mem-ab                          # with/without relevant memory
+go run ./cmd/bench -skill-ab                        # with/without a bound skill (single run)
+go run ./cmd/bench -skill-ab -ab-n 20 -out ./bench-reports   # n=20: 2×2 table + Fisher p + raw data on disk
 
-# ③ SWE-bench：生成與評測【分離】——cogito 只產 patch，判定交給官方 harness + 官方映像
-go run ./cmd/bench -swebench .swebench/lite.jsonl -limit 5 -predictions preds.jsonl   # 生成（花 API 錢）
+# ③ SWE-bench: generation and evaluation are SEPARATE — cogito only produces patches; verdicts come from the official harness + official images
+go run ./cmd/bench -swebench .swebench/lite.jsonl -limit 5 -predictions preds.jsonl   # generate (spends API money)
 python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Lite \
-  --predictions_path preds.jsonl --run_id my-run                                      # 判定（本地 Docker、免費）
+  --predictions_path preds.jsonl --run_id my-run                                      # evaluate (local Docker, free)
 ```
 
-完整跑法見 **[docs/swebench-runbook.md](docs/swebench-runbook.md)**。
+Full instructions: **[docs/swebench-runbook.md](docs/swebench-runbook.md)**.
 
-多跳語料是刻意設計的：**答案節點與查詢字面零重疊**，純關鍵字撈不到，只有沿 `[[link]]` 擴張的
-知識圖譜撈得到。並附**防作弊護欄**——若有人把語料改到 keyword 也能滿分，測試會失敗
-（`memeval_test.go`），讓 `0.50 vs 1.00` 不會因語料退化而變成假勝利。
+The multi-hop corpus is engineered on purpose: **answer nodes share zero surface text with the queries** — pure keyword search cannot reach them;
+only knowledge-graph expansion along `[[link]]`s can. It also ships an **anti-cheat guard** — if the corpus ever degrades so keyword search
+also scores perfect, a test fails (`memeval_test.go`), so `0.50 vs 1.00` can't quietly become a hollow win.
 
-**向量檢索補跑後（bge-m3）只到 0.58**——離 KG 的 1.00 還很遠。多跳題的答案節點跟查詢在語意上
-也不像，它只是**被連到**像的那個；向量相似度走不了 A→B→C，那是圖的工作。所以贏的是
-「沿關係擴張」這個機制，不是「更好的相似度函數」。
+**A later vector-retrieval run (bge-m3) reached only 0.58** — far from the KG's 1.00. In a multi-hop question, the answer node isn't
+semantically similar to the query either; it's merely **linked to** the one that is. Vector similarity can't walk A→B→C; that's a graph's job.
+What wins is the mechanism "expand along relations", not a better similarity function.
 
-#### 同一把尺也量自己
+#### The same ruler, applied to ourselves
 
-技能 A/B 補到 n=20 之後，**n=5 的三個幅度估計全部被推翻**：off 側通過率從 20% 回歸到 35%、
-「多花一個回合」的觀察直接消失、成本代價從 +35% 降到 +9.7%。效應方向撐住了，
-但沒有一個數字經得起原本的說法。
+After the skills A/B was expanded to n=20, **all three n=5 effect-size estimates were overturned**: the off-side pass rate regressed
+from 20% to 35%, the "one extra turn" observation vanished outright, and the cost penalty dropped from +35% to +9.7%.
+The direction of the effect held; not one number survived at its original size.
 
-於是同一把尺立刻回頭量到自己身上——**SWE-bench 的 opus 4/5 vs haiku 1/5，Fisher `p=0.206`，
-與技能 A/B 補樣本前是同一張 2×2 表。** 既然剛證明 n=5 不可信，就不能回頭把它寫成
-「pass@1 80%」。所以那條在上表裡標的是「未達顯著」，不是分數。
+Which immediately turned the ruler on ourselves — **SWE-bench's opus 4/5 vs haiku 1/5 is Fisher `p=0.206`, the very same 2×2 table
+the skills A/B had before its sample was expanded.** Having just proven n=5 untrustworthy, we can't turn around and write it up as
+"pass@1 80%". So that row is labeled "not significant" in the table above — not presented as a score.
 
-工具因此把**樣本門檻放在 p 值之前**：`n < 10`（沿用 `evolve.MinVerifySamples`）一律印
-「樣本不足」，不管 p 多小——小樣本碰巧顯著給出的假安心，比沒有數字更危險。
+The tool therefore puts the **sample floor before the p-value**: `n < 10` (reusing `evolve.MinVerifySamples`) always prints
+"insufficient sample", no matter how small p is — false assurance from a lucky small sample is more dangerous than no number at all.
 
-### 跑分與儀表板
+### Benchmarks & dashboards
 
 ```bash
-# 1) 跑分（真實 API、需 ANTHROPIC_API_KEY）並輸出 JSON 報告
+# 1) Run the suite (real API, needs ANTHROPIC_API_KEY) and emit a JSON report
 go run ./cmd/bench -model claude-haiku-4-5 -out ./bench-reports
-# CI 門檻：通過率低於 0.8 即以非 0 退出碼結束 → 讓 CI job 失敗
+# CI gate: pass rate below 0.8 exits non-zero → fails the CI job
 go run ./cmd/bench -out ./bench-reports -min-pass-rate 0.8
-# Reflexion：失敗的用例反思出教訓、最多重試 3 次（每次重試多花 API）
+# Reflexion: failed cases reflect into lessons and retry up to 3 times (each retry spends API)
 go run ./cmd/bench -reflexion 3 -out ./bench-reports
-# 參數自調：依跑分指標產出調參提案（→ workspace/.claw/config.proposed.json，不自動套用）
+# Auto-tuning: propose parameters from run metrics (→ workspace/.claw/config.proposed.json, never auto-applied)
 go run ./cmd/bench -tune -out ./bench-reports
 
-# 2) 視覺化：讀報告目錄、開儀表板（成功率 / 逐用例回合·試錯·成本·耗時 / 歷次趨勢）
+# 2) Visualize: read the report directory, open the dashboard (pass rates / per-case turns·retries·cost·latency / trends)
 go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
 ```
 
-### SWE-bench（公認 agentic coding benchmark）
+### SWE-bench (the canonical agentic-coding benchmark)
 
-同一套評測框架可直接跑 [SWE-bench](https://www.swebench.com/)：每個實例是一個真實 GitHub issue → 修補。loader 把實例映射到既有三段式 `TestCase`，**評測方法論對齊官方、且防作弊**：
+The same eval framework runs [SWE-bench](https://www.swebench.com/) directly: each instance is a real GitHub issue → patch. The loader maps instances onto the existing three-phase `TestCase`, **methodology aligned with the official harness and anti-cheat by construction**:
 
-| 階段 | 對應 | 防作弊關鍵 |
+| Phase | Maps to | Anti-cheat key |
 |---|---|---|
-| **Setup** | `clone` 到 `base_commit`，**不含** `test_patch` | agent 解題時看不到驗證測試 |
-| **Task** | 只給 `problem_statement`（issue） | 黃金 `patch` / 測試**不進** prompt，無從照抄 |
-| **Validate** | **跑完才** `git apply test_patch` → 跑 `FAIL_TO_PASS`(+`PASS_TO_PASS`) | 測試在 agent 之後才套，改不到 |
+| **Setup** | `clone` at `base_commit`, **without** `test_patch` | The agent never sees the verification tests while solving |
+| **Task** | Only the `problem_statement` (the issue) | The gold `patch` / tests **never enter** the prompt — nothing to copy |
+| **Validate** | Only **after the run**: `git apply test_patch` → run `FAIL_TO_PASS` (+`PASS_TO_PASS`) | Tests are applied after the agent finishes — unreachable, unmodifiable |
 
 ```bash
-# 離線 dry-run：印出每個實例的 Setup/Task/Validate 計畫——不呼叫 LLM、不 clone、不花錢
+# Offline dry-run: print each instance's Setup/Task/Validate plan — no LLM, no clone, no cost
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -dry-run
 
-# 真跑（需 ANTHROPIC_API_KEY；會 clone repo + 跑測試，逐題計成本）
+# Real run (needs ANTHROPIC_API_KEY; clones repos + runs tests, cost tracked per instance)
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 ```
 
-> 各 repo 的 Python 環境差異大，正式跑建議在官方 SWE-bench Docker 映像內執行（依賴已備）；`-swe-env-setup '<bash>'` 可覆蓋每個實例的環境安裝步驟。agent 只用 `read_file`/`write_file`/`edit_file`/`bash` 解題（無 SWE-bench 專用工具）。
+> Python environments vary wildly across repos; for serious runs use the official SWE-bench Docker images (dependencies prebuilt). `-swe-env-setup '<bash>'` overrides the per-instance environment setup. The agent solves with nothing but `read_file`/`write_file`/`edit_file`/`bash` (no SWE-bench-specific tools).
 
-**實測（2026-07）**：`scripts/run_swebench_lite.sh` 一鍵跑通官方 Docker harness。
-haiku 在 5 個 astropy 實例上 **resolved 1、errors 0**——樣本太小，不宣稱任何 pass rate，
-它的用途是證明整條 pipeline 是真的（真 repo、真 issue、官方 harness、F2P/P2P 雙向驗收）。
-成本實測 **$0.24/題、117 秒/題**（約 67 秒是 clone），故擴大到 30 題約 $7.3 / 1 小時。
+**Measured (2026-07)**: `scripts/run_swebench_lite.sh` runs the official Docker harness end to end.
+haiku on 5 astropy instances: **resolved 1, errors 0** — far too small a sample to claim any pass rate;
+its purpose is proving the pipeline is real (real repos, real issues, official harness, F2P/P2P two-way acceptance).
+Measured cost: **$0.24/instance, 117 s/instance** (~67 s of that is cloning), so scaling to 30 instances ≈ $7.3 / 1 hour.
 
-> 🔎 **一個未驗證的觀察**：`MaxTurns=40`，但五題中四題在 **3~5 回合就自己收手**（不是被切斷）。
-> 推測是 `-swe-env-setup` 空著 → 沒裝依賴 → **跑不了測試 → 沒有回饋訊號可迭代**，agent 只能
-> 讀 issue、讀幾個檔、寫 patch 就無事可做（唯一花到 19 回合的那題正好是有東西可探索的）。
-> 若成立，**提分的最大槓桿是備妥測試環境，而不是換更強的模型**。尚未驗證。
+> 🔎 **An unverified observation**: `MaxTurns=40`, yet four of the five instances stopped on their own within **3–5 turns** (not cut off).
+> The suspected chain: `-swe-env-setup` was empty → no dependencies installed → **tests can't run → no feedback signal to iterate on** —
+> the agent can only read the issue, read a few files, write a patch, and then has nothing left to do (the one instance that used 19 turns
+> was exactly the one with something to explore). If this holds, **the biggest lever for the score is a working test environment, not a stronger model**. Unverified.
 
-### Plan Mode（長程任務斷點續傳）
+### Plan Mode (long-task resumption)
 
-長任務最大的敵人不是「不會規劃」，而是**上下文流失**（窗口壓縮、滑動窗口、行程重啟、被防線中斷）。Plan Mode 用**狀態外部化**對抗它：強制把計畫寫 `PLAN.md`、進度寫 `TODO.md`、做一步打勾一步；喚醒時先嗅探這兩個檔，從第一個未打勾項續跑。
+The worst enemy of a long task isn't "can't plan" — it's **context loss** (window compression, sliding windows, process restarts, breaker interruptions). Plan Mode fights it with **state externalization**: plans are forced into `PLAN.md`, progress into `TODO.md`, one checkbox ticked per completed step; on wake-up the agent sniffs both files and resumes from the first unchecked item.
 
 ```bash
-go run ./cmd/claw-cli -plan -dir ./workspace/proj -prompt "<多步驟長任務>"
+go run ./cmd/claw-cli -plan -dir ./workspace/proj -prompt "<a long multi-step task>"
 ```
 
-**實證（haiku）**：一個「依序建 6 檔」的任務，跑到第 4 步時用 SIGTERM 強制中斷 → 磁碟留下 `s1–s4` + `TODO.md` 前 4 項 `[x]`。**重啟一個全新行程（in-memory session 為空、零對話記憶）只說「繼續」** → agent 嗅探到 `PLAN.md`/`TODO.md`、讀出「已到第 4 步」、**只補做 s5/s6**（零重工）。計畫若只存在模型的 context 裡，重啟那刻就沒了；檔案化的計畫活了下來——**這個價值與模型多強無關**。預設關閉、`-plan` opt-in（短任務不需要）。
+**Demonstrated (haiku)**: a "create 6 files in order" task was SIGTERM-killed at step 4 → disk holds `s1–s4` + a `TODO.md` with 4 boxes ticked. **A brand-new process (empty in-memory session, zero conversational memory) told nothing but "continue"** → the agent sniffed `PLAN.md`/`TODO.md`, read off "step 4 done", and **built only s5/s6** (zero rework). A plan that lives only in the model's context dies at the moment of restart; the plan on disk survived — **and this value is independent of how strong the model is**. Off by default; `-plan` opt-in (short tasks don't need the ceremony).
 
-### Loop Engineering（goal 迴圈 + 心跳）
+### Loop engineering (goal loop + heartbeat)
 
 ```bash
-# goal 迴圈：跑到 bash 驗證通過為止（退出碼 0 = 達成）。verify 輸出當下一輪反饋，自動重試。
+# Goal loop: run until the bash verification passes (exit 0 = achieved). Verify output feeds the next attempt.
 go run ./cmd/claw-cli -session fix-bug \
-  -prompt "修好 ./app 的編譯錯誤" \
+  -prompt "fix the build errors in ./app" \
   -verify "cd ./app && go build ./..." -max-attempts 5
 
-# 心跳（一次性 CLI）：OS 的 crontab 直接叫 claw-cli。零額外元件，適合「這台機器上跑一個腳本」。
-# 0 8 * * 1-5  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session daily-triage -prompt "拉昨日 CI 失敗，挑出可修的，逐一處理"
+# Heartbeat (one-shot CLI): let the OS crontab call claw-cli directly. Zero extra components — right for "one script on this machine".
+# 0 8 * * 1-5  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session daily-triage -prompt "pull yesterday's CI failures, pick the fixable ones, work through them"
 
-# 定期覆盤：每週一早上審閱近 7 天互動，蒸餾技能/慣例提案（retrospect 技能＝覆盤 playbook，
-# 產物只進 skills-proposed/ 與 AGENTS.proposed.md 提案通道，人工放行才生效）：
-# 0 8 * * 1  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session retrospect -prompt "用 read_skill 讀 retrospect 技能，照著覆盤近 7 天"
+# Weekly retrospective: every Monday morning, review the last 7 days and distill skill/convention proposals
+# (the retrospect skill is the playbook; output goes only to the skills-proposed/ and AGENTS.proposed.md channels, live only after human approval):
+# 0 8 * * 1  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session retrospect -prompt "read the retrospect skill with read_skill and run the 7-day review"
 ```
 
-**OS crontab vs 內建排程**：原本的立場是「不在 app 內造排程器」，後來補了[內建 cron](#cron排程任務)——但**不是取代**，兩者定位不同：
+**OS crontab vs built-in cron**: the original stance was "no scheduler inside the app"; the [built-in cron](#cron-scheduled-tasks) came later — but **not as a replacement**. They serve different deployments:
 
-| | OS crontab + `claw-cli` | 內建 cron |
+| | OS crontab + `claw-cli` | Built-in cron |
 |---|---|---|
-| 適合 | 這台機器跑一個腳本 | 已經有常駐 bot／面板的部署 |
-| 額外元件 | 零 | 需要 bot 或 dashboard 跑著 |
-| 要看結果 | 自己導 log | 面板有執行樹、可推播到 Slack／Telegram |
-| 改排程 | 編 crontab | 面板上點 |
+| Right for | One script on one machine | Deployments already running the bot/panel |
+| Extra components | Zero | Needs the bot or dashboard resident |
+| Seeing results | Redirect logs yourself | Run trees on the panel, push to Slack/Telegram |
+| Changing schedules | Edit crontab | Click on the panel |
 
-只跑 CLI 就用 OS crontab，別為了排程多養一個行程。
+If all you run is the CLI, use the OS crontab — don't keep an extra process alive just to schedule.
 
-### 切換 LLM Provider
+### Switching LLM providers
 
 ```bash
-# 預設 Claude（需 ANTHROPIC_API_KEY；可選 CLAUDE_MODEL）
+# Default: Claude (needs ANTHROPIC_API_KEY; optional CLAUDE_MODEL)
 go run ./cmd/claw-cli -prompt "..."
 
-# OpenAI 或任何 OpenAI 相容端點（本地 vLLM / Ollama / OpenRouter / Groq…）
+# OpenAI or any OpenAI-compatible endpoint (local vLLM / Ollama / OpenRouter / Groq…)
 export COGITO_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
-export OPENAI_BASE_URL=https://api.openai.com/v1   # 或 http://localhost:8000/v1 等
+export OPENAI_BASE_URL=https://api.openai.com/v1   # or http://localhost:8000/v1, etc.
 export OPENAI_MODEL=gpt-4o-mini
 go run ./cmd/claw-cli -prompt "..."
 ```
 
-### 具名子 agent（`.claw/agents/*.md`）
+### Named subagents (`.claw/agents/*.md`)
 
-把「單一探路者」擴成一組專才：在 `<workspace>/.claw/agents/<name>.md` 用 frontmatter 定義角色，主 agent 呼叫 `spawn_subagent` 時帶 `agent_type` 即可派出。複用同一套隔離委派 + 能力沙箱機制，可並行派多路。
+Grow the single scout into a team of specialists: define roles in `<workspace>/.claw/agents/<name>.md` frontmatter, and the main agent dispatches them by passing `agent_type` to `spawn_subagent`. Same isolated delegation + capability sandbox; parallel dispatch supported.
 
-這就是導言說的「數位員工背後的專家隊」：員工只有一個（進駐 IM 的主 agent），專才是它按需派遣的臨時編組——角色**定義**持久（本目錄的 `.md`），**實例**用完即棄、記憶外部化（工作區檔案 / 技能 / `.claw/memory`），不留常駐狀態，每次派遣都乾淨可重現。
+This is the "team of specialists behind the digital employee" from the introduction: there is one employee (the main agent living in your IM), and the specialists are temporary details it drafts on demand — role **definitions** persist (the `.md` files here), **instances** are disposable, memory is externalized (workspace files / skills / `.claw/memory`), no resident state, every dispatch clean and reproducible.
 
 ```markdown
 ---
 name: code-reviewer
-description: 從正確性/安全/可讀性審查程式碼變更，只讀不改
-tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集，省略＝沿用預設探索工具
-model: claude-opus-4-8          # 可選；該 agent 用的模型（省略＝沿用主引擎模型）
-effort: high                    # 可選；low/medium/high → 輸出 token 上限 2048/4096/8192
-isolation: worktree             # 可選；在 git worktree 隔離執行，完事把 diff apply 回主工作區
+description: Reviews code changes for correctness/security/readability; read-only
+tools: [read_file, bash]        # optional; narrows to a subset of the subagent toolset; omitted = default scout tools
+model: claude-opus-4-8          # optional; the model for this agent (omitted = main engine's model)
+effort: high                    # optional; low/medium/high → output-token caps 2048/4096/8192
+isolation: worktree             # optional; run in an isolated git worktree, apply the diff back on completion
 ---
-你是資深 code reviewer。用 read_file 與 bash 閱讀變更，從正確性/安全/可讀性審查。
-每個問題給 file:line + 一句話問題 + 最小修法；沒問題就說「無明顯問題」。完成後輸出精煉報告。
+You are a senior code reviewer. Read the changes with read_file and bash; review for correctness/security/readability.
+For each issue give file:line + a one-sentence problem + the minimal fix; if clean, say "no obvious issues". Output a distilled report.
 ```
 
-- `agent_type` 未指定 → 預設探路者（**唯讀** `read_file`+`bash`），行為與過去一致。
-- **可寫的實作型 agent**：在 `tools` 明確宣告 `write_file` / `edit_file`，該 agent 就能改檔（例如 `implementer` 這類實作型角色）。寫入是 **opt-in**——沒宣告就拿不到，且照走審批 middleware（敏感寫入 `.env`/`.git`/絕對路徑仍需人工放行）、檔案工具在工具層硬擋逃出工作區。
-- `tools` 只能是子 agent 工具超集（`read_file`/`bash`/`write_file`/`edit_file`）的子集，不含 `spawn_subagent`（杜絕遞迴）。
-- 可用清單會自動列進 `spawn_subagent` 的工具說明，讓模型知道有哪些角色可派。
-- **選模型 / effort**：`model` 讓探路用便宜快的（haiku）、審查用強的（opus）分層；`effort` 調輸出深度（token 上限）。provider 支援才生效，成本仍記進同一 session。effort 是輸出上限的粗略代理，非 extended-thinking。
-- **worktree 隔離**（`isolation: worktree`）：可寫 agent 在 base 的 git worktree 隔離跑，完事把 diff **序列化 apply 回主工作區**——這樣一輪並行多個可寫 agent 也不會相互覆蓋（各寫各的 worktree，回寫一個一個來）。前提：workspace 是 git repo（否則自動降級為共享工作區）、host 執行模式（docker sandbox 下 bash 掛在 base 容器，與 worktree 檔案隔離不完全對齊）。回寫衝突時，diff 會附在子 agent 報告裡交主 agent 處理。
-- **背景/非同步委派**（`background: true`）：丟背景池非同步跑、立即回一個 ID（如 `bg-1`），主 agent 可先繼續、之後用 `subagent_result`（帶 id）取結果、`subagent_list` 看全部。per-session 池、有並發上限與保留式清理（對齊背景 bash 的 TaskManager）。背景模式在**共享工作區** silent 跑（不做 worktree 隔離）；要並行隔離寫入請用同步的 `isolation: worktree`。
-- **per-agent 長期記憶**（`.claw/agents/<name>/memory/`）：具名 agent 有自己的記憶目錄，spawn 時其記錄（記憶格式同 `.claw/memory`）會注入該子 agent 的 role prompt——讓專員跨 spawn「記得」過往同類任務的沉澱，而不污染主 context、也不與其他 agent 互見。目前是**讀半邊**（記憶靠手寫填）；**寫半邊**（跑後自動反思→per-agent 提案→治理放行）為後續（見 [docs/multi-tenancy.md](docs/multi-tenancy.md)）。
+- No `agent_type` → the default scout (**read-only** `read_file`+`bash`), behavior unchanged from before.
+- **Writable implementation agents**: declare `write_file` / `edit_file` in `tools` and that agent can modify files (e.g. an `implementer` role). Writes are **opt-in** — undeclared means unavailable — and still pass the approval middleware (sensitive writes to `.env`/`.git`/absolute paths still need a human), with tool-layer containment against workspace escape.
+- `tools` may only be a subset of the subagent tool superset (`read_file`/`bash`/`write_file`/`edit_file`), never `spawn_subagent` (no recursion).
+- The available roster is auto-listed in `spawn_subagent`'s tool description, so the model knows who it can dispatch.
+- **Model / effort selection**: `model` lets scouts run cheap-and-fast (haiku) while reviewers run strong (opus); `effort` tunes output depth (token caps). Takes effect when the provider supports it; costs still land in the same session. Effort is a rough proxy via output caps, not extended thinking.
+- **Worktree isolation** (`isolation: worktree`): a writable agent runs in a git worktree off base and its diff is **applied back serially** — so several writable agents in one round can't clobber each other (each writes its own worktree; write-backs go one at a time). Preconditions: the workspace is a git repo (otherwise it degrades to the shared workspace) and host execution mode (under the Docker sandbox, bash is attached to the base container, which doesn't align with worktree file isolation). On write-back conflicts, the diff is attached to the subagent's report for the main agent to resolve.
+- **Background / async delegation** (`background: true`): runs in a background pool, immediately returning an ID (e.g. `bg-1`); the main agent continues, later collects with `subagent_result` (by id) or lists with `subagent_list`. Per-session pool, concurrency cap, retention-based cleanup (mirroring background bash's TaskManager). Background mode runs silently in the **shared workspace** (no worktree isolation); for parallel isolated writes use synchronous `isolation: worktree`.
+- **Per-agent long-term memory** (`.claw/agents/<name>/memory/`): a named agent has its own memory directory; on spawn, its records (same format as `.claw/memory`) are injected into the subagent's role prompt — specialists "remember" past work of their kind across spawns without polluting the main context or seeing each other's memory. Currently **read-only** (records are hand-written); the **write half** (post-run reflection → per-agent proposals → governance approval) is future work (see [docs/multi-tenancy.md](docs/multi-tenancy.md)).
 
-#### 編排模式（Orchestrator）——model-driven、零框架碼
+#### Orchestration (model-driven, zero framework code)
 
-「主 agent 規劃 → 分派子 agent（並行/串行）→ 審查 → 糾錯 → 整合」這種 orchestration**就是 ReAct**：主 agent 的「行動」是 `spawn_subagent`、子 agent 的報告是「觀察」，據此迭代到達成。cogito **不需要 workflow DAG 引擎**（那是 framework-driven、偏離 ReAct）；要讓主 agent 可靠地進入這個模式，寫一個 **`orchestrate` 技能**（`.claw/skills/orchestrate/SKILL.md`，內容是編排 playbook）即可——主 agent 碰到複雜任務時 `read_skill` 讀它、照著把 `implementer`/`code-reviewer` 等具名 agent 編排起來。**純 prompt、零引擎改動、與 per-agent 選模型和 worktree 隔離自然疊加**（例如 orchestrator 用大模型、worker 用小模型）。
+"Main agent plans → dispatches subagents (parallel/serial) → reviews → corrects → integrates" — that orchestration **is ReAct**: the main agent's "action" is `spawn_subagent`, the subagent's report is the "observation", and it iterates to completion. cogito **needs no workflow-DAG engine** (that would be framework-driven, a departure from ReAct). To make the main agent enter this mode reliably, write an **`orchestrate` skill** (`.claw/skills/orchestrate/SKILL.md`, an orchestration playbook) — on a complex task the main agent `read_skill`s it and marshals `implementer`/`code-reviewer` and friends accordingly. **Pure prompt, zero engine changes, composes naturally with per-agent model selection and worktree isolation** (e.g. a big-model orchestrator over small-model workers).
 
-這個模式的一次實跑（[`demo/mission-control`](demo/mission-control/) 的多視角 code review）：orchestrator 同一輪並行派出三個窄專員各審一個面向、隔離 context，最後整合成上線判斷。兩個護欄是框架層而非 prompt 求來的——**工具邊界**由註冊表 `Subset` 擋（三專員 `[read_file, bash]`、連 `write_file` 都沒有）、**政策 Deny＝目標終止**（任一工具被拒即終止回報，不給 agent 改寫繞過的空間）。**流程圖見 [Architecture → 圖解](#圖解詳版流程圖)。**
+A real run of this pattern ([`demo/mission-control`](demo/mission-control/): multi-perspective code review): the orchestrator dispatches three narrow specialists in parallel within one turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict. Both guardrails are framework-level, not prompt-begged — the **tool boundary** is enforced by the registry's `Subset` (the three specialists get `[read_file, bash]`, not even `write_file`), and **policy Deny = goal termination** (any denied tool ends the run with a report, leaving no room to rephrase around the block). **Flowchart: [Architecture → Diagrams](#diagrams-detailed-flowcharts).**
 
-### 跑多個員工（多實例，零程式碼）
+### Running multiple employees (multi-instance, zero code)
 
-> **多租戶架構**：這是「硬租戶」——一行程一租戶、完整隔離。另有「軟租戶」（一行程內 per-conversation，
-> 檔案/對話/成本天生隔離，記憶可 `COGITO_MEMORY_SCOPE=channel` 開隔離）。兩層的完整隔離矩陣與信任邊界見
-> **[docs/multi-tenancy.md](docs/multi-tenancy.md)**。
+> **Multi-tenancy**: this is "hard tenancy" — one process per tenant, full isolation. There is also "soft tenancy" (per-conversation within one process: files/conversations/costs isolated by construction; memory optionally via `COGITO_MEMORY_SCOPE=channel`). The full isolation matrix and trust boundaries: **[docs/multi-tenancy.md](docs/multi-tenancy.md)**.
 
-導言說 cogito 是「一名數位員工」——要一個團隊，就**每個員工一個目錄**。`claw` 從當前目錄載 `.env`、工作區固定在 `<當前目錄>/workspace`，所以一個目錄就是一個完整隔離的員工：自己的 IM 身分（bot token）、自己的人格與技能庫（`workspace/.claw/`）、自己的記憶與會話（`COGITO_SESSION_DIR`）、自己的白名單與模型設定。
+The introduction called cogito "a digital employee" — for a team, run **one directory per employee**. `claw` loads `.env` from the current directory and fixes the workspace at `<cwd>/workspace`, so one directory is one fully isolated employee: its own IM identity (bot token), its own personality and skill library (`workspace/.claw/`), its own memory and sessions (`COGITO_SESSION_DIR`), its own allowlist and model settings.
 
 ```bash
-go install ./cmd/claw          # binary 裝一次（$GOBIN），到處可用
+go install ./cmd/claw          # install the binary once ($GOBIN), use it anywhere
 
-# 員工一：coder（自己的 Telegram bot、opus、可寫的實作型 agents）
+# Employee one: coder (its own Telegram bot, opus, writable implementation agents)
 mkdir -p ~/agents/coder && cd ~/agents/coder
-cp /path/to/cogito-agent/.env.example .env   # 填「這個員工自己的」bot token / 白名單 / 模型
-mkdir -p workspace/.claw/{agents,skills}      # 這個員工的角色與技能庫
-claw                                          # coder 上工（.env 與 workspace 都取自當前目錄）
+cp /path/to/cogito-agent/.env.example .env   # fill in THIS employee's bot token / allowlist / model
+mkdir -p workspace/.claw/{agents,skills}      # this employee's roles and skill library
+claw                                          # coder clocks in (.env and workspace both come from the cwd)
 
-# 員工二：reviewer（另一個 bot token、唯讀工具集）——另開目錄、另起 process，互不相識
+# Employee two: reviewer (another bot token, read-only toolset) — another directory, another process, mutual strangers
 cd ~/agents/reviewer && claw
 ```
 
-- **隔離即邊界**：員工間技能/記憶/會話完全不共享——coder 學會的東西 reviewer 不會。要共享，顯式共享（見下）。
-- **「聘僱」一個預訓員工**：`workspace/.claw/`（agents/skills/memory）全是純文字檔——打包成 git repo 就是可分發的員工檔案，`git clone` 進新目錄＝到職（帶著角色與技能、記憶空白）。**secrets（`.env`）永遠不進 repo。**
+- **Isolation is the boundary**: employees share no skills/memory/sessions — what coder learns, reviewer doesn't know. Sharing is explicit (below).
+- **"Hiring" a pre-trained employee**: `workspace/.claw/` (agents/skills/memory) is all plain text — packaged as a git repo it becomes a distributable employee profile, and `git clone` into a fresh directory is onboarding (roles and skills included, memory blank). **Secrets (`.env`) never enter the repo.**
 
 ```bash
 git clone github.com/you/reviewer-claw ~/agents/reviewer/workspace/.claw
 ```
 
-- 對照：這與 Hermes Agent 的 Profiles（"Running Multiple Agents"）同構——每員工一個 home directory。cogito 不需要專用 profile CLI：**目錄即 profile**。
+- For comparison: this is isomorphic to Hermes Agent's Profiles ("Running Multiple Agents") — one home directory per employee. cogito needs no profile CLI: **the directory is the profile**.
 
-### 技能自生成 + 把關
+### Skill self-generation + gating
 
 ```bash
-# 1) 開啟自生成（技能 + 專案記憶）：產物只進暫存區、不自動生效
-export COGITO_SKILL_SYNTH=1      # 可複用流程 → .claw/skills-proposed/
-export COGITO_MEMORY_SYNTH=1     # 耐久專案慣例/雷點 → .claw/AGENTS.proposed.md（review 後併入 AGENTS.md）
-go run ./cmd/claw-cli -session t1 -prompt "<會用到某個可複用流程的任務>"
+# 1) Enable self-generation (skills + project memory): output is staged only, never live on its own
+export COGITO_SKILL_SYNTH=1      # reusable flows → .claw/skills-proposed/
+export COGITO_MEMORY_SYNTH=1     # durable conventions/pitfalls → .claw/AGENTS.proposed.md (merge into AGENTS.md after review)
+go run ./cmd/claw-cli -session t1 -prompt "<a task that exercises some reusable flow>"
 
-# 2) 把關 review：列出提案技能 + 確定性把關（結構 + 危險指令/憑證黑名單）
+# 2) Gated review: list proposed skills + deterministic gate (structure + dangerous-command/credential blacklist)
 go run ./cmd/skillgate
 
-# 3) 晉升：把關通過才移到 .claw/skills/ 生效（危險/不合格者一律被拒）
-go run ./cmd/skillgate -promote <技能名>   # 名稱＝skills-proposed/ 下的資料夾名
+# 3) Promote: only what passes moves into .claw/skills/ (dangerous/malformed proposals are refused)
+go run ./cmd/skillgate -promote <skill-name>   # the folder name under skills-proposed/
 ```
 
-CI：[`.github/workflows/ci.yml`](.github/workflows/ci.yml) 每次 push/PR 跑 gofmt/vet/build/`test -race`（無需 key）；[`benchmark.yml`](.github/workflows/benchmark.yml) 手動或每週排程跑分（需在 repo Secrets 設 `ANTHROPIC_API_KEY`），上傳 JSON 報告為 artifact。
+CI: [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs gofmt/vet/build/`test -race` on every push/PR (no key needed); [`benchmark.yml`](.github/workflows/benchmark.yml) runs the eval suite manually or on a weekly schedule (needs `ANTHROPIC_API_KEY` in repo Secrets) and uploads the JSON report as an artifact.
 
-## 文件索引
+## Documentation index
 
-原始碼之外的設計、協定與實測記錄都在 [`docs/`](docs/)。
+Design, protocols and measured results beyond the source live in [`docs/`](docs/). All of the documents below are currently written in Traditional Chinese.
 
-| 文件 | 內容 |
+| Document | Contents |
 |---|---|
-| [multi-tenancy.md](docs/multi-tenancy.md) | **多租戶架構**：硬租戶（一行程一租戶）vs 軟租戶（per-conversation）的兩層模型、逐維度隔離矩陣、`COGITO_MEMORY_SCOPE` 的記憶隔離 |
-| [office-protocol.md](docs/office-protocol.md) | **像素辦公室協定 v1**：三個 HTTP 端點、事件 `kind` 全集與欄位語意、傳遞保證（會掉幀、不反壓）、版本演進規則 |
-| [eval-results.md](docs/eval-results.md) | **三層評測結果**：檢索（0.50 → 0.58 → **1.00**）、記憶 A/B（步數 −66%）、技能 A/B（7/20→15/20，**p=0.0248 達顯著**，含 n=5 如何誤導的逐項對照）、SWE-bench（opus 4/5，**p=0.206 仍只當觀察**） |
-| [kg-spec.md](docs/kg-spec.md) | 知識圖譜規格：typed 關係、多跳檢索、提案邊的 gate |
-| [memory-stack-audit.md](docs/memory-stack-audit.md) | **記憶層自評**：對照流傳的「Agent Memory Stack」七層逐層攤開——六層有、shared memory 一層缺（含觸發條件），以及那套分類把放置策略/作用域混進內容種類的問題 |
-| [roadmap-next.md](docs/roadmap-next.md) | **待辦與已結案**（依「動它的風險」排序），每條附實測證據或延後理由 |
-| [tsnet-plan.md](docs/tsnet-plan.md) | 面板遠端存取（tsnet + WhoIs）的分 Phase action plan——**規劃、未實作**，含觸發條件 |
-| [memory-reconcile-format.md](docs/memory-reconcile-format.md) | **設計定案**：記憶整併的提案格式——提案通道怎麼表達 UPDATE/DELETE 這類破壞性操作，含三道護欄（畫像不可刪／舊值不符即拒／刪＝歸檔）。**未實作** |
-| [task-board-research.md](docs/task-board-research.md) | **設計研究**：同機多 agent 怎麼對齊。拆解 Hermes Kanban（狀態機＋原子認領＋單一寫入者），結論是「共享工作板」比「共享記憶」聰明。**觸發線已量測**（`scripts/subagent_briefing_cost.py`）：首測 $0.07、未達標 → 任務板先不做；但量測揪出「整份原始碼貼進 task_prompt」已修 |
-| [qm-learnings.md](docs/qm-learnings.md) | 對照 YC qm（2026-07 開源）的盤點：先釐清**它不是 harness 而是託管 harness 的上層平台**（45 個模組裡 harness 佔 1 個），再列抄什麼（記憶整併動作清單）、**不抄什麼**與理由——**規劃、未實作** |
-| [SECURITY.md](SECURITY.md) | **安全模型**：威脅模型假設、已實作的防線（逐條可查證）、以及 10 條**明確不防**的事——prompt injection、黑名單可繞過、host 模式 RCE 路徑、面板無遠端認證等 |
-| [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **事故記錄**：policy 擋下 `rm -rf` 後，agent 自行改寫命令繞過黑名單的逐步證據，與後續修復（拒絕＝目標終止） |
-| [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | demo 腳本：治理三幕 / 多 agent 並行 code review |
-| [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | SWE-bench 官方 harness 跑法、Plan Mode 斷點續傳演示 |
+| [multi-tenancy.md](docs/multi-tenancy.md) | **Multi-tenancy**: the two-layer model of hard (one process per tenant) vs soft (per-conversation) tenancy, the per-dimension isolation matrix, `COGITO_MEMORY_SCOPE` memory isolation |
+| [office-protocol.md](docs/office-protocol.md) | **Pixel-office protocol v1**: three HTTP endpoints, the full event `kind` set and field semantics, delivery guarantees (drops frames, no backpressure), versioning rules |
+| [eval-results.md](docs/eval-results.md) | **Three-layer eval results**: retrieval (0.50 → 0.58 → **1.00**), memory A/B (turns −66%), skills A/B (7/20→15/20, **p=0.0248 significant**, including how n=5 misled), SWE-bench (opus 4/5, **p=0.206, still an observation**) |
+| [kg-spec.md](docs/kg-spec.md) | Knowledge-graph spec: typed relations, multi-hop retrieval, the gate for proposed edges |
+| [memory-stack-audit.md](docs/memory-stack-audit.md) | **Memory-layer self-audit**: the circulating "Agent Memory Stack" seven layers unpacked one by one — six present, shared memory missing (with its trigger condition), and how that taxonomy conflates placement policy/scope with content kinds |
+| [roadmap-next.md](docs/roadmap-next.md) | **Open items and closed cases** (ordered by "risk of touching it"), each with measured evidence or a deferral rationale |
+| [tsnet-plan.md](docs/tsnet-plan.md) | Remote panel access (tsnet + WhoIs), a phased action plan — **planned, not implemented**, with trigger conditions |
+| [memory-reconcile-format.md](docs/memory-reconcile-format.md) | **Design decision**: the proposal format for memory reconciliation — how the proposal channel expresses destructive UPDATE/DELETE, with three guardrails (profiles undeletable / mismatched old value = reject / delete = archive). **Not implemented** |
+| [task-board-research.md](docs/task-board-research.md) | **Design research**: how multiple agents on one machine coordinate. Dissects Hermes's Kanban (state machine + atomic claiming + single writer); conclusion: a "shared task board" beats "shared memory". **The trigger line is measured** (`scripts/subagent_briefing_cost.py`): first reading $0.07, below threshold → no task board yet; but the measurement caught "the full source pasted into task_prompt", now fixed |
+| [qm-learnings.md](docs/qm-learnings.md) | Notes against YC's qm (open-sourced 2026-07): first establishing that **it isn't a harness but a platform hosting harnesses** (1 of its 45 modules), then what to copy (the memory-reconciliation action list), **what not to copy** and why — **planned, not implemented** |
+| [SECURITY.md](SECURITY.md) | **The security model**: threat-model assumptions, implemented defenses (each verifiable), and 10 things it **explicitly does not defend against** — prompt injection, blacklist bypasses, host-mode RCE paths, no remote panel auth, and more |
+| [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **Incident report**: after policy blocked `rm -rf`, the agent rewrote the command to slip the blacklist — step-by-step evidence and the fix (denial = goal termination) |
+| [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | Demo scripts: governance in three acts / parallel multi-agent code review |
+| [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | Running the official SWE-bench harness; the Plan Mode resumption demo |
 
 ## Contributing
 
-歡迎提交 Issue 與 Pull Request。提交前請先執行 `go test ./...` 和 `go vet ./...`。
+Issues and pull requests welcome. Please run `go test ./...` and `go vet ./...` before submitting.
 
 ## License
 
-以 [MIT License](LICENSE) 發佈。
+Released under the [MIT License](LICENSE).
