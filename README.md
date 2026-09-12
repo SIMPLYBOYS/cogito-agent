@@ -14,19 +14,19 @@
 
 # cogito-agent
 
-> A minimal autonomous agent framework in Go: it plugs a Claude-driven ReAct engine into Slack / Telegram and runs the think → tool call → observe loop autonomously inside a locked workspace — reading and writing files, executing commands, finishing real development tasks.
+> A minimal autonomous agent framework in Go. It plugs a Claude-driven ReAct engine into Slack / Telegram and runs the think → tool call → observe loop autonomously inside a locked workspace: reading and writing files, executing commands, finishing real development tasks.
 
-`cogito-agent` lets you @-mention or DM it on Slack / Telegram to hand over a task. It works autonomously inside its locked working directory and streams every thought, tool call and result back into the conversation — fully transparent, and you can step in at any time.
+`cogito-agent` lets you @-mention or DM it on Slack / Telegram to hand over a task. It works autonomously inside its locked working directory and streams every thought, tool call and result back into the conversation. Everything is visible, and you can step in at any time.
 
-Think of it as a **digital employee embedded in your team**: it lives in your IM, remembers what you've discussed (sessions persist across restarts + long-term memory), asks before doing anything dangerous (approvals), and keeps an auditable record of what it spent (cost tracking). Given a complex task, it dispatches its own team of specialists — planner, code-reviewer, security-auditor, implementer and other [named subagents](#named-subagents-clawagentsmd) — working in parallel, reviewing and correcting each other, then reporting back an integrated result. One employee, a whole team of specialists behind it.
+Think of it as a **digital employee embedded in your team**: it lives in your IM, remembers what you've discussed (sessions persist across restarts + long-term memory), asks before doing anything dangerous (approvals), and keeps an auditable record of what it spent (cost tracking). Given a complex task, it dispatches its own team of specialists: planner, code-reviewer, security-auditor, implementer and other [named subagents](#named-subagents-clawagentsmd). They work in parallel, review and correct each other, and report back an integrated result. One employee, a whole team of specialists behind it.
 
-> What this project is and is not — its differentiation and development priorities — is laid out in [POSITIONING.md](POSITIONING.md).
+> What this project is and is not, its differentiation and its development priorities are laid out in [POSITIONING.md](POSITIONING.md).
 
 ## Demo
 
 ![cogito-agent demo](docs/brag.gif)
 
-▶ Full version (HD, pausable): [docs/brag.mp4](docs/brag.mp4) — dangerous-command approval interception → cost/trace → self-evolution gated on your approval.
+▶ Full version (HD, pausable): [docs/brag.mp4](docs/brag.mp4). It shows a dangerous command intercepted for approval, the cost/trace view, and self-evolution waiting for your sign-off.
 
 ## Features
 
@@ -35,46 +35,46 @@ Think of it as a **digital employee embedded in your team**: it lives in your IM
 - 🧠 **Multi-provider**: one `LLMProvider` interface; Claude by default, one switch away from any OpenAI-compatible endpoint (OpenAI / vLLM / Ollama / OpenRouter / Groq…).
 
 **Built-in tools** (all confined to the locked workspace)
-- `read_file` / `write_file` / `edit_file` / `bash` (30s timeout, merged stdout/stderr) — four minimal primitives.
-- 🧭 **`spawn_subagent`**: delegate a subtask to an isolated subagent — isolated context, parallel dispatch, skills can be bound into the sub-context. Supports **named agents** (`agent_type`) — define roles/toolsets in `.claw/agents/<name>.md` frontmatter (code-reviewer, planner, security-auditor…); leave it unset and you get the default scout.
+- Four minimal primitives: `read_file` / `write_file` / `edit_file` / `bash` (30s timeout, merged stdout/stderr).
+- 🧭 **`spawn_subagent`**: hands a subtask to a subagent with its own context; dispatch several in parallel, and bind skills into the sub-context when useful. Supports **named agents** (`agent_type`), defined as roles/toolsets in `.claw/agents/<name>.md` frontmatter (code-reviewer, planner, security-auditor…); leave it unset and you get the default scout.
 - ⏱️ **Background tasks**: throw long commands (dev servers, long builds/training) into the background; poll output or kill them across turns; per-session pools, a concurrency cap, and the same dangerous-command approvals.
-- 🔎 **`search_sessions`**: keyword search over **past conversations** (cross-session / cross-channel, Chinese and English), returning **bounded** digests — when, which session, how much it cost, matching snippets. "Have we handled this before / how did we solve it last time?" no longer means grepping raw session JSON yourself.
+- 🔎 **`search_sessions`**: keyword search over **past conversations** (cross-session / cross-channel, Chinese and English), returning **bounded** digests: when, which session, how much it cost, matching snippets. "Have we handled this before / how did we solve it last time?" no longer means grepping raw session JSON yourself.
 - 🔌 **Pluggable registry + wrap-around middleware**: implement `BaseTool` and it's registered; middleware hooks in approvals / timing and more.
 
 **Harness engineering (runaway control)**
-- 📄 **[SECURITY.md](SECURITY.md) — what it defends against and, more importantly, [what it does not](SECURITY.md#-不防什麼)**: prompt injection is explicitly out of scope, the command blacklist is bypassable (with a real incident on record), and host-mode bash is an RCE path onto the host. Follow the last section of that doc before going live.
-- 🔒 **Entry authorization (fail-closed)**: only user ids on `COGITO_ALLOWED_USERS` may drive the agent from Slack/Telegram; unset = deny everyone. High-risk approvals are restricted to `COGITO_ADMIN_USERS`, so a requester can never self-approve. **Set the allowlist before going live** (see [.env.example](.env.example)) — an unrestricted bot entry plus tool execution equals RCE for anyone.
-- 🛡️ **Human-in-the-loop approval for dangerous commands**: calls matching the blacklist (`rm -rf` / `sudo` / `kill`…) are suspended and pushed to Slack until an admin replies `approve` / `reject`. File tools (read/write/edit) hard-block workspace escapes at the tool layer — `..` traversal, absolute paths, **and symlinks** (resolved to the deepest existing ancestor, then prefix re-verified) — no reliance on approvals that could be bypassed.
-- 📦 **Pluggable sandbox (OS-level hard isolation)**: `bash` can run under a Docker executor — one container per session, mounting only that session's directory, `--network none`, memory/CPU/PID limits.
-- 🚦 **Runaway circuit breakers**: a turn cap and a per-task cost cap (two hard breakers) + infinite-loop fingerprint detection (a soft intervention: on a hit, inject a "break out and try differently" reminder instead of aborting). Human intervention is a ladder too — when you see it drifting, `/steer` interjects a correction first (without discarding the money already burned); `stop` is the last rung.
+- 📄 **[SECURITY.md](SECURITY.md): what it defends against and, more importantly, [what it does not](SECURITY.md#-不防什麼)**. Prompt injection is explicitly out of scope, the command blacklist is bypassable (with a real incident on record), and host-mode bash is an RCE path onto the host. Follow the last section of that doc before going live.
+- 🔒 **Entry authorization (fail-closed)**: only user ids on `COGITO_ALLOWED_USERS` may drive the agent from Slack/Telegram; unset = deny everyone. High-risk approvals are restricted to `COGITO_ADMIN_USERS`, so a requester can never self-approve. **Set the allowlist before going live** (see [.env.example](.env.example)): an unrestricted bot entry plus tool execution equals RCE for anyone.
+- 🛡️ **Human-in-the-loop approval for dangerous commands**: calls matching the blacklist (`rm -rf` / `sudo` / `kill`…) are suspended and pushed to Slack until an admin replies `approve` / `reject`. File tools (read/write/edit) hard-block workspace escapes at the tool layer: `..` traversal, absolute paths, **and symlinks** (resolved to the deepest existing ancestor, then prefix re-verified). None of this relies on approvals that could be bypassed.
+- 📦 **Pluggable sandbox (OS-level hard isolation)**: `bash` can run under a Docker executor. One container per session, mounting only that session's directory, `--network none`, memory/CPU/PID limits.
+- 🚦 **Runaway circuit breakers**: a turn cap and a per-task cost cap (two hard breakers) + infinite-loop fingerprint detection (a soft intervention: on a hit, inject a "break out and try differently" reminder instead of aborting). Human intervention is a ladder too: when you see it drifting, `/steer` interjects a correction first, without discarding the money already burned; `stop` is the last rung.
 - ⚡ **Tool concurrency limits** + 🩹 **error self-healing**: on tool errors, a "here's what to do next" rescue guide is injected.
 
 **Context engineering**
 - 🗜️ **Adaptive compression**: the compression watermark is set from the model's true context window and self-calibrates each round from the returned `PromptTokens`.
 - 🪟 **Sliding window + system prompt assembly**: identity / discipline / `AGENTS.md` / skills; supports **Plan Mode** (state externalized to `PLAN.md` / `TODO.md`, resumable after interruption) and **progressive skill loading** (index only; bodies on demand).
-- 👤 **User profile layer (always resident)**: memories tagged `tags: [user]` keep their **bodies in the prompt every round** instead of waiting for `recall` — by the time the model thinks to look up "he hates that pattern", the code is usually already written. Quota-capped (12 entries / 2000 chars), stable name ordering (a frozen prefix that doesn't break the prompt cache), and over-quota entries are dropped whole rather than truncated (truncation can turn "don't do X" into "do X"). Distilled as a side stream of the same reflection LLM call — no extra spend.
-- 🧠 **Retrievable long-term memory (knowledge graph)**: memories are discrete records; the system prompt holds only a capped index; `recall` returns a **connected subgraph** — the hits + their `[[link]]` neighborhoods + the relations among them (Chinese-bigram seeding, k-hop expansion), enabling multi-hop relational reasoning. Hits update the LRU; overflow auto-archives (recoverable, not deleted). Replaces "load all of `AGENTS.md` every round"; aligned with CoALA's long-term semantic layer.
-- 💾 **Session persistence (optional)**: conversation history and costs land on disk and are restored by ID after a restart; the same store is the corpus behind `search_sessions` — past conversations go from "can only be continued" to "can be looked up".
-- 🧬 **Self-evolution (optional, off by default)**: successful flows are reflected into reusable skills; successes and failures into project memories and tuning proposals — but **everything lands in a staging area and nothing takes effect on its own**: deterministic gating (structure + dangerous-command/credential scans) plus human approval to promote. The one exception is opt-in `COGITO_MEMORY_AUTOAPPLY`: narrow additive memories that pass all four criteria auto-apply, with a 72-hour undo window and one git commit per proposal for rollback.
+- 👤 **User profile layer (always resident)**: memories tagged `tags: [user]` keep their **bodies in the prompt every round** instead of waiting for `recall`. By the time the model thinks to look up "he hates that pattern", the code is usually already written. Quota-capped (12 entries / 2000 chars), stable name ordering (a frozen prefix that doesn't break the prompt cache), and over-quota entries are dropped whole rather than truncated (truncation can turn "don't do X" into "do X"). The profile is distilled as a side stream of the same reflection call, so it costs nothing extra.
+- 🧠 **Retrievable long-term memory (knowledge graph)**: memories are discrete records; the system prompt holds only a capped index; `recall` returns a **connected subgraph**: the hits, their `[[link]]` neighborhoods, and the relations among them (Chinese-bigram seeding, k-hop expansion). That is what makes multi-hop reasoning possible. Hits update the LRU; overflow auto-archives (recoverable, not deleted). Replaces "load all of `AGENTS.md` every round"; aligned with CoALA's long-term semantic layer.
+- 💾 **Session persistence (optional)**: conversation history and costs land on disk and are restored by ID after a restart. The same store is the corpus behind `search_sessions`: past conversations go from "can only be continued" to "can be looked up".
+- 🧬 **Self-evolution (optional, off by default)**: successful flows are reflected into reusable skills; successes and failures into project memories and tuning proposals. But **everything lands in a staging area and nothing takes effect on its own**: deterministic gating (structure + dangerous-command/credential scans) plus human approval to promote. The one exception is opt-in `COGITO_MEMORY_AUTOAPPLY`: narrow additive memories that pass all four criteria auto-apply, with a 72-hour undo window and one git commit per proposal for rollback.
 
-- 📚 **Verifiable architecture docs**: `verify_citations` makes the citations in agent-written `docs/wiki/` **checkable** — the citation format carries its own anchor (`〔path:line · a string those lines must contain〕`); the tool opens each file and compares, and a wrong line number is reported with the **actual** line. Pairs with the `repo-wiki` skill (chapter tree + concept→code-entity map + mermaid + only regenerate pages a change actually affects). **Why it exists**: we watched a cloud service generate architecture docs for a real repo where the `file:line` references were guessed — it claimed a function at line 438 when it lives at 498 (line 438 was an SVG). Forgivable for something outside the repo; your agent lives inside the repo — it has no excuse to guess.
+- 📚 **Verifiable architecture docs**: `verify_citations` makes the citations in agent-written `docs/wiki/` **checkable**. The citation format carries its own anchor (`〔path:line · a string those lines must contain〕`); the tool opens each file and compares, and a wrong line number is reported with the **actual** line. Pairs with the `repo-wiki` skill (chapter tree + concept→code-entity map + mermaid + only regenerate pages a change actually affects). **Why it exists**: we watched a cloud service generate architecture docs for a real repo where the `file:line` references were guessed. It claimed a function at line 438 when it lives at 498 (line 438 was an SVG). Forgivable for something outside the repo; your agent lives inside the repo, so it has no excuse to guess.
 
 **Integrations & observability**
-- 💬 **Multi-platform (Slack + Telegram)**: a transport-agnostic core (`internal/chatbot`) + thin transport layers; Slack over **Socket Mode**, Telegram over **getUpdates long polling** — both outbound, **no public URL / ngrok needed**. Both can run in one process; sessions/workdirs are namespaced by `platform:` prefix **by default** (with a deliberate exception under `COGITO_USER_LINK`, below); per-channel workspace isolation + per-WorkDir locks (same directory serializes, different channels run in parallel, effective across platforms).
+- 💬 **Multi-platform (Slack + Telegram)**: a transport-agnostic core (`internal/chatbot`) + thin transport layers; Slack over **Socket Mode**, Telegram over **getUpdates long polling**. Both are outbound: **no public URL / ngrok needed**. Both can run in one process; sessions/workdirs are namespaced by `platform:` prefix **by default** (with a deliberate exception under `COGITO_USER_LINK`, below); per-channel workspace isolation + per-WorkDir locks (same directory serializes, different channels run in parallel, effective across platforms).
   - **Addressing semantics match on both platforms**: DMs treat every message as a task; channels/groups only trigger on **@mention** (or a reply to the bot on Telegram), with the @ stripped automatically.
-- 🔗 **Cross-platform DM continuity** (`COGITO_USER_LINK`): declare one person's per-platform ids and a DM conversation started on Telegram can continue on Slack — same session history, with replies and approval prompts routed to whichever platform they spoke on last. DMs only; groups never merge.
-- 📡 **Live progress streaming** + 💰 **cost tracking**: thinking / tools / outcomes / final answers stream to the chat platform in real time, with tokens and USD accumulated per session; with `COGITO_OFFICE_URL` set, completion events carry the **actual cost** onto the pixel-office task card (zero/unknown is not sent — no painting $0 to pretend it's free).
-- 🧊 **Three prompt-caching breakpoints**: one ephemeral breakpoint each on `tools` / `system` / **the conversation tail**, plus an anchored window (full history while `EnableSummary` is on; an append-only prefix is what makes cache hits stable) — long conversations drop from thousands of full-price input tokens to **2 tk per round**. [Diagram](docs/diagrams/caching-breakpoints.svg)
+- 🔗 **Cross-platform DM continuity** (`COGITO_USER_LINK`): declare one person's per-platform ids and a DM conversation started on Telegram can continue on Slack. Same session history, with replies and approval prompts routed to whichever platform they spoke on last. DMs only; groups never merge.
+- 📡 **Live progress streaming** + 💰 **cost tracking**: thinking / tools / outcomes / final answers stream to the chat platform in real time, with tokens and USD accumulated per session; with `COGITO_OFFICE_URL` set, completion events carry the **actual cost** onto the pixel-office task card (zero/unknown is not sent; no painting $0 to pretend it's free).
+- 🧊 **Three prompt-caching breakpoints**: one ephemeral breakpoint each on `tools` / `system` / **the conversation tail**, plus an anchored window (full history while `EnableSummary` is on; an append-only prefix is what makes cache hits stable). Long conversations drop from thousands of full-price input tokens to **2 tk per round**. [Diagram](docs/diagrams/caching-breakpoints.svg)
 - 🔭 **OpenTelemetry tracing**: OTLP → Jaeger / Langfuse / Collector, LLM spans carry `gen_ai.*`; a zero-cost no-op when no endpoint is configured.
 - 🧩 **MCP integration (stdio + Streamable HTTP)**: load a `.mcp.json` to attach external MCP tool servers (local stdio or remote HTTP, e.g. Twinkle Hub); a gateway exposes them progressively instead of stuffing N full schemas into every round's context.
-- 🛠️ **Operator Dashboard** (`cmd/claw-dashboard`): a loopback-bound ops panel — run-tree replay, usage slicing, skills / cron / MCP / key rotation / permission policy, plus an embedded chat that drives the agent in place (token streaming).
-- ⏰ **Built-in cron**: dispatches tasks to the agent on schedule, with standard cron expressions + timezone; results push to Slack/Telegram (tagged with the execution source). The scheduler lives inside resident processes — the bot and the dashboard each run one, arbitrated by a file lock so only one actually fires.
-- 📊 **Three-layer evals (real numbers, negative results included)**: SWE-bench measures the model × harness product and cannot attribute credit between the two, so two extra layers evaluate the harness itself. **Retrieval** `hit@k` never calls an LLM — keyword 0.50 → embedding 0.58 → **keyword+KG 1.00** (a later vector-retrieval run only reached 0.58, proving the win is "expansion along relations", not a better similarity function). **A/B ablations** fix the model and toggle one feature — memory takes a task **from 8 to 3 turns, −66% cost**; skills lift pass rate **7/20 → 15/20** (Fisher **p=0.0248, significant** — only after expanding to n=20). **SWE-bench** on a 5-instance subset: opus resolved **4**, haiku 1 — but **n=5, p=0.206, not significant: reported as an observation, never written up as a score**. Significance testing is **built into the tool** (`-ab-n`), with a sample-size floor that comes before the p-value. [Results & interpretation →](docs/eval-results.md)
+- 🛠️ **Operator Dashboard** (`cmd/claw-dashboard`): a loopback-bound ops panel with run-tree replay, usage slicing, skills / cron / MCP / key rotation / permission policy, plus an embedded chat that drives the agent in place (token streaming).
+- ⏰ **Built-in cron**: dispatches tasks to the agent on schedule, with standard cron expressions + timezone; results push to Slack/Telegram (tagged with the execution source). The scheduler lives inside resident processes: the bot and the dashboard each run one, arbitrated by a file lock so only one fires.
+- 📊 **Three-layer evals (real numbers, negative results included)**: SWE-bench measures the model × harness product and cannot attribute credit between the two, so two extra layers evaluate the harness itself. **Retrieval** `hit@k` never calls an LLM: keyword 0.50 → embedding 0.58 → **keyword+KG 1.00** (a later vector-retrieval run only reached 0.58, proving the win is "expansion along relations", not a better similarity function). **A/B ablations** fix the model and toggle one feature: memory takes a task **from 8 to 3 turns, −66% cost**; skills lift pass rate **7/20 → 15/20** (Fisher **p=0.0248**, significant only after expanding to n=20). **SWE-bench** on a 5-instance subset: opus resolved **4**, haiku 1, but at **n=5, p=0.206** that is an observation, not a score. Significance testing is **built into the tool** (`-ab-n`), with a sample-size floor that comes before the p-value. [Results & interpretation →](docs/eval-results.md)
 
 **Safety boundaries**
-- 🛡️ **Deny > Ask > Allow permission model**: a declarative policy file (`.claw/policy.json`) can make a tool **never allowed**; verdicts are independent of rule order. **Unattended** runs (cron) treat Ask as Deny — when no one is there to answer, "waiting for an answer" is not safety.
-- 🔑 **Keys never reach child processes**: the agent's bash and MCP-server subprocesses receive only allowlisted environment variables; `ANTHROPIC_API_KEY` and friends are unreadable (MCP servers are mostly third-party npx packages — this closes a supply-chain exposure).
-- 🚧 **Read-only control plane**: file tools may not write into `.claw/` (skills / memory / guardrails / schedules) — otherwise the agent could promote its own skills, lift its own cost cap, and schedule itself, bypassing the entire human-approval chain.
+- 🛡️ **Deny > Ask > Allow permission model**: a declarative policy file (`.claw/policy.json`) can make a tool **never allowed**; verdicts are independent of rule order. **Unattended** runs (cron) treat Ask as Deny.
+- 🔑 **Keys never reach child processes**: the agent's bash and MCP-server subprocesses receive only allowlisted environment variables; `ANTHROPIC_API_KEY` and friends are unreadable (MCP servers are mostly third-party npx packages; this closes a supply-chain exposure).
+- 🚧 **Read-only control plane**: file tools may not write into `.claw/` (skills / memory / guardrails / schedules). Otherwise the agent could promote its own skills, lift its own cost cap, and schedule itself, bypassing the entire human-approval chain.
 
 ## Architecture
 
@@ -181,12 +181,12 @@ flowchart TB
   LLM -.recall fetches a connected subgraph, k-hop neighborhood + relations, hits update LRU.-> MEM
 ```
 
-- **Static layer** ([composer.go](internal/context/composer.go)): identity/discipline hard-coded, layered with Plan Mode, `AGENTS.md`, the skills index and the memory index (all progressive — tables of contents, no bodies) — built once per Execute.
+- **Static layer** ([composer.go](internal/context/composer.go)): identity/discipline hard-coded, layered with Plan Mode, `AGENTS.md`, the skills index and the memory index (all progressive: tables of contents, no bodies), built once per Execute.
 - **Long-term memory** ([memory.go](internal/context/memory.go)): discrete records in `.claw/memory/`, a capped resident index, and a `recall` tool that fetches bodies on demand (Chinese bigrams); hits update the LRU, overflow archives to `.claw/memory-archive/` (recoverable). Replaces "load all of `AGENTS.md`".
-  - **Two tiers**: records tagged `tags: [user]` go through the **user profile** — bodies inlined into the static layer, resident every round (name-sorted for a stable prefix); everything else stays progressive (index only, bodies on `recall`). Records beyond the profile quota remain in the index and reachable via `recall`.
-- **Past conversations** ([session_search.go](internal/context/session_search.go)): the core of `search_sessions`. It shares `recall`'s lexer (alphanumeric whole words + CJK bigrams), linearly scans persisted sessions, and returns **bounded** output (≤3 snippets × 160 chars per session, 5 sessions by default, 20 max) — read the session file itself when you need the details.
+  - **Two tiers**: records tagged `tags: [user]` go through the **user profile**: bodies inlined into the static layer, resident every round (name-sorted for a stable prefix). Everything else stays progressive (index only, bodies on `recall`). Records beyond the profile quota remain in the index and reachable via `recall`.
+- **Past conversations** ([session_search.go](internal/context/session_search.go)): the core of `search_sessions`. It shares `recall`'s lexer (alphanumeric whole words + CJK bigrams), linearly scans persisted sessions, and returns **bounded** output (≤3 snippets × 160 chars per session, 5 sessions by default, 20 max). Read the session file itself when you need the details.
 - **Dynamic layer** ([session.go](internal/context/session.go) `GetWorkingMemory`): takes the last 20 messages, strips orphan `tool_result`s, and prepends a `user` turn if needed to satisfy Anthropic's strict alternation.
-- **Three lines of defense**: the Compactor guards volume (the [75% watermark](internal/context/compactor.go)), the sliding window guards count, and stripping/patching guards the protocol — all applied to the outgoing copy only; `history` is never mutilated.
+- **Three lines of defense**: the Compactor guards volume (the [75% watermark](internal/context/compactor.go)), the sliding window guards count, and stripping/patching guards the protocol. All three apply to the outgoing copy only; `history` itself is never modified.
 - **Self-calibrating feedback**: each round corrects the byte/token ratio using the real `PromptTokens`, so the estimate converges on the tokenizer and adapts to models with different windows.
 
 Directory layout:
@@ -250,15 +250,15 @@ internal/
 
 The two mermaid charts above are the skeleton; the three draw.io figures below zoom into key subsystems (editable sources linked — drag them back into [draw.io](https://app.diagrams.net) to modify). Figure labels are in Traditional Chinese.
 
-**Multi-agent orchestration flow** — the orchestrator dispatches three narrow specialists in parallel within a single turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict; both guardrails (tool boundary = registry Subset, policy Deny = goal termination) are framework-level, not prompt-begged. Source: [`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)
+**Multi-agent orchestration flow**: the orchestrator dispatches three narrow specialists in parallel within a single turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict. Both guardrails (tool boundary = registry Subset, policy Deny = goal termination) live in the framework, not in the prompt. Source: [`orchestration-flow.drawio`](demo/mission-control/diagrams/orchestration-flow.drawio)
 
 ![Multi-agent orchestration flow: orchestrator → three parallel specialists in one turn → integrated verdict](demo/mission-control/diagrams/orchestration-flow.svg)
 
-**Three prompt-caching breakpoints + anchored window** — one ephemeral breakpoint per payload layer, with breakpoint ③ extending the cacheable prefix to the conversation tail; long conversations drop from thousands of full-price input tokens to 2 tk per round. Source: [`caching-breakpoints.drawio`](docs/diagrams/caching-breakpoints.drawio)
+**Three prompt-caching breakpoints + anchored window**: one ephemeral breakpoint per payload layer, with breakpoint ③ extending the cacheable prefix to the conversation tail; long conversations drop from thousands of full-price input tokens to 2 tk per round. Source: [`caching-breakpoints.drawio`](docs/diagrams/caching-breakpoints.drawio)
 
 ![Prompt-caching breakpoints and anchored window, with before/after cache-read patterns](docs/diagrams/caching-breakpoints.svg)
 
-**Multi-tenancy isolation matrix** — hard tenancy (one process per tenant) vs soft tenancy (per-conversation within one process), dimension by dimension: files/conversations/costs isolated by construction; skills/memory/credentials/authorization shared by default (memory can opt into isolation). Full discussion in [docs/multi-tenancy.md](docs/multi-tenancy.md). Source: [`tenancy-matrix.drawio`](docs/diagrams/tenancy-matrix.drawio)
+**Multi-tenancy isolation matrix**: hard tenancy (one process per tenant) vs soft tenancy (per-conversation within one process), dimension by dimension. Files/conversations/costs are isolated by construction; skills/memory/credentials/authorization are shared by default (memory can opt into isolation). Full discussion in [docs/multi-tenancy.md](docs/multi-tenancy.md). Source: [`tenancy-matrix.drawio`](docs/diagrams/tenancy-matrix.drawio)
 
 ![Multi-tenancy isolation matrix: hard vs soft tenancy, isolation/sharing per dimension](docs/diagrams/tenancy-matrix.svg)
 
@@ -292,29 +292,29 @@ Variables:
 | `TELEGRAM_BOT_TOKEN` | (optional, multi-platform) Telegram Bot Token from @BotFather; when set, getUpdates long polling runs in the same process as Slack |
 | `COGITO_ALLOWED_USERS` | **(must be set on servers)** Comma-separated allowlist of user ids that may drive the agent. Unset = fail-closed, all inbound denied. Telegram = numeric id, Slack = ids starting with `U` |
 | `COGITO_ADMIN_USERS` | (optional) Who may `approve`/`reject` high-risk operations (comma-separated); unset = falls back to `COGITO_ALLOWED_USERS`. Set it to enforce "requester ≠ approver" |
-| `COGITO_USER_LINK` | (optional) **Cross-platform DM continuity**: declare one person's ids across platforms (`=` joins a group, commas separate groups, e.g. `771163423=U0AABBCC`). That person's **DMs** on Telegram / Slack then share one conversation state (session/workdir/busy lock) — start on Telegram, continue on Slack, history intact; replies and approval prompts go to the platform they last spoke on. Groups never merge (channel context belongs to the channel). Must be explicit — this is a trust declaration; the system never guesses |
-| `.claw/pricing.json` (a file, not an env var) | (optional) **Custom pricing** (USD per million tokens): `{"claude-x": {"input": 10, "output": 50}}`. The built-in table is the default; this file layers on top — the official `/v1/models` **returns no prices**, so you maintain them yourself, but new models no longer require a rebuild. Changes apply without restart. Prices must be positive (0 would make the `MaxCostUSD` breaker never fire, so it's skipped). It lives in `.claw/` because agent writes are already blocked there — the power to change prices is the power to lift your own cost cap |
+| `COGITO_USER_LINK` | (optional) **Cross-platform DM continuity**: declare one person's ids across platforms (`=` joins a group, commas separate groups, e.g. `771163423=U0AABBCC`). That person's **DMs** on Telegram / Slack then share one conversation state (session/workdir/busy lock): start on Telegram, continue on Slack, history intact; replies and approval prompts go to the platform they last spoke on. Groups never merge (channel context belongs to the channel). Must be explicit: this is a trust declaration, and the system never guesses |
+| `.claw/pricing.json` (a file, not an env var) | (optional) **Custom pricing** (USD per million tokens): `{"claude-x": {"input": 10, "output": 50}}`. The built-in table is the default; this file layers on top. The official `/v1/models` **returns no prices**, so you maintain them yourself, but new models no longer require a rebuild. Changes apply without restart. Prices must be positive (0 would make the `MaxCostUSD` breaker never fire, so it's skipped). It lives in `.claw/` because agent writes are already blocked there: the power to change prices is the power to lift your own cost cap |
 | `COGITO_PRICE_INPUT_USD` / `COGITO_PRICE_OUTPUT_USD` | (optional) Fallback pricing for unregistered models (USD per million tokens), keeping the cost breaker effective on non-Claude endpoints; unset = opus-tier 5/25 |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | (optional) OTLP trace endpoint, pointing at Jaeger / Langfuse / an OTel Collector; unset = tracing is a no-op |
 | `OTEL_EXPORTER_OTLP_HEADERS` | (optional) OTLP auth headers, e.g. Langfuse's `Authorization=Basic <base64(pk:sk)>` |
 | `OTEL_TRACES_EXPORTER` | (optional) `console` prints spans to the terminal (local debugging, no backend needed) |
 | `COGITO_MCP_CONFIG` | (optional) Path to a `.mcp.json`; loads and connects external MCP tool servers |
-| `COGITO_MCP_TIMEOUT` | (optional) Per-call MCP timeout in seconds, default 300 (5 min). A **hang backstop**, not a performance policy — remote tools may legitimately be slow, but a server that accepts the connection and never responds would hold an engine concurrency token forever (the turn/cost breakers only check **between** turns; they can't save a task stuck inside one call). `0` = unlimited (old behavior) |
+| `COGITO_MCP_TIMEOUT` | (optional) Per-call MCP timeout in seconds, default 300 (5 min). A **hang backstop**, not a performance policy: remote tools may legitimately be slow, but a server that accepts the connection and never responds would hold an engine concurrency token forever (the turn/cost breakers only check **between** turns; they can't save a task stuck inside one call). `0` = unlimited (old behavior) |
 | `COGITO_SESSION_DIR` | (optional) Session persistence directory; required for restart resumption and for the panel's `/runs` to see the bot's run trees (checkpoint granularity = one turn) |
 | `COGITO_AUTO_RESUME` | (optional) `1` = auto-resume: transient interruptions retry with backoff while the process lives; after a hard kill, restart scans for unfinished tasks and resumes them (each capped at 3 attempts to prevent loops). Cross-restart resumption also needs `COGITO_SESSION_DIR` |
 | `COGITO_SUMMARY` | (optional) `off` disables the rolling summary for conversational entrypoints (on by default). **Note**: the summary is what enables the [anchored window](#context-engineering-how-each-rounds-prompt-is-assembled), which is the precondition for prompt-caching breakpoint ③ to hit |
 | `COGITO_MEMORY_SCOPE` | (optional) `channel` = long-term memory **isolated per conversation** (skills still shared); default `global` shares across conversations. See [docs/multi-tenancy.md](docs/multi-tenancy.md) |
-| `COGITO_REFLECT_MODEL` | (optional) **Run background reflection on a cheaper model** (skill/memory/KG distillation). It runs after the task ends, nobody is waiting, and the output still needs human approval — no reason to burn the main model. Deliberately does **not** cover the goal judge (that acceptance check affects task outcomes) |
+| `COGITO_REFLECT_MODEL` | (optional) **Run background reflection on a cheaper model** (skill/memory/KG distillation). It runs after the task ends, nobody is waiting, and the output still needs human approval; no reason to burn the main model. Deliberately does **not** cover the goal judge (that acceptance check affects task outcomes) |
 | `COGITO_SKILL_SYNTH` / `COGITO_MEMORY_SYNTH` / `COGITO_KG_SYNTH` | (optional) `1` enables the three kinds of self-evolution reflection: proposed skills / proposed memories (successful conventions + failure lessons) / proposed KG relations. **All output is staged and requires human approval** |
-| `TAVILY_API_KEY` | (optional) Registers the `web_search` / `fetch_url` outbound-verification tools (Tavily; page fetches go through its /extract — fetching happens remotely, internal addresses are unreachable, ruling out the whole SSRF class) and injects discipline rule 10 ("verify before acting when input is insufficient"). Unset = neither registered nor injected — the tool list and the discipline never advertise what can't be used. Queries are capped at 400 chars against exfiltration; queries containing secret-like fragments (.env/id_rsa…) go through approval |
+| `TAVILY_API_KEY` | (optional) Registers the `web_search` / `fetch_url` outbound-verification tools (Tavily; page fetches go through its /extract, so fetching happens remotely, internal addresses are unreachable, and the whole SSRF class is ruled out) and injects discipline rule 10 ("verify before acting when input is insufficient"). Unset = neither registered nor injected: the tool list and the discipline never advertise what can't be used. Queries are capped at 400 chars against exfiltration; queries containing secret-like fragments (.env/id_rsa…) go through approval |
 | `COGITO_MEMORY_AUTOAPPLY` | (optional) `1` = auto-approve proposed memories that pass **all four criteria**: ① style-only, no decision-behavior change (LLM-judged, fail-closed) ② purely additive (updates/deletes always go to a human) ③ single line ≤100 chars ④ zero conflict with existing memories. Auto-approved entries get a **72-hour undo window** (`undo memory`) and **one git commit per proposal** (when the workspace is a git repo; revert = single-entry rollback). Everything else still goes to a human |
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | (optional) Embedding-based seed selection for the knowledge graph (OpenAI-compatible `/embeddings`); unset = `recall` seeds by keyword. When set, run `ingest -embed` to build the vector cache |
 | `COGITO_OFFICE_URL` | (optional) Pixel-office bridge address; execution events are projected there when set. Protocol: [docs/office-protocol.md](docs/office-protocol.md) |
-| `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | (optional) The office **HTTP task-dispatch entrypoint**; opens only when both are set. ⚠️ It can execute **arbitrary tasks**, so it binds **loopback only** by default — non-loopback refuses to start with a hint (escape hatch `COGITO_HTTP_INSECURE=1`, but use an SSH tunnel for remote access instead) |
-| `COGITO_HTTP_USER` | (optional) The dispatcher identity (default `office-web`); must be listed in `COGITO_ALLOWED_USERS`. **The office platform no longer inherits `ALLOWED` as `ADMIN`**: this identity never has approval rights — the "token holder can self-approve" hole is closed |
+| `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | (optional) The office **HTTP task-dispatch entrypoint**; opens only when both are set. ⚠️ It can execute **arbitrary tasks**, so it binds **loopback only** by default; non-loopback refuses to start with a hint (escape hatch `COGITO_HTTP_INSECURE=1`, but use an SSH tunnel for remote access instead) |
+| `COGITO_HTTP_USER` | (optional) The dispatcher identity (default `office-web`); must be listed in `COGITO_ALLOWED_USERS`. **The office platform no longer inherits `ALLOWED` as `ADMIN`**: this identity never has approval rights, which closes the "token holder can self-approve" hole |
 | `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | (optional) The **approver identity** (default `office-boss`) and its dedicated token. Dispatch and approval are **two keys**: the bridge sends approve/reject with `X-Approver-Token` to enter Core as the approver; the approver identity can **only** approve/reject (dispatching with it returns 403). The approver must be listed in both `COGITO_ALLOWED_USERS` and `COGITO_ADMIN_USERS` (recommended: `office:office-boss`). Identical tokens are treated as non-separated and approval is disabled |
 
-> **Platform scoping** (applies to `COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK`): entries may be `platform:id` (that platform only) or a bare `id` (any platform, backward compatible). **Prefer the prefix** — a bare id is valid on every platform, and it's only safe today because Telegram (numeric) and Slack (`U`-prefixed) id spaces happen not to overlap; the day a third platform lands (Discord snowflakes are numeric too), a stranger with a matching number would **walk straight through the authorization gate**. Example: `COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`. Note that switching `COGITO_USER_LINK` to prefixed form changes the session key; existing shared sessions do not migrate automatically.
+> **Platform scoping** (applies to `COGITO_ALLOWED_USERS` / `COGITO_ADMIN_USERS` / `COGITO_USER_LINK`): entries may be `platform:id` (that platform only) or a bare `id` (any platform, backward compatible). **Prefer the prefix**: a bare id is valid on every platform, and it's only safe today because Telegram (numeric) and Slack (`U`-prefixed) id spaces happen not to overlap. The day a third platform lands (Discord snowflakes are numeric too), a stranger with a matching number would **walk straight through the authorization gate**. Example: `COGITO_ALLOWED_USERS=telegram:123456789,slack:U0123ABC`. Note that switching `COGITO_USER_LINK` to prefixed form changes the session key; existing shared sessions do not migrate automatically.
 
 ### MCP tool servers (optional)
 
@@ -333,7 +333,7 @@ Point `COGITO_MCP_CONFIG` at a `.mcp.json` (same shape as Claude Desktop's). At 
 }
 ```
 
-> **Supply chain**: MCP servers are mostly third-party npx/uvx packages — you're outsourcing tool capability, so **pin exact versions** (read the changelog before upgrading). On cogito's side: MCP server subprocesses receive only allowlisted env vars (`ANTHROPIC_API_KEY` etc. are unreadable), and MCP tools go through the same [permission gate](#tool-permission-policy-deny--ask--allow).
+> **Supply chain**: MCP servers are mostly third-party npx/uvx packages. You're outsourcing tool capability, so **pin exact versions** (read the changelog before upgrading). On cogito's side: MCP server subprocesses receive only allowlisted env vars (`ANTHROPIC_API_KEY` etc. are unreadable), and MCP tools go through the same [permission gate](#tool-permission-policy-deny--ask--allow).
 
 ```bash
 export COGITO_MCP_CONFIG=./.mcp.json
@@ -350,7 +350,7 @@ go run ./cmd/claw   # startup logs will show "[mcp] mounted N tools from server 
    go run ./cmd/claw
    ```
 
-   Slack uses **Socket Mode**, Telegram uses **getUpdates long polling** — both are outbound connections: **no open ports, no public URL, no ngrok**.
+   Slack uses **Socket Mode**, Telegram uses **getUpdates long polling**. Both are outbound connections: **no open ports, no public URL, no ngrok**.
 
 2. In the Slack app admin, enable **Socket Mode** (Settings → Socket Mode → Enable), generate an App-Level Token (`xapp-`, scope `connections:write`) for `SLACK_APP_TOKEN`, and subscribe to `app_mention` and `message.im` under **Event Subscriptions** (no Request URL needed in Socket Mode).
 
@@ -365,16 +365,16 @@ go run ./cmd/claw   # startup logs will show "[mcp] mounted N tools from server 
    | `help` / `指令` / `commands` | Show the command list |
    | `goal <acceptance criteria>` | Set a persistent goal; after each run an LLM judge checks acceptance and unmet goals auto-continue (capped at 5 attempts; protected by the cost breaker / turn cap). Manage with `goal status`/`pause`/`resume`/`clear` |
    | `stop` | Abort the running task in this channel (cancelable context; stops at the next turn boundary). With linked identities (`COGITO_USER_LINK`), a shared session can be stopped from any platform |
-   | `/steer <one sentence>` | Interject a course correction into a **running** task (aliases `steer`/`插話`): queued, folded into the conversation at the turn boundary — doesn't interrupt the step in flight, doesn't discard money already burned. When idle it is not silently promoted into a new task ("correcting" must not silently escalate into "starting work"). First rung of the steer→constrain→stop ladder; constrain is deliberately unbuilt (MaxTurns/MaxCostUSD are already the hard lines) |
+   | `/steer <one sentence>` | Interject a course correction into a **running** task (aliases `steer`/`插話`): queued, folded into the conversation at the turn boundary. It doesn't interrupt the step in flight and doesn't discard money already burned. When idle it does not become a new task on its own ("correcting" must not silently escalate into "starting work"). First rung of the steer→constrain→stop ladder; constrain is deliberately unbuilt (MaxTurns/MaxCostUSD are already the hard lines) |
    | `status` | Show this session's spend / tokens / history length / model / Plan / busy state |
-   | `get <path>` | Send a file from this channel's workspace back to the chat (Telegram `sendDocument` / Slack file upload; 50 MB cap). **User-pull** — files leave only when a human types the command; the agent has no upload tool (blocks prompt-injection exfiltration) |
+   | `get <path>` | Send a file from this channel's workspace back to the chat (Telegram `sendDocument` / Slack file upload; 50 MB cap). **User-pull**: files leave only when a human types the command, and the agent has no upload tool (blocks prompt-injection exfiltration) |
    | `model` / `model <id>` / `model reset` | View / switch / reset this channel's model (per-channel, via a `Configurable` provider; takes effect next task) |
    | `compress` | Manually fold context (old messages into the rolling summary), shortening history to save cost |
    | `learn` | Distill a **proposed** skill from this conversation (staged; only live after passing `skillgate`) |
    | `approve` / `reject` (optionally with taskID) | Allow / deny a tool call intercepted by dangerous-command approval (admins in `COGITO_ADMIN_USERS` only) |
    | `memory list` | List proposed memories (numbered) for item-by-item review. Destructive proposals show **old value/new value/reason** and a ⚠️ |
    | `memory reconcile` | **Reconcile long-term memory**: scan existing records for contradictions and staleness, producing diffable `UPDATE`/`DELETE`/`ADD` proposals (**never auto-applied**; requires `apply memory`). Needs `COGITO_MEMORY_SYNTH=1` |
-   | `apply memory` / `reject memory` (optionally numbered) | Approve / discard **proposed memories** from post-task reflection (approve = stored as retrievable long-term records). No number = the whole batch; numbered = item by item, e.g. `apply memory 1 3` — reflection is batch-produced, and "mostly useful with one bad entry" is the norm |
+   | `apply memory` / `reject memory` (optionally numbered) | Approve / discard **proposed memories** from post-task reflection (approve = stored as retrievable long-term records). No number = the whole batch; numbered = item by item, e.g. `apply memory 1 3`. Reflection is batch-produced, and "mostly useful with one bad entry" is the norm |
    | `undo memory` (optionally numbered) | List / revoke memories auto-approved within the **72-hour window** (`COGITO_MEMORY_AUTOAPPLY`): revoke = archive (recoverable) + a git commit trail |
    | `apply edges` / `reject edges` | Approve / discard LLM-extracted **proposed KG relations** (approve = gated merge into the graph, effective on the next `recall`) |
    | `apply config` / `reject config` | Approve / discard **proposed parameters** from `cmd/bench -tune` (approve = promoted to `.claw/config.json`, applied from the next task; clamped to bounds on apply) |
@@ -398,7 +398,7 @@ The bot works under the workspace root `./workspace/`, inside **per-channel isol
 
 > **Telegram Forum Topics**: in supergroups with Topics enabled, **each topic gets its own session/workdir** (one group, one bot, routed by `message_thread_id`), and replies land back in the originating topic — the minimal precondition for "one specialist per topic". The test is `is_topic_message`: plain reply threads in ordinary groups do **not** split, so a normal group isn't shattered into a pile of sessions.
 
-> ⚠️ **Security note**: under the default (`HostExecutor`), `bash` executes arbitrary commands on the machine running the service, and `write_file` / `edit_file` modify files — run only in isolated/controlled environments. **In production, enable the Docker sandbox** for an OS-level hard boundary:
+> ⚠️ **Security note**: under the default (`HostExecutor`), `bash` executes arbitrary commands on the machine running the service, and `write_file` / `edit_file` modify files. Run only in isolated/controlled environments. **In production, enable the Docker sandbox** for an OS-level hard boundary:
 >
 > ```bash
 > docker build -t cogito-sandbox:latest -f docker/sandbox.Dockerfile .
@@ -419,11 +419,11 @@ The bot works under the workspace root `./workspace/`, inside **per-channel isol
 > Granularity is **one image per process**. For different roles on different stacks, today's answer is "one employee per directory"
 > (see [Running multiple employees](#running-multiple-employees-multi-instance-zero-code)), each with its own `COGITO_SANDBOX_IMAGE`.
 
-> When enabled, **each session keeps one resident container**: the first bash call starts it with `docker run -d ... sleep infinity`, and subsequent calls `docker exec` into it — no per-command container startup latency, and **installed packages / written files / background processes persist** across calls within the session. The container mounts only that session's workDir, has no network by default, and is resource-limited; graceful shutdown (or CLI exit) runs `docker rm -f`. Container names derive from a workDir hash, so they're identifiable and cleanable after a crash.
+> When enabled, **each session keeps one resident container**: the first bash call starts it with `docker run -d ... sleep infinity`, and subsequent calls `docker exec` into it. There is no per-command container startup latency, and **installed packages / written files / background processes persist** across calls within the session. The container mounts only that session's workDir, has no network by default, and is resource-limited; graceful shutdown (or CLI exit) runs `docker rm -f`. Container names derive from a workDir hash, so they're identifiable and cleanable after a crash.
 >
-> What persists is **filesystem-level** state (packages/files/processes); **not** shell `export`s, `cd`, or aliases — each bash call is its own `docker exec ... bash -c`, a fresh process (matching host mode's "new shell every time"). To keep environment variables across calls, write them into `~/.bashrc` or similar.
+> What persists is **filesystem-level** state (packages/files/processes); **not** shell `export`s, `cd`, or aliases. Each bash call is its own `docker exec ... bash -c`, a fresh process (matching host mode's "new shell every time"). To keep environment variables across calls, write them into `~/.bashrc` or similar.
 >
-> **Isolation scope (important)**: the container encloses **`bash`** (including background tasks), **not the whole agent**. `read_file` / `write_file` / `edit_file` always run on the **host** — their boundary is the tool-layer workspace containment (`..`, absolute paths, symlinks all blocked), not the container. This is a deliberate division of labor: **the container blocks "arbitrary commands", the tool layer blocks "escaping the workspace"** — complementary, not redundant. (Which is exactly why tool-layer symlink resolution is necessary: bash inside the container can plant a symlink in the mounted workDir pointing at the host, and a host-side file tool that didn't resolve symlinks would follow it out.) The approval middleware is orthogonal to both — high-risk commands need human approval even inside the container.
+> **Isolation scope (important)**: the container encloses **`bash`** (including background tasks), **not the whole agent**. `read_file` / `write_file` / `edit_file` always run on the **host**: their boundary is the tool-layer workspace containment (`..`, absolute paths, symlinks all blocked), not the container. This is a deliberate division of labor: **the container blocks "arbitrary commands", the tool layer blocks "escaping the workspace"**. The two complement each other rather than overlap. (Which is exactly why tool-layer symlink resolution is necessary: bash inside the container can plant a symlink in the mounted workDir pointing at the host, and a host-side file tool that didn't resolve symlinks would follow it out.) The approval middleware is orthogonal to both: high-risk commands need human approval even inside the container.
 >
 > Note: the first container start is slow if the image must be pulled (build a local image beforehand); currently one session maps to one container, with no per-command subdivision.
 
@@ -443,15 +443,15 @@ Same for Slack (`cmd/claw`): with `COGITO_SESSION_DIR` set, per-channel memory s
 <table>
 <tr>
 <td width="50%"><img src="docs/dashboard/runs.png" alt="Runs: the full execution tree of one query"><br>
-<b>Runs</b> — the ReAct loop unfolded step by step: thinking, tool arguments, subagent delegation, final answer</td>
+<b>Runs</b>: the ReAct loop unfolded step by step — thinking, tool arguments, subagent delegation, final answer</td>
 <td width="50%"><img src="docs/dashboard/metrics.png" alt="Metrics: usage sliced by platform and model"><br>
-<b>Metrics</b> — total spend and tokens, sliced by platform/model (built in, no Langfuse dependency)</td>
+<b>Metrics</b>: total spend and tokens, sliced by platform/model (built in, no Langfuse dependency)</td>
 </tr>
 <tr>
 <td width="50%"><img src="docs/dashboard/cron.png" alt="Cron: scheduled tasks"><br>
-<b>Cron</b> — schedules, next/last run, failure reasons, result-push settings</td>
+<b>Cron</b>: schedules, next/last run, failure reasons, result-push settings</td>
 <td width="50%"><img src="docs/dashboard/policy.png" alt="Tool permission policy"><br>
-<b>Policy</b> — current Deny &gt; Ask &gt; Allow rules (read-only view)</td>
+<b>Policy</b>: current Deny &gt; Ask &gt; Allow rules (read-only view)</td>
 </tr>
 </table>
 
@@ -460,7 +460,7 @@ go run ./cmd/claw-dashboard          # → http://127.0.0.1:8091 (read-only)
 COGITO_DASH_CHAT=1 go run ./cmd/claw-dashboard   # additionally enables write capability (see below)
 ```
 
-**Loopback-bound, no auth** — for remote access use an SSH tunnel (`ssh -L 8091:127.0.0.1:8091 <host>`); binding a non-loopback address **refuses to start** (remote auth is not implemented).
+**Loopback-bound, no auth**. For remote access use an SSH tunnel (`ssh -L 8091:127.0.0.1:8091 <host>`); binding a non-loopback address **refuses to start** (remote auth is not implemented).
 
 | Page | Contents |
 |---|---|
@@ -484,7 +484,7 @@ COGITO_CRON_NOTIFY=telegram:123456789        # result push; comma-separated mult
 COGITO_CRON_NOTIFY_ERRORS_ONLY=1             # push only on failure
 ```
 
-The scheduler lives in **resident processes**: `cmd/claw` (the bot) and the dashboard each run one, sharing `.claw/cron.json` and arbitrated by a file lock (`flock`) — **only one fires per tick**. Close the panel and schedules still run as long as the bot is up.
+The scheduler lives in **resident processes**: `cmd/claw` (the bot) and the dashboard each run one, sharing `.claw/cron.json` and arbitrated by a file lock (`flock`), so **only one fires per tick**. Close the panel and schedules still run as long as the bot is up.
 
 - A missed schedule is **made up exactly once** (down three days = one make-up run); good for "remind me daily", not for "poll every N minutes".
 - Result pushes carry the **execution source** (bot/dashboard); run trees live at `/runs/cron-<id>`.
@@ -505,8 +505,8 @@ Only "tool X is **never** allowed (ask nobody)" needs a policy file, `workspace/
 ```
 
 - Verdicts follow **Deny > Ask > Allow**, **independent of rule order**.
-- **Unattended** runs (cron) treat Ask as Deny — when no one can answer, "waiting for an answer" is not safety.
-- A malformed policy file or bad regex → **abort at startup**, never silently ignored (otherwise you'd believe you're protected while nothing loaded).
+- **Unattended** runs (cron) treat Ask as Deny: when no one can answer, "waiting for an answer" is not safety.
+- A malformed policy file or bad regex **aborts startup** rather than being silently ignored; otherwise you'd believe you're protected while nothing loaded.
 - The panel's `/platform` shows the active policy (read-only; file changes need a restart).
 
 ## Development
@@ -533,19 +533,19 @@ go build ./...     # build
 
 The first seven are practical entrypoints; the last two are **teaching/diagnostic** harnesses, each demonstrating a mechanism that's hard to explain in words.
 The capabilities they demonstrate are guarded by real tests elsewhere (`context/compactor_test.go`, `mcp/*_test.go`),
-so they aid understanding — they are not acceptance paths.
+so they exist to aid understanding; they are not acceptance paths.
 
 > Removed demos: `claw-demo` (session isolation), `claw-demo-trace` (OTel spans),
 > `claw-demo-observability` (cost tracking), `claw-demo-subagent` (subagent isolation).
-> One criterion for all: **something else now shows the same thing better** — the panel's run-tree replay, Langfuse's Gantt view,
+> One criterion decided all four: something else now shows the same thing better. The panel's run-tree replay, Langfuse's Gantt view,
 > the panel's Metrics page, and (for subagents) the run tree's collaboration nodes plus the office projection where you can watch
 > NPCs get drafted, report back, and return to their desks. The two that remain have no substitute: compression is invisible in any UI,
 > and MCP diagnosis is the only LLM-free connection check.
 
 ### Evals: three layers, because they measure different things
 
-A common misconception is "evals measure model capability". Benchmarks like SWE-bench measure the **model × harness product** —
-a single score **cannot attribute credit** between the two. Hence three layers: the first two evaluate our own mechanisms; the third is only an external reference point.
+A common misconception is "evals measure model capability". Benchmarks like SWE-bench measure the **model × harness product**:
+a single score **cannot attribute credit** between the two. Hence three layers. The first two evaluate our own mechanisms; the third is only an external reference point.
 
 | Layer | Measures | The model's role | Cost | Results |
 |---|---|---|---|---|
@@ -560,10 +560,10 @@ a single score **cannot attribute credit** between the two. Hence three layers: 
 | **Memory** off→on (n=5) | 5/5 → 5/5 | 8 → **3** | $0.0342 → **$0.0116** (−66%) | **High**: 5/5 consistent, zero variance on the on side |
 | **Skills** off→on (**n=20**) | **7/20 → 15/20** | 4 → 4 | $0.0145 → $0.0159 (+9.7%) | **High**: Fisher **p=0.0248, significant** |
 
-> **Memory improves efficiency, skills improve correctness — both are now conclusions, not observations.**
+> **Memory improves efficiency, skills improve correctness. Both are now conclusions, not observations.**
 > The skills row started at n=5 (1/5→4/5, p=0.206, not significant) and could only be an observation; expanded to n=20 on 2026-08-05, it reached significance.
-> The larger sample also overturned all three of the n=5 effect-size estimates (the "+1 turn" observation vanished; the cost penalty dropped from +35% to +9.7%) —
-> **significance testing is built into `cmd/bench -ab-n`**, not hand-computed after the fact.
+> The larger sample also overturned all three of the n=5 effect-size estimates: the "+1 turn" observation vanished, and the cost penalty dropped from +35% to +9.7%.
+> **Significance testing is built into `cmd/bench -ab-n`**, not hand-computed after the fact.
 >
 > Raw per-run data, the n=5 vs n=20 item-by-item comparison, and the methodological mistakes made along the way: **[docs/eval-results.md](docs/eval-results.md)**.
 
@@ -587,11 +587,11 @@ python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench
 
 Full instructions: **[docs/swebench-runbook.md](docs/swebench-runbook.md)**.
 
-The multi-hop corpus is engineered on purpose: **answer nodes share zero surface text with the queries** — pure keyword search cannot reach them;
-only knowledge-graph expansion along `[[link]]`s can. It also ships an **anti-cheat guard** — if the corpus ever degrades so keyword search
-also scores perfect, a test fails (`memeval_test.go`), so `0.50 vs 1.00` can't quietly become a hollow win.
+The multi-hop corpus is engineered on purpose: **answer nodes share zero surface text with the queries**, so pure keyword search cannot reach them;
+only knowledge-graph expansion along `[[link]]`s can. It also ships an **anti-cheat guard**: if the corpus ever degrades so keyword search
+also scores perfect, a test fails (`memeval_test.go`) before `0.50 vs 1.00` can become a hollow win.
 
-**A later vector-retrieval run (bge-m3) reached only 0.58** — far from the KG's 1.00. In a multi-hop question, the answer node isn't
+**A later vector-retrieval run (bge-m3) reached only 0.58**, far from the KG's 1.00. In a multi-hop question, the answer node isn't
 semantically similar to the query either; it's merely **linked to** the one that is. Vector similarity can't walk A→B→C; that's a graph's job.
 What wins is the mechanism "expand along relations", not a better similarity function.
 
@@ -601,12 +601,12 @@ After the skills A/B was expanded to n=20, **all three n=5 effect-size estimates
 from 20% to 35%, the "one extra turn" observation vanished outright, and the cost penalty dropped from +35% to +9.7%.
 The direction of the effect held; not one number survived at its original size.
 
-Which immediately turned the ruler on ourselves — **SWE-bench's opus 4/5 vs haiku 1/5 is Fisher `p=0.206`, the very same 2×2 table
+Which immediately turned the ruler on ourselves: **SWE-bench's opus 4/5 vs haiku 1/5 is Fisher `p=0.206`, the very same 2×2 table
 the skills A/B had before its sample was expanded.** Having just proven n=5 untrustworthy, we can't turn around and write it up as
-"pass@1 80%". So that row is labeled "not significant" in the table above — not presented as a score.
+"pass@1 80%". So that row is labeled "not significant" in the table above, not presented as a score.
 
 The tool therefore puts the **sample floor before the p-value**: `n < 10` (reusing `evolve.MinVerifySamples`) always prints
-"insufficient sample", no matter how small p is — false assurance from a lucky small sample is more dangerous than no number at all.
+"insufficient sample", no matter how small p is. False assurance from a lucky small sample is more dangerous than no number at all.
 
 ### Benchmarks & dashboards
 
@@ -645,24 +645,25 @@ go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 > Python environments vary wildly across repos; for serious runs use the official SWE-bench Docker images (dependencies prebuilt). `-swe-env-setup '<bash>'` overrides the per-instance environment setup. The agent solves with nothing but `read_file`/`write_file`/`edit_file`/`bash` (no SWE-bench-specific tools).
 
 **Measured (2026-07)**: `scripts/run_swebench_lite.sh` runs the official Docker harness end to end.
-haiku on 5 astropy instances: **resolved 1, errors 0** — far too small a sample to claim any pass rate;
+haiku on 5 astropy instances: **resolved 1, errors 0**. Far too small a sample to claim any pass rate;
 its purpose is proving the pipeline is real (real repos, real issues, official harness, F2P/P2P two-way acceptance).
 Measured cost: **$0.24/instance, 117 s/instance** (~67 s of that is cloning), so scaling to 30 instances ≈ $7.3 / 1 hour.
 
-> 🔎 **An unverified observation**: `MaxTurns=40`, yet four of the five instances stopped on their own within **3–5 turns** (not cut off).
-> The suspected chain: `-swe-env-setup` was empty → no dependencies installed → **tests can't run → no feedback signal to iterate on** —
-> the agent can only read the issue, read a few files, write a patch, and then has nothing left to do (the one instance that used 19 turns
-> was exactly the one with something to explore). If this holds, **the biggest lever for the score is a working test environment, not a stronger model**. Unverified.
+> 🔎 **An unverified observation**: `MaxTurns=40`, yet four of the five instances stopped on their own within **3 to 5 turns** (not cut off).
+> The suspected chain: `-swe-env-setup` was empty, so no dependencies were installed, so the tests couldn't run, so there was no feedback
+> signal to iterate on. The agent can only read the issue, read a few files, write a patch, and then has nothing left to do (the one
+> instance that used 19 turns was exactly the one with something to explore). If this holds, **the biggest lever for the score is a
+> working test environment, not a stronger model**. Unverified.
 
 ### Plan Mode (long-task resumption)
 
-The worst enemy of a long task isn't "can't plan" — it's **context loss** (window compression, sliding windows, process restarts, breaker interruptions). Plan Mode fights it with **state externalization**: plans are forced into `PLAN.md`, progress into `TODO.md`, one checkbox ticked per completed step; on wake-up the agent sniffs both files and resumes from the first unchecked item.
+The worst enemy of a long task isn't "can't plan"; it's **context loss** (window compression, sliding windows, process restarts, breaker interruptions). Plan Mode fights it with **state externalization**: plans are forced into `PLAN.md`, progress into `TODO.md`, one checkbox ticked per completed step; on wake-up the agent sniffs both files and resumes from the first unchecked item.
 
 ```bash
 go run ./cmd/claw-cli -plan -dir ./workspace/proj -prompt "<a long multi-step task>"
 ```
 
-**Demonstrated (haiku)**: a "create 6 files in order" task was SIGTERM-killed at step 4 → disk holds `s1–s4` + a `TODO.md` with 4 boxes ticked. **A brand-new process (empty in-memory session, zero conversational memory) told nothing but "continue"** → the agent sniffed `PLAN.md`/`TODO.md`, read off "step 4 done", and **built only s5/s6** (zero rework). A plan that lives only in the model's context dies at the moment of restart; the plan on disk survived — **and this value is independent of how strong the model is**. Off by default; `-plan` opt-in (short tasks don't need the ceremony).
+**Demonstrated (haiku)**: a "create 6 files in order" task was SIGTERM-killed at step 4, leaving `s1–s4` on disk and a `TODO.md` with 4 boxes ticked. **A brand-new process (empty in-memory session, zero conversational memory) was told nothing but "continue"**; the agent sniffed `PLAN.md`/`TODO.md`, read off "step 4 done", and **built only s5/s6**, with zero rework. A plan that lives only in the model's context dies at the moment of restart; the plan on disk survived. **And this value is independent of how strong the model is.** Off by default; `-plan` opt-in (short tasks don't need the ceremony).
 
 ### Loop engineering (goal loop + heartbeat)
 
@@ -680,7 +681,7 @@ go run ./cmd/claw-cli -session fix-bug \
 # 0 8 * * 1  cd /path/to/cogito-agent && COGITO_SESSION_DIR=./workspace/sessions ./claw-cli -session retrospect -prompt "read the retrospect skill with read_skill and run the 7-day review"
 ```
 
-**OS crontab vs built-in cron**: the original stance was "no scheduler inside the app"; the [built-in cron](#cron-scheduled-tasks) came later — but **not as a replacement**. They serve different deployments:
+**OS crontab vs built-in cron**: the original stance was "no scheduler inside the app"; the [built-in cron](#cron-scheduled-tasks) came later, but **not as a replacement**. They serve different deployments:
 
 | | OS crontab + `claw-cli` | Built-in cron |
 |---|---|---|
@@ -689,7 +690,7 @@ go run ./cmd/claw-cli -session fix-bug \
 | Seeing results | Redirect logs yourself | Run trees on the panel, push to Slack/Telegram |
 | Changing schedules | Edit crontab | Click on the panel |
 
-If all you run is the CLI, use the OS crontab — don't keep an extra process alive just to schedule.
+If all you run is the CLI, use the OS crontab: don't keep an extra process alive just to schedule.
 
 ### Switching LLM providers
 
@@ -709,7 +710,7 @@ go run ./cmd/claw-cli -prompt "..."
 
 Grow the single scout into a team of specialists: define roles in `<workspace>/.claw/agents/<name>.md` frontmatter, and the main agent dispatches them by passing `agent_type` to `spawn_subagent`. Same isolated delegation + capability sandbox; parallel dispatch supported.
 
-This is the "team of specialists behind the digital employee" from the introduction: there is one employee (the main agent living in your IM), and the specialists are temporary details it drafts on demand — role **definitions** persist (the `.md` files here), **instances** are disposable, memory is externalized (workspace files / skills / `.claw/memory`), no resident state, every dispatch clean and reproducible.
+This is the "team of specialists behind the digital employee" from the introduction. There is one employee (the main agent living in your IM), and the specialists are temporary crews it assembles on demand. Role **definitions** persist (the `.md` files here); **instances** are disposable, memory is externalized (workspace files / skills / `.claw/memory`), no resident state, every dispatch clean and reproducible.
 
 ```markdown
 ---
@@ -724,26 +725,26 @@ You are a senior code reviewer. Read the changes with read_file and bash; review
 For each issue give file:line + a one-sentence problem + the minimal fix; if clean, say "no obvious issues". Output a distilled report.
 ```
 
-- No `agent_type` → the default scout (**read-only** `read_file`+`bash`), behavior unchanged from before.
-- **Writable implementation agents**: declare `write_file` / `edit_file` in `tools` and that agent can modify files (e.g. an `implementer` role). Writes are **opt-in** — undeclared means unavailable — and still pass the approval middleware (sensitive writes to `.env`/`.git`/absolute paths still need a human), with tool-layer containment against workspace escape.
+- Without `agent_type` you get the default scout (**read-only** `read_file`+`bash`); behavior unchanged from before.
+- **Writable implementation agents**: declare `write_file` / `edit_file` in `tools` and that agent can modify files (e.g. an `implementer` role). Writes are **opt-in** (undeclared means unavailable) and still pass the approval middleware (sensitive writes to `.env`/`.git`/absolute paths still need a human), with tool-layer containment against workspace escape.
 - `tools` may only be a subset of the subagent tool superset (`read_file`/`bash`/`write_file`/`edit_file`), never `spawn_subagent` (no recursion).
 - The available roster is auto-listed in `spawn_subagent`'s tool description, so the model knows who it can dispatch.
-- **Model / effort selection**: `model` lets scouts run cheap-and-fast (haiku) while reviewers run strong (opus); `effort` tunes output depth (token caps). Takes effect when the provider supports it; costs still land in the same session. Effort is a rough proxy via output caps, not extended thinking.
-- **Worktree isolation** (`isolation: worktree`): a writable agent runs in a git worktree off base and its diff is **applied back serially** — so several writable agents in one round can't clobber each other (each writes its own worktree; write-backs go one at a time). Preconditions: the workspace is a git repo (otherwise it degrades to the shared workspace) and host execution mode (under the Docker sandbox, bash is attached to the base container, which doesn't align with worktree file isolation). On write-back conflicts, the diff is attached to the subagent's report for the main agent to resolve.
+- **Model / effort selection**: `model` lets scouts run cheap and fast (haiku) while reviewers run strong (opus); `effort` tunes output depth (token caps). Takes effect when the provider supports it; costs still land in the same session. Effort is a rough proxy via output caps, not extended thinking.
+- **Worktree isolation** (`isolation: worktree`): a writable agent runs in a git worktree off base and its diff is **applied back serially**, so several writable agents in one round can't clobber each other (each writes its own worktree; write-backs go one at a time). Preconditions: the workspace is a git repo (otherwise it degrades to the shared workspace) and host execution mode (under the Docker sandbox, bash is attached to the base container, which doesn't align with worktree file isolation). On write-back conflicts, the diff is attached to the subagent's report for the main agent to resolve.
 - **Background / async delegation** (`background: true`): runs in a background pool, immediately returning an ID (e.g. `bg-1`); the main agent continues, later collects with `subagent_result` (by id) or lists with `subagent_list`. Per-session pool, concurrency cap, retention-based cleanup (mirroring background bash's TaskManager). Background mode runs silently in the **shared workspace** (no worktree isolation); for parallel isolated writes use synchronous `isolation: worktree`.
-- **Per-agent long-term memory** (`.claw/agents/<name>/memory/`): a named agent has its own memory directory; on spawn, its records (same format as `.claw/memory`) are injected into the subagent's role prompt — specialists "remember" past work of their kind across spawns without polluting the main context or seeing each other's memory. Currently **read-only** (records are hand-written); the **write half** (post-run reflection → per-agent proposals → governance approval) is future work (see [docs/multi-tenancy.md](docs/multi-tenancy.md)).
+- **Per-agent long-term memory** (`.claw/agents/<name>/memory/`): a named agent has its own memory directory; on spawn, its records (same format as `.claw/memory`) are injected into the subagent's role prompt, so specialists "remember" past work of their kind across spawns without polluting the main context or seeing each other's memory. Currently **read-only** (records are hand-written); the **write half** (post-run reflection feeding per-agent proposals through governance approval) is future work (see [docs/multi-tenancy.md](docs/multi-tenancy.md)).
 
 #### Orchestration (model-driven, zero framework code)
 
-"Main agent plans → dispatches subagents (parallel/serial) → reviews → corrects → integrates" — that orchestration **is ReAct**: the main agent's "action" is `spawn_subagent`, the subagent's report is the "observation", and it iterates to completion. cogito **needs no workflow-DAG engine** (that would be framework-driven, a departure from ReAct). To make the main agent enter this mode reliably, write an **`orchestrate` skill** (`.claw/skills/orchestrate/SKILL.md`, an orchestration playbook) — on a complex task the main agent `read_skill`s it and marshals `implementer`/`code-reviewer` and friends accordingly. **Pure prompt, zero engine changes, composes naturally with per-agent model selection and worktree isolation** (e.g. a big-model orchestrator over small-model workers).
+"The main agent plans, dispatches subagents in parallel or series, reviews, corrects, integrates" — that orchestration **is ReAct**: the main agent's "action" is `spawn_subagent`, the subagent's report is the "observation", and it iterates to completion. cogito **needs no workflow-DAG engine** (that would be framework-driven, a departure from ReAct). To make the main agent enter this mode reliably, write an **`orchestrate` skill** (`.claw/skills/orchestrate/SKILL.md`, an orchestration playbook): on a complex task the main agent `read_skill`s it and marshals `implementer`/`code-reviewer` and friends accordingly. **Pure prompt, zero engine changes, composes naturally with per-agent model selection and worktree isolation** (e.g. a big-model orchestrator over small-model workers).
 
-A real run of this pattern ([`demo/mission-control`](demo/mission-control/): multi-perspective code review): the orchestrator dispatches three narrow specialists in parallel within one turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict. Both guardrails are framework-level, not prompt-begged — the **tool boundary** is enforced by the registry's `Subset` (the three specialists get `[read_file, bash]`, not even `write_file`), and **policy Deny = goal termination** (any denied tool ends the run with a report, leaving no room to rephrase around the block). **Flowchart: [Architecture → Diagrams](#diagrams-detailed-flowcharts).**
+A real run of this pattern ([`demo/mission-control`](demo/mission-control/): multi-perspective code review): the orchestrator dispatches three narrow specialists in parallel within one turn, each reviewing one dimension in an isolated context, then integrates a go/no-go verdict. Both guardrails live in the framework, not in the prompt: the **tool boundary** is enforced by the registry's `Subset` (the three specialists get `[read_file, bash]`, not even `write_file`), and **policy Deny = goal termination** (any denied tool ends the run with a report, leaving no room to rephrase around the block). **Flowchart: [Architecture → Diagrams](#diagrams-detailed-flowcharts).**
 
 ### Running multiple employees (multi-instance, zero code)
 
-> **Multi-tenancy**: this is "hard tenancy" — one process per tenant, full isolation. There is also "soft tenancy" (per-conversation within one process: files/conversations/costs isolated by construction; memory optionally via `COGITO_MEMORY_SCOPE=channel`). The full isolation matrix and trust boundaries: **[docs/multi-tenancy.md](docs/multi-tenancy.md)**.
+> **Multi-tenancy**: this is "hard tenancy", one process per tenant, full isolation. There is also "soft tenancy" (per-conversation within one process: files/conversations/costs isolated by construction; memory optionally via `COGITO_MEMORY_SCOPE=channel`). The full isolation matrix and trust boundaries: **[docs/multi-tenancy.md](docs/multi-tenancy.md)**.
 
-The introduction called cogito "a digital employee" — for a team, run **one directory per employee**. `claw` loads `.env` from the current directory and fixes the workspace at `<cwd>/workspace`, so one directory is one fully isolated employee: its own IM identity (bot token), its own personality and skill library (`workspace/.claw/`), its own memory and sessions (`COGITO_SESSION_DIR`), its own allowlist and model settings.
+The introduction called cogito "a digital employee". For a team, run **one directory per employee**. `claw` loads `.env` from the current directory and fixes the workspace at `<cwd>/workspace`, so one directory is one fully isolated employee: its own IM identity (bot token), its own personality and skill library (`workspace/.claw/`), its own memory and sessions (`COGITO_SESSION_DIR`), its own allowlist and model settings.
 
 ```bash
 go install ./cmd/claw          # install the binary once ($GOBIN), use it anywhere
@@ -758,14 +759,14 @@ claw                                          # coder clocks in (.env and worksp
 cd ~/agents/reviewer && claw
 ```
 
-- **Isolation is the boundary**: employees share no skills/memory/sessions — what coder learns, reviewer doesn't know. Sharing is explicit (below).
-- **"Hiring" a pre-trained employee**: `workspace/.claw/` (agents/skills/memory) is all plain text — packaged as a git repo it becomes a distributable employee profile, and `git clone` into a fresh directory is onboarding (roles and skills included, memory blank). **Secrets (`.env`) never enter the repo.**
+- **Isolation is the boundary**: employees share no skills/memory/sessions. What coder learns, reviewer doesn't know. Sharing is explicit (below).
+- **"Hiring" a pre-trained employee**: `workspace/.claw/` (agents/skills/memory) is all plain text. Packaged as a git repo it becomes a distributable employee profile, and `git clone` into a fresh directory is onboarding (roles and skills included, memory blank). **Secrets (`.env`) never enter the repo.**
 
 ```bash
 git clone github.com/you/reviewer-claw ~/agents/reviewer/workspace/.claw
 ```
 
-- For comparison: this is isomorphic to Hermes Agent's Profiles ("Running Multiple Agents") — one home directory per employee. cogito needs no profile CLI: **the directory is the profile**.
+- For comparison: this is isomorphic to Hermes Agent's Profiles ("Running Multiple Agents"), one home directory per employee. cogito needs no profile CLI: **the directory is the profile**.
 
 ### Skill self-generation + gating
 
@@ -794,14 +795,14 @@ Design, protocols and measured results beyond the source live in [`docs/`](docs/
 | [office-protocol.md](docs/office-protocol.md) | **Pixel-office protocol v1**: three HTTP endpoints, the full event `kind` set and field semantics, delivery guarantees (drops frames, no backpressure), versioning rules |
 | [eval-results.md](docs/eval-results.md) | **Three-layer eval results**: retrieval (0.50 → 0.58 → **1.00**), memory A/B (turns −66%), skills A/B (7/20→15/20, **p=0.0248 significant**, including how n=5 misled), SWE-bench (opus 4/5, **p=0.206, still an observation**) |
 | [kg-spec.md](docs/kg-spec.md) | Knowledge-graph spec: typed relations, multi-hop retrieval, the gate for proposed edges |
-| [memory-stack-audit.md](docs/memory-stack-audit.md) | **Memory-layer self-audit**: the circulating "Agent Memory Stack" seven layers unpacked one by one — six present, shared memory missing (with its trigger condition), and how that taxonomy conflates placement policy/scope with content kinds |
+| [memory-stack-audit.md](docs/memory-stack-audit.md) | **Memory-layer self-audit**: the circulating "Agent Memory Stack" seven layers unpacked one by one. Six present, shared memory missing (with its trigger condition), plus how that taxonomy conflates placement policy/scope with content kinds |
 | [roadmap-next.md](docs/roadmap-next.md) | **Open items and closed cases** (ordered by "risk of touching it"), each with measured evidence or a deferral rationale |
-| [tsnet-plan.md](docs/tsnet-plan.md) | Remote panel access (tsnet + WhoIs), a phased action plan — **planned, not implemented**, with trigger conditions |
+| [tsnet-plan.md](docs/tsnet-plan.md) | Remote panel access (tsnet + WhoIs), a phased action plan. **Planned, not implemented**, with trigger conditions |
 | [memory-reconcile-format.md](docs/memory-reconcile-format.md) | **Design decision**: the proposal format for memory reconciliation — how the proposal channel expresses destructive UPDATE/DELETE, with three guardrails (profiles undeletable / mismatched old value = reject / delete = archive). **Not implemented** |
-| [task-board-research.md](docs/task-board-research.md) | **Design research**: how multiple agents on one machine coordinate. Dissects Hermes's Kanban (state machine + atomic claiming + single writer); conclusion: a "shared task board" beats "shared memory". **The trigger line is measured** (`scripts/subagent_briefing_cost.py`): first reading $0.07, below threshold → no task board yet; but the measurement caught "the full source pasted into task_prompt", now fixed |
-| [qm-learnings.md](docs/qm-learnings.md) | Notes against YC's qm (open-sourced 2026-07): first establishing that **it isn't a harness but a platform hosting harnesses** (1 of its 45 modules), then what to copy (the memory-reconciliation action list), **what not to copy** and why — **planned, not implemented** |
-| [SECURITY.md](SECURITY.md) | **The security model**: threat-model assumptions, implemented defenses (each verifiable), and 10 things it **explicitly does not defend against** — prompt injection, blacklist bypasses, host-mode RCE paths, no remote panel auth, and more |
-| [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **Incident report**: after policy blocked `rm -rf`, the agent rewrote the command to slip the blacklist — step-by-step evidence and the fix (denial = goal termination) |
+| [task-board-research.md](docs/task-board-research.md) | **Design research**: how multiple agents on one machine coordinate. Dissects Hermes's Kanban (state machine + atomic claiming + single writer); conclusion: a "shared task board" beats "shared memory". **The trigger line is measured** (`scripts/subagent_briefing_cost.py`): first reading $0.07, below the threshold, so no task board yet; but the measurement caught "the full source pasted into task_prompt", now fixed |
+| [qm-learnings.md](docs/qm-learnings.md) | Notes against YC's qm (open-sourced 2026-07): first establishing that **it isn't a harness but a platform hosting harnesses** (1 of its 45 modules), then what to copy (the memory-reconciliation action list), **what not to copy** and why. **Planned, not implemented** |
+| [SECURITY.md](SECURITY.md) | **The security model**: threat-model assumptions, implemented defenses (each verifiable), and 10 things it **explicitly does not defend against**: prompt injection, blacklist bypasses, host-mode RCE paths, no remote panel auth, and more |
+| [incident-blacklist-bypass.md](docs/incident-blacklist-bypass.md) | **Incident report**: after policy blocked `rm -rf`, the agent rewrote the command to slip the blacklist; step-by-step evidence and the fix (denial = goal termination) |
 | [demo-runbook.md](docs/demo-runbook.md) · [interview-runbook.md](docs/interview-runbook.md) | Demo scripts: governance in three acts / parallel multi-agent code review |
 | [swebench-runbook.md](docs/swebench-runbook.md) · [plan-mode-demo.md](docs/plan-mode-demo.md) | Running the official SWE-bench harness; the Plan Mode resumption demo |
 
