@@ -80,7 +80,9 @@ type taskState struct {
 type TaskManager struct {
 	mu       sync.Mutex
 	tasks    map[string]*taskState
-	reserved int // 已通過名額檢查、還在 fork/exec 路上沒登記進 tasks 的任務數
+	reserved int            // 已通過名額檢查、還在 fork/exec 路上沒登記進 tasks 的任務數
+	starting sync.WaitGroup // 同上那批 Start；KillAll 要等它們落地才收得到
+	closed   bool           // KillAll 過了：不再接受新任務
 	executor sandbox.Executor
 	workDir  string
 	seq      int
@@ -130,6 +132,10 @@ func (tm *TaskManager) runningCount() int {
 // Start 在背景拉起一條命令，立即回傳任務 ID（不等待完成）。
 func (tm *TaskManager) Start(command string) (string, error) {
 	tm.mu.Lock()
+	if tm.closed {
+		tm.mu.Unlock()
+		return "", fmt.Errorf("正在關閉，不再接受背景任務")
+	}
 	tm.pruneDoneLocked() // 順手清掉超出保留數的舊結束任務，防長活 session 的 map 單調洩漏
 	if tm.runningCount()+tm.reserved >= MaxBackgroundTasks {
 		tm.mu.Unlock()
@@ -140,14 +146,19 @@ func (tm *TaskManager) Start(command string) (string, error) {
 	// 名額在鎖內佔好：檢查到登記之間隔著 fork/exec，引擎又會並行跑工具，不佔位的話
 	// 同一輪的多個 bash_background 會一起通過檢查。
 	tm.reserved++
+	tm.starting.Add(1)
 	tm.mu.Unlock()
-	settle := func(ts *taskState) { // 歸還預留；成功的話同一個臨界區內登記，名額不會有空窗
+	// settle 歸還預留；成功的話在同一個臨界區內登記，名額不會有空窗。回報這段期間是否已開始關閉。
+	settle := func(ts *taskState) (closed bool) {
 		tm.mu.Lock()
 		tm.reserved--
 		if ts != nil {
 			tm.tasks[ts.id] = ts
 		}
+		closed = tm.closed
 		tm.mu.Unlock()
+		tm.starting.Done()
+		return closed
 	}
 
 	// 刻意用獨立的可取消 context（非 bash 的 30s）——背景任務本來就要長活。
@@ -172,8 +183,6 @@ func (tm *TaskManager) Start(command string) (string, error) {
 
 	ts := &taskState{id: id, command: command, startedAt: time.Now(), buf: buf, cancel: cancel, cmd: cmd,
 		exited: make(chan struct{})}
-	settle(ts)
-
 	go func(c *exec.Cmd, st *taskState) {
 		err := c.Wait()
 		st.mu.Lock()
@@ -183,6 +192,11 @@ func (tm *TaskManager) Start(command string) (string, error) {
 		close(st.exited)
 	}(cmd, ts)
 
+	if settle(ts) {
+		// 啟動途中開始關機：KillAll 等得到的話會連它一起收，這裡再殺一次是給它等不到（逾時）的情況。
+		ts.kill()
+		return "", fmt.Errorf("正在關閉，背景任務 %s 已終止", id)
+	}
 	return id, nil
 }
 
@@ -276,6 +290,20 @@ func (tm *TaskManager) List() string {
 // 只 cancel 的話 bash 死了、孫行程還握著管線和埠口活著。
 func (tm *TaskManager) KillAll() {
 	tm.mu.Lock()
+	tm.closed = true
+	tm.mu.Unlock()
+
+	deadline, cancel := context.WithTimeout(context.Background(), killAllReapTimeout)
+	defer cancel()
+	// 正走在 fork/exec 路上的 Start 要先等它登記進 tasks，否則下面的快照看不到它、它隨後照樣活過關機。
+	landed := make(chan struct{})
+	go func() { tm.starting.Wait(); close(landed) }()
+	select {
+	case <-landed:
+	case <-deadline.Done():
+	}
+
+	tm.mu.Lock()
 	all := make([]*taskState, 0, len(tm.tasks))
 	for _, ts := range tm.tasks {
 		ts.kill()
@@ -283,11 +311,10 @@ func (tm *TaskManager) KillAll() {
 	}
 	tm.mu.Unlock()
 
-	deadline := time.After(killAllReapTimeout)
 	for _, ts := range all {
 		select {
 		case <-ts.exited:
-		case <-deadline:
+		case <-deadline.Done():
 			return
 		}
 	}

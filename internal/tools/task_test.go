@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -169,5 +171,78 @@ func TestTaskManager_KillAllReapsProcessTree(t *testing.T) {
 	ts.mu.Unlock()
 	if !done {
 		t.Fatal("KillAll 回來時任務仍未結束：孫行程還活著、握著輸出管線")
+	}
+}
+
+// shell 先退出、被 Wait 收屍後，Getpgid(shell PID) 就查不到了；若清理時才查 pgid，fallback 只殺得到
+// 已死的 shell，同組孫行程照活——`cmd &` 起 dev server 正是這個形狀。
+func TestTaskManager_KillAllAfterShellExited(t *testing.T) {
+	tm := NewTaskManager(sandbox.HostExecutor{}, t.TempDir())
+	id, err := tm.Start("sleep 30 &")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond) // shell 背景化 sleep 後立刻退出；sleep 仍握著輸出管線
+
+	start := time.Now()
+	tm.KillAll()
+	ts := tm.get(id)
+	ts.mu.Lock()
+	done := ts.done
+	ts.mu.Unlock()
+	if !done {
+		t.Fatalf("shell 已退出時 KillAll 收不到同組孫行程（等了 %v 仍在跑）", time.Since(start))
+	}
+}
+
+// gatedExecutor 讓 Command 卡在閘門前，模擬 Start 正走在 fork/exec 路上。
+type gatedExecutor struct {
+	sandbox.HostExecutor
+	entered, release chan struct{}
+}
+
+func (g gatedExecutor) Command(ctx context.Context, command, workDir string) (*exec.Cmd, error) {
+	close(g.entered)
+	<-g.release
+	return g.HostExecutor.Command(ctx, command, workDir)
+}
+
+// 關機時正好有 Start 走在 fork/exec 路上：KillAll 只看已登記的任務就先回來，那個任務隨後照樣
+// 啟動、登記、活過關機。
+func TestTaskManager_KillAllCatchesInFlightStart(t *testing.T) {
+	g := gatedExecutor{entered: make(chan struct{}), release: make(chan struct{})}
+	tm := NewTaskManager(g, t.TempDir())
+	t.Cleanup(func() {
+		for _, ts := range tm.tasks {
+			ts.kill()
+		}
+	})
+
+	startErr := make(chan error, 1)
+	go func() {
+		_, err := tm.Start("sleep 30")
+		startErr <- err
+	}()
+	<-g.entered
+
+	killed := make(chan struct{})
+	go func() { tm.KillAll(); close(killed) }()
+	time.Sleep(50 * time.Millisecond)
+	close(g.release)
+	<-killed
+	err := <-startErr
+
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for id, ts := range tm.tasks {
+		ts.mu.Lock()
+		running := !ts.done
+		ts.mu.Unlock()
+		if running {
+			t.Fatalf("KillAll 回來後仍有任務 %s 在跑：關機期間正在啟動的任務漏網了", id)
+		}
+	}
+	if err == nil {
+		t.Error("關機中啟動的任務不該回報成功")
 	}
 }
