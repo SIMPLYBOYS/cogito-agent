@@ -246,13 +246,23 @@ func (tm *TaskManager) Kill(id string) error {
 
 // kill 標記終止並收掉整棵行程樹，回報呼叫前是否已結束。Kill 與 KillAll 共用這一條：
 // cancel 只殺得到 bash，真正在跑的（dev server / build）是孫行程。
+//
+// 已結束（Wait 已返回）的任務不再發任何訊號：組 ID 就是當初的 PID，組內沒人之後系統可以把它
+// 發給不相干的行程，對舊 ID 送 SIGKILL 會殺到別人的整組。代價是 `cmd > log &` 這種不握管線的
+// 孫行程，任務顯示已結束後就收不到了——從組 ID 分不出那是它還是重用者。
+// ponytail: 讀 done 與送訊號之間仍有微秒級空窗（最後一個成員恰好此時死掉、PID 又恰好輪回）；
+// 要根除得讓組長保持未收屍（waitid WNOWAIT），跨平台代價不值得。
 func (ts *taskState) kill() (alreadyDone bool) {
 	ts.mu.Lock()
 	alreadyDone = ts.done
-	ts.killed = true
+	if !alreadyDone {
+		ts.killed = true
+	}
 	ts.mu.Unlock()
 	ts.cancel()
-	sandbox.KillTree(ts.cmd)
+	if !alreadyDone {
+		sandbox.KillTree(ts.cmd)
+	}
 	return alreadyDone
 }
 

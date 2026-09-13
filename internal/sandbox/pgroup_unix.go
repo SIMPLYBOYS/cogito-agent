@@ -19,6 +19,7 @@ func setPgid(cmd *exec.Cmd) {
 // pgid 不能在這時才用 Getpgid(shell PID) 查：`cmd &` 這種形狀 shell 會先退出、被 Wait 收屍，
 // 之後就查不到了，只剩孫行程握著管線活著。setPgid 用 Pgid 0，組 ID 就是當初的 PID，
 // 而組內還有人活著，這個 ID 就不會被系統重用——直接拿 PID 殺整組即可。
+// 前提是呼叫端確定組還沒散（Wait 尚未返回）：組內沒人之後 ID 可以被別人拿去用，這時再殺會殺錯組。
 // 沒 setPgid 過的命令不能這樣做（它和我們同組，負號 PID 殺不到或殺錯），只殺直接子行程。
 func killGroup(cmd *exec.Cmd) {
 	if cmd.Process == nil {

@@ -40,6 +40,11 @@ func runCombined(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 	case err := <-done:
 		return buf.Bytes(), err
 	case <-ctx.Done():
+		select {
+		case err := <-done: // 兩邊同時就緒時 select 隨機挑；已跑完就別對可能已散的組開槍（見 killGroup）
+			return buf.Bytes(), err
+		default:
+		}
 		killGroup(cmd)
 		<-done // 收屍。管線的寫入端全死了，Wait 立刻回來——讀 buf 也才沒有 data race
 		return buf.Bytes(), ctx.Err()
