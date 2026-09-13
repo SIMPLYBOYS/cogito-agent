@@ -213,40 +213,47 @@ func (m *SubagentManager) Await(ctx context.Context, ids []string, all bool, tim
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
-		pending := 0
+		var pending []<-chan struct{}
 		for _, st := range waiting {
 			select {
 			case <-st.finished:
 			default:
-				pending++
+				pending = append(pending, st.finished)
 			}
 		}
-		if pending == 0 || (!all && pending < len(waiting)) {
+		if len(pending) == 0 || (!all && len(pending) < len(waiting)) {
 			return m.awaitReport(ids, "")
 		}
-		// 還沒達標：睡在「任何一個結束」上。all 模式下醒來會再繞一圈檢查剩下的。
-		cases := make([]<-chan struct{}, 0, len(waiting))
-		for _, st := range waiting {
-			cases = append(cases, st.finished)
-		}
+		// 還沒達標：只睡在【還沒結束】的上面。已關閉的 channel 放進來會讓每一輪立刻醒來，
+		// 變成熱迴圈；all 模式下醒來會再繞一圈檢查剩下的。
+		stop := make(chan struct{})
+		note := ""
 		select {
 		case <-ctx.Done():
-			return m.awaitReport(ids, "（等待被中止，背景子 agent 仍在跑，稍後可用 subagent_result 查）")
+			note = "（等待被中止，背景子 agent 仍在跑，稍後可用 subagent_result 查）"
 		case <-timer.C:
-			return m.awaitReport(ids, fmt.Sprintf("（等了 %s 仍未達標，背景子 agent 仍在跑，可再 await 或改用 subagent_result）", timeout))
-		case <-anyOf(cases):
+			note = fmt.Sprintf("（等了 %s 仍未達標，背景子 agent 仍在跑，可再 await 或改用 subagent_result）", timeout)
+		case <-anyOf(stop, pending):
+		}
+		close(stop)
+		if note != "" {
+			return m.awaitReport(ids, note)
 		}
 	}
 }
 
-// anyOf 回傳一個「任一輸入 channel 關閉就關閉」的 channel。
-func anyOf(chans []<-chan struct{}) <-chan struct{} {
+// anyOf 回傳一個「任一輸入 channel 關閉就關閉」的 channel。呼叫端醒來或放棄等待後必須
+// close(stop)：否則等著未結束者的 goroutine 會一直卡到對方結束為止。
+func anyOf(stop <-chan struct{}, chans []<-chan struct{}) <-chan struct{} {
 	out := make(chan struct{})
 	var once sync.Once
 	for _, c := range chans {
 		go func(c <-chan struct{}) {
-			<-c
-			once.Do(func() { close(out) })
+			select {
+			case <-c:
+				once.Do(func() { close(out) })
+			case <-stop:
+			}
 		}(c)
 	}
 	return out

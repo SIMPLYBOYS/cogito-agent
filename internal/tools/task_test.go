@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,5 +119,55 @@ func TestSyncBuffer_Cap(t *testing.T) {
 	}
 	if !strings.Contains(s, "BCDE") {
 		t.Errorf("應保留尾部: %q", s)
+	}
+}
+
+// 名額檢查與登記之間隔著 fork/exec（數 ms）。引擎同一輪會並行跑工具，兩個 bash_background
+// 同時進來就能一起通過檢查——上限變成擺設。
+func TestTaskManager_ConcurrencyLimitUnderRace(t *testing.T) {
+	tm := NewTaskManager(sandbox.HostExecutor{}, t.TempDir())
+	defer tm.KillAll()
+
+	const callers = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	started := 0
+	gate := make(chan struct{})
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-gate
+			if _, err := tm.Start("sleep 30"); err == nil {
+				mu.Lock()
+				started++
+				mu.Unlock()
+			}
+		}()
+	}
+	close(gate)
+	wg.Wait()
+	if started > MaxBackgroundTasks {
+		t.Fatalf("並發上限 %d 被突破：%d 個呼叫同時進來，成功啟動 %d 個", MaxBackgroundTasks, callers, started)
+	}
+}
+
+// 關機走 KillAll。它若只 cancel（只殺 bash），bash 底下的孫行程會活下來繼續佔著輸出管線與埠口，
+// Wait 也就永遠等不到。KillAll 回來時，每個任務都必須真的結束了。
+func TestTaskManager_KillAllReapsProcessTree(t *testing.T) {
+	tm := NewTaskManager(sandbox.HostExecutor{}, t.TempDir())
+	id, err := tm.Start("sleep 30; true") // 多一個 `; true`，bash 才會 fork 出 sleep 而不是直接 exec
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // 讓 bash 真的把 sleep 拉起來
+
+	tm.KillAll()
+	ts := tm.get(id)
+	ts.mu.Lock()
+	done := ts.done
+	ts.mu.Unlock()
+	if !done {
+		t.Fatal("KillAll 回來時任務仍未結束：孫行程還活著、握著輸出管線")
 	}
 }

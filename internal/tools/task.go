@@ -21,6 +21,8 @@ const (
 	// 沒有這層，tm.tasks 只增不減——長活 session 每跑一個背景任務就滯留一個 taskState（各含最多
 	// 256KB buffer），單調洩漏。保留最近 N 個讓 List/Output 仍能查近況，記憶體上界 = N×256KB。
 	doneTaskRetention = 10
+	// killAllReapTimeout 是 KillAll 等收屍的上限：SIGKILL 整組通常瞬間就收完，收不掉的不能卡住關機。
+	killAllReapTimeout = 3 * time.Second
 )
 
 // syncBuffer 是併發安全、有上限的輸出緩衝：背景行程 goroutine 寫、Output 工具讀。
@@ -62,7 +64,8 @@ type taskState struct {
 	startedAt time.Time
 	buf       *syncBuffer
 	cancel    context.CancelFunc
-	cmd       *exec.Cmd // 供 Kill 收整棵子孫樹（cancel 只殺得掉直接子行程）
+	cmd       *exec.Cmd     // 供 Kill 收整棵子孫樹（cancel 只殺得掉直接子行程）
+	exited    chan struct{} // Wait 回來後 close：KillAll 靠它確認整棵樹真的收掉了
 
 	mu      sync.Mutex
 	done    bool
@@ -77,6 +80,7 @@ type taskState struct {
 type TaskManager struct {
 	mu       sync.Mutex
 	tasks    map[string]*taskState
+	reserved int // 已通過名額檢查、還在 fork/exec 路上沒登記進 tasks 的任務數
 	executor sandbox.Executor
 	workDir  string
 	seq      int
@@ -127,19 +131,31 @@ func (tm *TaskManager) runningCount() int {
 func (tm *TaskManager) Start(command string) (string, error) {
 	tm.mu.Lock()
 	tm.pruneDoneLocked() // 順手清掉超出保留數的舊結束任務，防長活 session 的 map 單調洩漏
-	if tm.runningCount() >= MaxBackgroundTasks {
+	if tm.runningCount()+tm.reserved >= MaxBackgroundTasks {
 		tm.mu.Unlock()
 		return "", fmt.Errorf("背景任務已達並發上限 %d，請先用 task_kill 收掉不需要的任務", MaxBackgroundTasks)
 	}
 	tm.seq++
 	id := fmt.Sprintf("task-%d", tm.seq)
+	// 名額在鎖內佔好：檢查到登記之間隔著 fork/exec，引擎又會並行跑工具，不佔位的話
+	// 同一輪的多個 bash_background 會一起通過檢查。
+	tm.reserved++
 	tm.mu.Unlock()
+	settle := func(ts *taskState) { // 歸還預留；成功的話同一個臨界區內登記，名額不會有空窗
+		tm.mu.Lock()
+		tm.reserved--
+		if ts != nil {
+			tm.tasks[ts.id] = ts
+		}
+		tm.mu.Unlock()
+	}
 
 	// 刻意用獨立的可取消 context（非 bash 的 30s）——背景任務本來就要長活。
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd, err := tm.executor.Command(ctx, command, tm.workDir)
 	if err != nil {
 		cancel()
+		settle(nil)
 		return "", fmt.Errorf("建立背景命令失敗: %w", err)
 	}
 	// 自成 process group：task_kill 才收得掉【整棵】子孫樹。dev server 這類「bash 起一個真正的
@@ -150,13 +166,13 @@ func (tm *TaskManager) Start(command string) (string, error) {
 	cmd.Stderr = buf
 	if err := cmd.Start(); err != nil {
 		cancel()
+		settle(nil)
 		return "", fmt.Errorf("啟動背景任務失敗: %w", err)
 	}
 
-	ts := &taskState{id: id, command: command, startedAt: time.Now(), buf: buf, cancel: cancel, cmd: cmd}
-	tm.mu.Lock()
-	tm.tasks[id] = ts
-	tm.mu.Unlock()
+	ts := &taskState{id: id, command: command, startedAt: time.Now(), buf: buf, cancel: cancel, cmd: cmd,
+		exited: make(chan struct{})}
+	settle(ts)
 
 	go func(c *exec.Cmd, st *taskState) {
 		err := c.Wait()
@@ -164,6 +180,7 @@ func (tm *TaskManager) Start(command string) (string, error) {
 		st.done = true
 		st.exitErr = err
 		st.mu.Unlock()
+		close(st.exited)
 	}(cmd, ts)
 
 	return id, nil
@@ -207,16 +224,22 @@ func (tm *TaskManager) Kill(id string) error {
 	if ts == nil {
 		return fmt.Errorf("找不到背景任務 %q", id)
 	}
-	ts.mu.Lock()
-	already := ts.done
-	ts.killed = true
-	ts.mu.Unlock()
-	ts.cancel()
-	sandbox.KillTree(ts.cmd) // cancel 只殺 bash；真正在跑的（dev server / build）是孫行程
-	if already {
+	if ts.kill() {
 		return fmt.Errorf("任務 %q 已結束，無需終止", id)
 	}
 	return nil
+}
+
+// kill 標記終止並收掉整棵行程樹，回報呼叫前是否已結束。Kill 與 KillAll 共用這一條：
+// cancel 只殺得到 bash，真正在跑的（dev server / build）是孫行程。
+func (ts *taskState) kill() (alreadyDone bool) {
+	ts.mu.Lock()
+	alreadyDone = ts.done
+	ts.killed = true
+	ts.mu.Unlock()
+	ts.cancel()
+	sandbox.KillTree(ts.cmd)
+	return alreadyDone
 }
 
 // List 列出所有任務及狀態（穩定排序）。
@@ -248,14 +271,24 @@ func (tm *TaskManager) List() string {
 	return string(b)
 }
 
-// KillAll 終止所有任務（cmd 優雅關閉時呼叫，避免殘留孤兒行程）。
+// KillAll 終止所有任務並等它們收屍（cmd 優雅關閉時呼叫，避免殘留孤兒行程）。
+// 回來時每個任務的 Wait 都已返回——管線的寫入端全死了，才代表整棵樹真的收掉；
+// 只 cancel 的話 bash 死了、孫行程還握著管線和埠口活著。
 func (tm *TaskManager) KillAll() {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
+	all := make([]*taskState, 0, len(tm.tasks))
 	for _, ts := range tm.tasks {
-		ts.mu.Lock()
-		ts.killed = true
-		ts.mu.Unlock()
-		ts.cancel()
+		ts.kill()
+		all = append(all, ts)
+	}
+	tm.mu.Unlock()
+
+	deadline := time.After(killAllReapTimeout)
+	for _, ts := range all {
+		select {
+		case <-ts.exited:
+		case <-deadline:
+			return
+		}
 	}
 }

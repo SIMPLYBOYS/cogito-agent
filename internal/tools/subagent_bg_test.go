@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -158,5 +159,30 @@ func TestSubagentTool_SpawnFailureIsError(t *testing.T) {
 	}
 	if out != "" {
 		t.Errorf("回錯誤時不該同時給結果字串，實際：%q", out)
+	}
+}
+
+// wait_all=true 且其中一個已經交件時，已關閉的 channel 會讓每一輪等待立刻醒來；若每輪都替
+// 【所有】channel 開 goroutine，等未完成者的那批會卡到對方交件為止——一次 await 就能堆出上萬個。
+func TestSubagentManager_AwaitAllDoesNotLeakGoroutines(t *testing.T) {
+	r := &perIDRunner{gates: map[string]chan struct{}{
+		"fast": make(chan struct{}), "slow": make(chan struct{}),
+	}}
+	m := NewSubagentManager(r)
+	fast, _ := m.Spawn(SubTask{Prompt: "fast"}, "A")
+	slow, _ := m.Spawn(SubTask{Prompt: "slow"}, "B")
+	defer close(r.gates["slow"])
+	close(r.gates["fast"])
+	waitFor(t, func() bool { return strings.Contains(m.Result(fast), "已完成") }, "fast 應先交件")
+
+	base := runtime.NumGoroutine()
+	m.Await(context.Background(), []string{fast, slow}, true, 100*time.Millisecond)
+
+	deadline := time.Now().Add(time.Second)
+	for runtime.NumGoroutine() > base+2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := runtime.NumGoroutine(); n > base+2 {
+		t.Fatalf("await 回來後殘留 %d 個 goroutine（等待前 %d）", n-base, base)
 	}
 }
