@@ -1,0 +1,230 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "cogito-agent Harness 機制",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "entry",
+      "label": "入口與交付"
+    },
+    {
+      "id": "loop",
+      "label": "回合（engine 主迴圈）"
+    },
+    {
+      "id": "tools",
+      "label": "工具呼叫與觀察"
+    }
+  ],
+  "groups": [
+    {
+      "id": "tool_gate",
+      "label": "每次 ToolCall 必經",
+      "lane": "tools",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "msg",
+    "auth",
+    "boundary",
+    "context",
+    "generate",
+    "guard"
+  ],
+  "nodes": [
+    {
+      "id": "msg",
+      "lane": "entry",
+      "col": 0,
+      "type": "external",
+      "label": "IM 訊息",
+      "sublabel": "Slack / Telegram",
+      "width": 136
+    },
+    {
+      "id": "auth",
+      "lane": "entry",
+      "col": 1,
+      "type": "security",
+      "label": "入口授權",
+      "sublabel": "白名單 fail-closed",
+      "width": 136
+    },
+    {
+      "id": "reply",
+      "lane": "entry",
+      "col": 5,
+      "type": "frontend",
+      "label": "交付回覆",
+      "sublabel": "最終回答推回 IM",
+      "width": 136
+    },
+    {
+      "id": "stop",
+      "lane": "loop",
+      "col": 0,
+      "type": "security",
+      "label": "任務終止",
+      "sublabel": "回報原因給人",
+      "width": 136
+    },
+    {
+      "id": "boundary",
+      "lane": "loop",
+      "col": 1,
+      "type": "backend",
+      "label": "回合邊界檢查",
+      "sublabel": "熔斷 · /stop · steer",
+      "width": 136
+    },
+    {
+      "id": "context",
+      "lane": "loop",
+      "col": 2,
+      "type": "backend",
+      "label": "組裝上下文",
+      "sublabel": "摘要 · 窗口 · Compact",
+      "width": 136
+    },
+    {
+      "id": "generate",
+      "lane": "loop",
+      "col": 3,
+      "type": "cloud",
+      "label": "LLM Generate",
+      "sublabel": "CostTracker 記帳",
+      "width": 136
+    },
+    {
+      "id": "observe",
+      "lane": "tools",
+      "col": 2,
+      "type": "backend",
+      "label": "寫回觀察",
+      "sublabel": "救援指南 · 迴圈探測",
+      "width": 136
+    },
+    {
+      "id": "tool",
+      "lane": "tools",
+      "col": 3,
+      "type": "messagebus",
+      "label": "工具執行",
+      "sublabel": "路徑守衛 · 沙箱",
+      "width": 136
+    },
+    {
+      "id": "guard",
+      "lane": "tools",
+      "col": 4,
+      "type": "security",
+      "label": "policy.Guard",
+      "sublabel": "Deny > Ask > Allow",
+      "width": 136
+    }
+  ],
+  "edges": [
+    {
+      "id": "msg-auth",
+      "from": "msg",
+      "to": "auth"
+    },
+    {
+      "id": "auth-boundary",
+      "from": "auth",
+      "to": "boundary",
+      "label": "Run",
+      "variant": "emphasis",
+      "toSide": "top"
+    },
+    {
+      "id": "boundary-context",
+      "from": "boundary",
+      "to": "context"
+    },
+    {
+      "id": "context-generate",
+      "from": "context",
+      "to": "generate",
+      "variant": "emphasis"
+    },
+    {
+      "id": "generate-guard",
+      "from": "generate",
+      "to": "guard",
+      "label": "ToolCall",
+      "variant": "emphasis"
+    },
+    {
+      "id": "guard-tool",
+      "from": "guard",
+      "to": "tool",
+      "label": "放行",
+      "variant": "security"
+    },
+    {
+      "id": "tool-observe",
+      "from": "tool",
+      "to": "observe",
+      "label": "結果"
+    },
+    {
+      "id": "observe-boundary",
+      "from": "observe",
+      "to": "boundary",
+      "label": "下一回合",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "generate-reply",
+      "from": "generate",
+      "to": "reply",
+      "label": "無工具呼叫",
+      "variant": "emphasis",
+      "role": "branch"
+    },
+    {
+      "id": "boundary-stop",
+      "from": "boundary",
+      "to": "stop",
+      "label": "熔斷 · /stop",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "observe-stop",
+      "from": "observe",
+      "to": "stop",
+      "label": "Deny · 無人值守",
+      "variant": "security",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "硬防線：直接終止任務",
+      "items": [
+        "回合上限 40 輪；單任務成本上限 $1，用到 80% 先提醒收尾",
+        "政策 Deny 或無人值守時的 Ask 一律終止，不讓 agent 換法繞過"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "軟干預：注入提醒後續跑",
+      "items": [
+        "工具報錯注入救援指南；同參數重複失敗注入跳出提醒",
+        "Ask 交人工審批；人拒絕不終止，理由回給模型改道"
+      ]
+    }
+  ]
+}

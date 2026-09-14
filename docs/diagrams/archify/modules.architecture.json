@@ -1,0 +1,351 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "cogito-agent 模組架構",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "人類開發者",
+      "sublabel": "Slack / Telegram",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "chatbot",
+      "type": "backend",
+      "label": "chatbot Core",
+      "sublabel": "internal/chatbot",
+      "tag": "入口授權 fail-closed",
+      "pos": [
+        260,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "AgentEngine",
+      "sublabel": "ReAct 主迴圈",
+      "tag": "回合 / 成本熔斷",
+      "pos": [
+        480,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "policy",
+      "type": "security",
+      "label": "policy.Guard",
+      "sublabel": "Deny > Ask > Allow",
+      "pos": [
+        700,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "registry",
+      "type": "backend",
+      "label": "Tool Registry",
+      "sublabel": "internal/tools",
+      "pos": [
+        920,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "sandbox",
+      "type": "security",
+      "label": "Sandbox Executor",
+      "sublabel": "Host / Docker",
+      "pos": [
+        1140,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "evolve",
+      "type": "backend",
+      "label": "evolve",
+      "sublabel": "反思提案 · gate",
+      "pos": [
+        260,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "context",
+      "type": "backend",
+      "label": "Context 層",
+      "sublabel": "composer · compactor",
+      "tag": "記憶 / KG recall",
+      "pos": [
+        480,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "provider",
+      "type": "cloud",
+      "label": "LLM Provider",
+      "sublabel": "Claude / OpenAI 相容",
+      "tag": "CostTracker 包裝",
+      "pos": [
+        700,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "external",
+      "label": "MCP Gateway",
+      "sublabel": "stdio / HTTP",
+      "pos": [
+        920,
+        110
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "dashboard",
+      "type": "frontend",
+      "label": "claw-dashboard",
+      "sublabel": "loopback 維運面板",
+      "pos": [
+        260,
+        490
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "workspace",
+      "type": "database",
+      "label": "Workspace",
+      "sublabel": "per-channel 目錄",
+      "tag": ".claw/ 控制面唯讀",
+      "pos": [
+        1140,
+        490
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "claw 常駐行程",
+      "wraps": [
+        "chatbot",
+        "engine",
+        "policy",
+        "registry",
+        "sandbox",
+        "evolve",
+        "context",
+        "provider",
+        "mcp"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "每次 ToolCall 必經",
+      "wraps": [
+        "policy",
+        "registry",
+        "sandbox"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-to-chatbot",
+      "from": "users",
+      "to": "chatbot",
+      "label": "訊息 / 口令",
+      "variant": "emphasis"
+    },
+    {
+      "id": "chatbot-to-engine",
+      "from": "chatbot",
+      "to": "engine",
+      "label": "Run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-to-policy",
+      "from": "engine",
+      "to": "policy",
+      "label": "ToolCall",
+      "variant": "emphasis"
+    },
+    {
+      "id": "policy-to-registry",
+      "from": "policy",
+      "to": "registry",
+      "label": "放行",
+      "variant": "security"
+    },
+    {
+      "id": "registry-to-sandbox",
+      "from": "registry",
+      "to": "sandbox",
+      "label": "bash"
+    },
+    {
+      "id": "sandbox-to-workspace",
+      "from": "sandbox",
+      "to": "workspace",
+      "label": "rooted 執行",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        1215,
+        427
+      ]
+    },
+    {
+      "id": "registry-to-workspace",
+      "from": "registry",
+      "to": "workspace",
+      "label": "檔案工具 · 路徑守衛",
+      "fromSide": "bottom",
+      "toSide": "left"
+    },
+    {
+      "id": "engine-to-context",
+      "from": "engine",
+      "to": "context",
+      "label": "Build · Compact",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelDx": -36
+    },
+    {
+      "id": "engine-to-provider",
+      "from": "engine",
+      "to": "provider",
+      "label": "Generate",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "chatbot-to-evolve",
+      "from": "chatbot",
+      "to": "evolve",
+      "label": "反思 · 放行",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "registry-to-mcp",
+      "from": "registry",
+      "to": "mcp",
+      "label": "MCP 工具",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "dashboard-to-engine",
+      "from": "dashboard",
+      "to": "engine",
+      "label": "內嵌 chat",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "users-to-dashboard",
+      "from": "users",
+      "to": "dashboard",
+      "label": "操作員",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "兩個入口",
+      "items": [
+        "chatbot 先過白名單授權，再交給 AgentEngine",
+        "面板內嵌 chat 自建引擎，同樣掛 policy.Guard"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "上下文與模型",
+      "items": [
+        "composer 組 system prompt：AGENTS.md、技能索引、記憶索引",
+        "CostTracker 包住 Provider 記帳，供成本熔斷使用"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "安全邊界",
+      "items": [
+        "每次 ToolCall 先過 policy.Guard，Deny 即終止任務",
+        "檔案工具擋 .. / 絕對路徑 / symlink；bash 可進 Docker"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "自我進化",
+      "items": [
+        "反思產物只寫暫存區，過 gate 並經人工放行才生效"
+      ]
+    }
+  ]
+}
