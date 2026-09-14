@@ -78,6 +78,20 @@
 
 > 各設計維度的取捨、scoped 決定與對照主流 agent（Claude Code / Codex / Hermes），見 [DESIGN.md](DESIGN.md)；競品定位見 [POSITIONING.md](POSITIONING.md)。
 
+**模組架構**：兩個入口（chatbot 先過白名單授權；面板內嵌 chat 自建引擎），主路徑 AgentEngine → policy.Guard → Tool Registry → Sandbox → Workspace，旁邊是 Context、LLM Provider、MCP 與 evolve。互動版：[`modules.html`](docs/diagrams/archify/modules.html)（下載後用瀏覽器開啟）。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/archify/modules.dark.png">
+  <img src="docs/diagrams/archify/modules.light.png" alt="cogito-agent 模組架構：chatbot 與 dashboard 兩個入口、AgentEngine、policy.Guard、Tool Registry、Sandbox Executor、Workspace，以及 Context、LLM Provider、MCP Gateway、evolve">
+</picture>
+
+**Harness 機制**：一回合是一個順時針的環。回合邊界檢查（`/stop`、steer、回合與成本熔斷）→ 組裝上下文 → Generate → policy.Guard → 工具執行 → 寫回觀察 → 下一回合。harness 主動終止任務的地方有兩處：回合邊界的熔斷，以及觀察寫回後才檢查到的政策拒絕。互動版：[`harness.html`](docs/diagrams/archify/harness.html)。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/archify/harness.dark.png">
+  <img src="docs/diagrams/archify/harness.light.png" alt="cogito-agent harness 迴圈：回合邊界檢查、組裝上下文、LLM Generate、policy.Guard、工具執行、寫回觀察，熔斷或政策拒絕時終止任務">
+</picture>
+
 ```mermaid
 flowchart TB
   HUMAN["人類開發者與運維"]

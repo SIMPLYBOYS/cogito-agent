@@ -80,6 +80,20 @@ Think of it as a **digital employee embedded in your team**: it lives in your IM
 
 > Per-dimension trade-offs, scoped decisions, and comparisons against mainstream agents (Claude Code / Codex / Hermes) are in [DESIGN.md](DESIGN.md); competitive positioning in [POSITIONING.md](POSITIONING.md).
 
+**Module map**: two entrypoints (the chat bot checks the allowlist first; the dashboard's embedded chat builds its own engine), the main path AgentEngine → policy.Guard → Tool Registry → Sandbox → Workspace, and the Context, LLM Provider, MCP and evolve modules beside it. Interactive version: [`modules.html`](docs/diagrams/archify/modules.html) (download and open in a browser). Figure labels are in Traditional Chinese.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/archify/modules.dark.png">
+  <img src="docs/diagrams/archify/modules.light.png" alt="cogito-agent module map: chatbot and dashboard entrypoints, AgentEngine, policy.Guard, Tool Registry, Sandbox Executor and Workspace, with Context, LLM Provider, MCP Gateway and evolve">
+</picture>
+
+**Harness mechanism**: one turn is a clockwise loop. Turn-boundary checks (`/stop`, steer, turn and cost breakers) → context assembly → Generate → policy.Guard → tool execution → observation write-back → next turn. The harness stops a task in two places: a breaker at the turn boundary, or a policy denial the loop detects after the observation is written. Interactive version: [`harness.html`](docs/diagrams/archify/harness.html).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/archify/harness.dark.png">
+  <img src="docs/diagrams/archify/harness.light.png" alt="cogito-agent harness loop: turn-boundary checks, context assembly, LLM Generate, policy.Guard, tool execution, observation write-back, with termination on breakers or policy denial">
+</picture>
+
 ```mermaid
 flowchart TB
   HUMAN["Human developers & operators"]
