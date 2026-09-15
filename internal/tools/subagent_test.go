@@ -179,6 +179,34 @@ func TestSubagent_ModelAndEffort(t *testing.T) {
 	}
 }
 
+// 這次派工指定的模型等級蓋過具名 agent 定義；只收 haiku／sonnet／opus，其他值拒絕、不拉起子 agent。
+func TestSubagent_ModelOverridePerCall(t *testing.T) {
+	dir := t.TempDir()
+	writeAgentDef(t, dir, "reviewer",
+		"---\nname: reviewer\ndescription: 審查\nmodel: claude-opus-4-8\ntools: [read_file]\n---\n你是 reviewer。")
+	fr := &fakeRunner{}
+	st := NewSubagentTool(fr, superReg(), nil, dir)
+	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"整理","agent_type":"reviewer","model":"haiku"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if fr.gotModel != "haiku" {
+		t.Errorf("派工指定的等級應蓋過定義，got %q", fr.gotModel)
+	}
+	fr = &fakeRunner{}
+	st = NewSubagentTool(fr, superReg(), nil, dir)
+	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"整理","agent_type":"reviewer"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if fr.gotModel != "claude-opus-4-8" {
+		t.Errorf("沒指定就用定義的，got %q", fr.gotModel)
+	}
+	fr = &fakeRunner{}
+	st = NewSubagentTool(fr, superReg(), nil, dir)
+	if _, err := st.Execute(context.Background(), []byte(`{"task_prompt":"整理","model":"claude-opus-5"}`)); err == nil || fr.called {
+		t.Errorf("完整 id 不收（只收等級別名），err=%v called=%v", err, fr.called)
+	}
+}
+
 // 不存在的 agent_type → 回真錯誤（registry 標 IsError），且不拉起子 agent。
 //
 // 這條原本斷言「error-as-observation」——回 (errText, nil)。那個契約的理由是「不中斷主

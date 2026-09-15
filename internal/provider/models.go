@@ -13,6 +13,7 @@ import (
 	"context"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -157,4 +158,33 @@ func (c *CachedLister) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	}
 	c.cache, c.at = got, time.Now()
 	return got, nil
+}
+
+// subagentAliases：主 agent 派子 agent 時依任務難度選的三個等級（spawn_subagent 的 model 參數）。
+// 只收別名不收完整 id：讓主 agent 做「難易判斷」而不是去背（或編）型號；型號升級改這一處。
+var subagentAliases = map[string]string{
+	"haiku":  "claude-haiku-4-5",
+	"sonnet": "claude-sonnet-5",
+	"opus":   "claude-opus-5",
+}
+
+// ResolveModelAlias 把子 agent 的模型別名解成實際 id。
+//   - 不是別名（具名 agent 定義裡寫的完整 id、或空字串）→ 原樣回傳
+//   - 是別名、主引擎是 Claude → 對應的 Claude id
+//   - 是別名、主引擎不是 Claude（OpenAI 相容端點）→ 回空字串＝沿用主引擎，不把 claude id 送去別家
+func ResolveModelAlias(model, current string) string {
+	id, ok := subagentAliases[strings.ToLower(strings.TrimSpace(model))]
+	if !ok {
+		return model
+	}
+	if !strings.HasPrefix(current, "claude-") {
+		return ""
+	}
+	return id
+}
+
+// IsSubagentAlias 回報 model 是不是可接受的子 agent 等級別名（haiku／sonnet／opus）。
+func IsSubagentAlias(model string) bool {
+	_, ok := subagentAliases[strings.ToLower(strings.TrimSpace(model))]
+	return ok
 }

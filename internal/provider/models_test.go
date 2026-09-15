@@ -117,3 +117,19 @@ func TestListModelsCarriesWindow(t *testing.T) {
 		t.Errorf("剝除日期後的 id 應查得到，got %d", w)
 	}
 }
+
+func TestResolveModelAlias(t *testing.T) {
+	cases := []struct{ in, current, want string }{
+		{"haiku", "claude-opus-5", "claude-haiku-4-5"},
+		{"Sonnet", "claude-opus-5", "claude-sonnet-5"},
+		{"opus", "claude-haiku-4-5", "claude-opus-5"},
+		{"haiku", "gpt-4o-mini", ""},                            // 主引擎不是 Claude：沿用主引擎，不送 claude id 去別家
+		{"claude-opus-4-8", "claude-opus-5", "claude-opus-4-8"}, // 定義裡寫的完整 id 原樣通過
+		{"", "claude-opus-5", ""},
+	}
+	for _, c := range cases {
+		if got := ResolveModelAlias(c.in, c.current); got != c.want {
+			t.Errorf("ResolveModelAlias(%q, %q) = %q, want %q", c.in, c.current, got, c.want)
+		}
+	}
+}

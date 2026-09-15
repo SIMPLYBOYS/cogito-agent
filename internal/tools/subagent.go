@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
@@ -127,6 +128,11 @@ func (t *SubagentTool) Definition() schema.ToolDefinition {
 					"type":        "string",
 					"description": "（可選）要綁定給子 agent的技能名稱，須與 System Prompt『技能索引』中的名稱一致。指定後該技能正文只進子 context。",
 				},
+				"model": map[string]interface{}{
+					"type":        "string",
+					"enum":        []string{"haiku", "sonnet", "opus"},
+					"description": "（可選）依這件事的難度選子 agent 的模型等級：haiku＝照做不用判斷（抓資料、整理、格式轉換）；sonnet＝一般分析、寫初稿、單一模組修改；不帶＝沿用你自己的模型（架構、除錯、決策、辯論）。會蓋過具名 agent 定義裡的模型。",
+				},
 				"background": map[string]interface{}{
 					"type":        "boolean",
 					"description": "（可選）true＝丟背景非同步跑、立即回傳 ID（用 subagent_result 查結果）；預設 false＝同步等到回報。背景模式在共享工作區跑（不做 worktree 隔離）。",
@@ -141,6 +147,7 @@ type subagentArgs struct {
 	TaskPrompt string `json:"task_prompt"`
 	AgentType  string `json:"agent_type"`
 	Skill      string `json:"skill"`
+	Model      string `json:"model"`
 	Background bool   `json:"background"`
 }
 
@@ -181,6 +188,17 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		}
 	}
 
+	// 模型：這次派工指定的等級（主 agent 依難度選）優先於具名 agent 定義裡寫的；別名在引擎端解成實際 id。
+	// 只收三個等級別名——主 agent 做的是難易判斷，不該自己拼型號（拼錯就是一次白花的 API 呼叫）。
+	model := def.Model
+	if input.Model != "" {
+		if !provider.IsSubagentAlias(input.Model) {
+			return "", fmt.Errorf("model 只接受 haiku／sonnet／opus（不帶＝沿用你自己的模型），收到 %q", input.Model)
+		}
+		model = input.Model
+		log.Printf("[Subagent] 🎚️ 這次派工指定模型等級 %q（蓋過定義的 %q）\n", input.Model, def.Model)
+	}
+
 	// 工具集：具名 agent 宣告了 tools 就用（可含 write/edit），否則預設唯讀探路者工具集（安全底線）。
 	toolset := defaultSubagentTools
 	if len(def.Tools) > 0 {
@@ -208,7 +226,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 			Prompt:       input.TaskPrompt,
 			SkillBody:    skillBody,
 			SystemPrompt: def.Prompt,
-			Model:        def.Model,
+			Model:        model,
 			MaxTokens:    effortToMaxTokens(def.Effort),
 			Registry:     reg,
 			Reporter:     nil, // 背景＝silent，用 subagent_result 取結果
@@ -258,7 +276,7 @@ func (t *SubagentTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		SkillBody:    skillBody,
 		SystemPrompt: def.Prompt, // 空＝RunSub 回退預設探路者 prompt
 		Name:         input.AgentType,
-		Model:        def.Model,
+		Model:        model,
 		MaxTokens:    effortToMaxTokens(def.Effort),
 		Registry:     reg,
 		Reporter:     t.reporter,
