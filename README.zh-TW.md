@@ -379,7 +379,7 @@ go run ./cmd/claw   # 啟動日誌會顯示「[mcp] 已掛載 server "filesystem
 | `/steer <一句話>` | 對**進行中**的任務插話糾正方向（別名 `steer`／`插話`）：塞進插話佇列、回合邊界收進對話——不打斷正在跑的那一步、不作廢已燒的錢。閒置時不代發成新任務（「糾正」不得靜默升級成「開工」）。這是 steer→constrain→stop 階梯的第一階；constrain 刻意未做（MaxTurns/MaxCostUSD 已是硬防線） |
    | `status` | 顯示本會話花費 / token / 歷史長度 / 模型 / Plan / 忙碌狀態 |
    | `get <路徑>` | 把本頻道工作區裡的檔案傳回聊天（Telegram `sendDocument`／Slack 檔案上傳；上限 50 MB）。**user-pull**——只有人打指令才外傳，agent 沒有上傳工具（防 prompt injection 外滲） |
-   | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效） |
+   | `model` / `model <id>` / `model reset` | 查看 / 切換 / 還原本頻道模型（per-channel，經 `Configurable` provider；下個任務生效）。`claude-*` 走 Anthropic，其他模型 id 走 OpenAI 相容端點——bot 跑 Claude 時也一樣 |
    | `compress` | 手動摺疊 context（把舊訊息摺進滾動摘要），縮短歷史省成本 |
    | `learn` | 從本次對話蒸餾一個【提案】技能（進暫存區，過 `skillgate` 把關才生效） |
    | `approve` / `reject`（可帶 taskID） | 放行 / 拒絕被危險指令審批攔下的工具呼叫（僅 `COGITO_ADMIN_USERS`） |
@@ -716,6 +716,8 @@ export OPENAI_MODEL=gpt-4o-mini
 go run ./cmd/claw-cli -prompt "..."
 ```
 
+**混用兩家**：請求送去哪裡由模型 id 決定。主 provider 是 Claude 時，設好 `OPENAI_API_KEY`（需要時加 `OPENAI_BASE_URL`），指定任何非 `claude-` 開頭的模型就會送到該 OpenAI 相容端點：頻道的 `model <id>`、具名 agent 的 `model:`、`COGITO_REFLECT_MODEL` 都適用。反過來也行：主 provider 是 OpenAI 時，`claude-*` 在設了 `ANTHROPIC_API_KEY` 時送 Anthropic；沒設就忽略、沿用目前模型（內建的審查類 agent 都指定 `claude-opus-4-8`）。內建價目表沒有的模型會用保守估價計費，實際單價請寫進 `.claw/pricing.json`。
+
 ### 具名子 agent（`.claw/agents/*.md`）
 
 把「單一探路者」擴成一組專才：在 `<workspace>/.claw/agents/<name>.md` 用 frontmatter 定義角色，主 agent 呼叫 `spawn_subagent` 時帶 `agent_type` 即可派出。複用同一套隔離委派 + 能力沙箱機制，可並行派多路。
@@ -727,7 +729,7 @@ go run ./cmd/claw-cli -prompt "..."
 name: code-reviewer
 description: 從正確性/安全/可讀性審查程式碼變更，只讀不改
 tools: [read_file, bash]        # 可選；限縮到子 agent 工具集的子集，省略＝沿用預設探索工具
-model: claude-opus-4-8          # 可選；該 agent 用的模型（省略＝沿用主引擎模型）
+model: claude-opus-4-8          # 可選；該 agent 用的模型（省略＝沿用主引擎模型；非 claude- 開頭走 OpenAI 相容端點）
 effort: high                    # 可選；low/medium/high → 輸出 token 上限 2048/4096/8192
 isolation: worktree             # 可選；在 git worktree 隔離執行，完事把 diff apply 回主工作區
 ---

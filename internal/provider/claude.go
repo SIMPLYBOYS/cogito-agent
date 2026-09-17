@@ -54,7 +54,15 @@ func (p *ClaudeProvider) ModelName() string {
 }
 
 // Configure 回傳換了 model / maxTokens 的變體（值拷貝，原 provider 不變；共用同一 client）。
+// 指定的不是 Claude 模型時換成 OpenAI 相容 provider（OPENAI_* 設定），頻道 `model gpt-…`、具名 agent
+// 的 model、COGITO_REFLECT_MODEL 才指得到別家。沒設 OPENAI_API_KEY 也照換：第一次呼叫回的
+// 「缺少 OPENAI_API_KEY」比 Anthropic 的「找不到模型」好懂。
 func (p *ClaudeProvider) Configure(model string, maxTokens int) LLMProvider {
+	if model != "" && !isClaudeModel(model) {
+		cfg := openAIConfigFromEnv()
+		cfg.Model = model
+		return NewOpenAIProvider(cfg)
+	}
 	np := *p
 	if model != "" {
 		np.model = model

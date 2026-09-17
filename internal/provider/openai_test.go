@@ -166,3 +166,67 @@ func TestOpenAIProvider_NoRetryOn4xx(t *testing.T) {
 		t.Errorf("4xx 不該重試，應只打 1 次，實際 %d 次", n)
 	}
 }
+
+// okServer 是只回一句話的 OpenAI 相容假端點，記下收到的 model 與 Authorization。
+func okServer(t *testing.T, gotModel, gotAuth *string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req oaiRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		*gotModel, *gotAuth = req.Model, r.Header.Get("Authorization")
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// 主引擎跑 Claude 時，頻道 `model gpt-…`、具名 agent 的 model、COGITO_REFLECT_MODEL 指到非 Claude 模型，
+// 請求要送到 OpenAI 相容端點——而不是把 gpt id 丟給 Anthropic，換一句「找不到模型」。
+func TestClaudeConfigure_NonClaudeModelGoesToOpenAIEndpoint(t *testing.T) {
+	var gotModel, gotAuth string
+	srv := okServer(t, &gotModel, &gotAuth)
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "oai-key")
+	t.Setenv("OPENAI_MAX_CONTEXT_TOKENS", "64000")
+
+	p := (&ClaudeProvider{model: "claude-opus-5"}).Configure("gpt-4o-mini", 0)
+	if _, ok := p.(*OpenAIProvider); !ok {
+		t.Fatalf("指定 gpt-4o-mini 仍留在 %T，請求會送去 Anthropic", p)
+	}
+	if _, err := p.Generate(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil); err != nil {
+		t.Fatalf("Generate 失敗: %v", err)
+	}
+	if gotModel != "gpt-4o-mini" || gotAuth != "Bearer oai-key" {
+		t.Errorf("端點收到 model=%q auth=%q，want gpt-4o-mini / Bearer oai-key", gotModel, gotAuth)
+	}
+	if w := p.MaxContextTokens(); w != 64000 {
+		t.Errorf("窗口應取 OPENAI_MAX_CONTEXT_TOKENS=64000，got %d", w)
+	}
+	if c := (&ClaudeProvider{model: "claude-opus-5"}).Configure("claude-haiku-4-5", 0); c.ModelName() != "claude-haiku-4-5" {
+		t.Errorf("claude- 模型應留在 Claude，got %T %q", c, c.ModelName())
+	}
+}
+
+// 內建的審查類具名 agent 都寫 model: claude-opus-4-8。主引擎是 OpenAI 相容端點時：沒有 Anthropic 金鑰就
+// 沿用本端點的模型（把 claude id 送去別家只會換來一次必然失敗的呼叫）；有金鑰就改走 Claude。
+func TestOpenAIConfigure_ClaudeModel(t *testing.T) {
+	var gotModel, gotAuth string
+	srv := okServer(t, &gotModel, &gotAuth)
+	base := NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", Model: "gpt-4o-mini", HTTPClient: srv.Client()})
+
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	p := base.Configure("claude-opus-4-8", 0)
+	if _, err := p.Generate(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil); err != nil {
+		t.Fatalf("Generate 失敗: %v", err)
+	}
+	if gotModel != "gpt-4o-mini" {
+		t.Errorf("沒有 Anthropic 金鑰時應沿用 gpt-4o-mini，端點卻收到 %q", gotModel)
+	}
+
+	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
+	seedWindows(t, map[string]int{}) // 讓 NewClaudeProvider 不在背景打網路
+	cp, ok := base.Configure("claude-opus-4-8", 2048).(*ClaudeProvider)
+	if !ok || cp.model != "claude-opus-4-8" || cp.maxTokens != 2048 {
+		t.Fatalf("有 Anthropic 金鑰時應改走 Claude（claude-opus-4-8, maxTokens 2048），got %+v ok=%v", cp, ok)
+	}
+}

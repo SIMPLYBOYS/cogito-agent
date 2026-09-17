@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -63,7 +64,18 @@ func (p *OpenAIProvider) MaxContextTokens() int { return p.cfg.MaxContextTokens 
 
 // Configure 回傳換了 model 的變體（沿用同一端點/金鑰/HTTP client）。maxTokens 目前不套用——
 // 此 provider 的請求未送 max_tokens（由端點自行決定），effort 對 OpenAI 相容路徑靜默忽略。
-func (p *OpenAIProvider) Configure(model string, _ int) LLMProvider {
+//
+// 指定 claude- 模型（內建審查類具名 agent 都寫 claude-opus-4-8）：有 ANTHROPIC_API_KEY 就改走 Claude；
+// 沒有就沿用本端點的模型——把 claude id 送去別家只會換來一次必然失敗的呼叫，而 NewClaudeProvider
+// 缺金鑰會 panic。
+func (p *OpenAIProvider) Configure(model string, maxTokens int) LLMProvider {
+	if isClaudeModel(model) {
+		if os.Getenv("ANTHROPIC_API_KEY") != "" {
+			return NewClaudeProvider(model).Configure("", maxTokens)
+		}
+		log.Printf("[OpenAI] 未設 ANTHROPIC_API_KEY，忽略模型 %q、沿用 %s", model, p.cfg.Model)
+		model = ""
+	}
 	cfg := p.cfg // 值拷貝（含 HTTPClient 指標，沿用同一 client）
 	if model != "" {
 		cfg.Model = model

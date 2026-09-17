@@ -382,7 +382,7 @@ go run ./cmd/claw   # startup logs will show "[mcp] mounted N tools from server 
    | `/steer <one sentence>` | Interject a course correction into a **running** task (aliases `steer`/`插話`): queued, folded into the conversation at the turn boundary. It doesn't interrupt the step in flight and doesn't discard money already burned. When idle it does not become a new task on its own ("correcting" must not silently escalate into "starting work"). First rung of the steer→constrain→stop ladder; constrain is deliberately unbuilt (MaxTurns/MaxCostUSD are already the hard lines) |
    | `status` | Show this session's spend / tokens / history length / model / Plan / busy state |
    | `get <path>` | Send a file from this channel's workspace back to the chat (Telegram `sendDocument` / Slack file upload; 50 MB cap). **User-pull**: files leave only when a human types the command, and the agent has no upload tool (blocks prompt-injection exfiltration) |
-   | `model` / `model <id>` / `model reset` | View / switch / reset this channel's model (per-channel, via a `Configurable` provider; takes effect next task) |
+   | `model` / `model <id>` / `model reset` | View / switch / reset this channel's model (per-channel, via a `Configurable` provider; takes effect next task). `claude-*` ids go to Anthropic; any other id goes to the OpenAI-compatible endpoint, even when the bot runs on Claude |
    | `compress` | Manually fold context (old messages into the rolling summary), shortening history to save cost |
    | `learn` | Distill a **proposed** skill from this conversation (staged; only live after passing `skillgate`) |
    | `approve` / `reject` (optionally with taskID) | Allow / deny a tool call intercepted by dangerous-command approval (admins in `COGITO_ADMIN_USERS` only) |
@@ -720,6 +720,8 @@ export OPENAI_MODEL=gpt-4o-mini
 go run ./cmd/claw-cli -prompt "..."
 ```
 
+**Mixing providers**: the model id decides where a request goes. With Claude as the main provider, set `OPENAI_API_KEY` (and `OPENAI_BASE_URL` if needed) and any non-`claude-` id you pick goes to that OpenAI-compatible endpoint: a channel's `model <id>`, a named agent's `model:`, or `COGITO_REFLECT_MODEL`. The reverse also works: on an OpenAI main provider, a `claude-*` id goes to Anthropic when `ANTHROPIC_API_KEY` is set; without it the id is ignored and the current model is kept (the built-in review agents specify `claude-opus-4-8`). Models without a price in the built-in table are costed at a conservative estimate; add real prices in `.claw/pricing.json`.
+
 ### Named subagents (`.claw/agents/*.md`)
 
 Grow the single scout into a team of specialists: define roles in `<workspace>/.claw/agents/<name>.md` frontmatter, and the main agent dispatches them by passing `agent_type` to `spawn_subagent`. Same isolated delegation + capability sandbox; parallel dispatch supported.
@@ -731,7 +733,7 @@ This is the "team of specialists behind the digital employee" from the introduct
 name: code-reviewer
 description: Reviews code changes for correctness/security/readability; read-only
 tools: [read_file, bash]        # optional; narrows to a subset of the subagent toolset; omitted = default scout tools
-model: claude-opus-4-8          # optional; the model for this agent (omitted = main engine's model)
+model: claude-opus-4-8          # optional; the model for this agent (omitted = main engine's model; non-claude ids go to the OpenAI-compatible endpoint)
 effort: high                    # optional; low/medium/high → output-token caps 2048/4096/8192
 isolation: worktree             # optional; run in an isolated git worktree, apply the diff back on completion
 ---

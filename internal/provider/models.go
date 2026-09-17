@@ -177,7 +177,7 @@ func ResolveModelAlias(model, current string) string {
 	if !ok {
 		return model
 	}
-	if !strings.HasPrefix(current, "claude-") {
+	if !isClaudeModel(current) {
 		return ""
 	}
 	return id

@@ -771,13 +771,13 @@ func (c *Core) tryModelCommand(convID, text string) bool {
 		if cur == "" {
 			cur = "（預設，啟動時設定）"
 		}
-		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型：%s\n切換：`model <模型id>`（如 `model claude-haiku-4-5`）；還原：`model reset`", cur))
+		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型：%s\n切換：`model <模型id>`（如 `model claude-haiku-4-5`、`model gpt-4o-mini`；claude- 開頭走 Anthropic，其他走 OpenAI 相容端點）；還原：`model reset`", cur))
 	case strings.EqualFold(arg, "reset"), strings.EqualFold(arg, "default"):
 		s.SetModel("")
 		SendMessage(convID, "🧠 已還原為啟動預設模型（下個任務生效）。")
 	default:
 		s.SetModel(arg)
-		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型已設為 `%s`（下個任務生效）。provider 不支援該模型時，下個任務會回錯。", arg))
+		SendMessage(convID, fmt.Sprintf("🧠 本頻道模型已設為 `%s`（下個任務生效）。claude- 開頭走 Anthropic，其他走 OpenAI 相容端點（OPENAI_BASE_URL／OPENAI_API_KEY）；模型或金鑰不對時，下個任務會回錯。", arg))
 	}
 	return true
 }

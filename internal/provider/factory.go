@@ -14,12 +14,7 @@ import (
 func FromEnv() (LLMProvider, string, error) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("COGITO_PROVIDER"))) {
 	case "openai", "openai-compatible", "oai":
-		cfg := OpenAIConfig{
-			BaseURL:          os.Getenv("OPENAI_BASE_URL"),
-			APIKey:           os.Getenv("OPENAI_API_KEY"),
-			Model:            envDefault("OPENAI_MODEL", "gpt-4o-mini"),
-			MaxContextTokens: envInt("OPENAI_MAX_CONTEXT_TOKENS", 128000),
-		}
+		cfg := openAIConfigFromEnv()
 		if cfg.APIKey == "" {
 			return nil, "", fmt.Errorf("COGITO_PROVIDER=openai 但未設 OPENAI_API_KEY")
 		}
@@ -37,6 +32,20 @@ func FromEnv() (LLMProvider, string, error) {
 		return nil, "", fmt.Errorf("未知的 COGITO_PROVIDER=%q（支援 claude / openai）", os.Getenv("COGITO_PROVIDER"))
 	}
 }
+
+// openAIConfigFromEnv 讀 OpenAI 相容端點的設定。主引擎是 Claude、但指定了非 Claude 模型時也走這份。
+func openAIConfigFromEnv() OpenAIConfig {
+	return OpenAIConfig{
+		BaseURL:          os.Getenv("OPENAI_BASE_URL"),
+		APIKey:           os.Getenv("OPENAI_API_KEY"),
+		Model:            envDefault("OPENAI_MODEL", "gpt-4o-mini"),
+		MaxContextTokens: envInt("OPENAI_MAX_CONTEXT_TOKENS", 128000),
+	}
+}
+
+// isClaudeModel 以 claude- 前綴認 Anthropic 的模型。只能這樣認：OpenAI 相容端點（Ollama、vLLM…）
+// 的模型名沒有規律，無法反過來列舉。
+func isClaudeModel(model string) bool { return strings.HasPrefix(model, "claude-") }
 
 func envDefault(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
