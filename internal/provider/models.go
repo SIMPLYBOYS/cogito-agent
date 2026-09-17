@@ -168,19 +168,33 @@ var subagentAliases = map[string]string{
 	"opus":   "claude-opus-5",
 }
 
+// openAISubagentAliases：主引擎是 OpenAI（gpt- 開頭）時的同等級對應，依官方 GPT-5.6 家族的定位與價格
+// （luna 小、terra 中、sol 旗艦）。型號升級同樣改這一處。
+var openAISubagentAliases = map[string]string{
+	"haiku":  "gpt-5.6-luna",
+	"sonnet": "gpt-5.6-terra",
+	"opus":   "gpt-5.6-sol",
+}
+
 // ResolveModelAlias 把子 agent 的模型別名解成實際 id。
 //   - 不是別名（具名 agent 定義裡寫的完整 id、或空字串）→ 原樣回傳
 //   - 是別名、主引擎是 Claude → 對應的 Claude id
-//   - 是別名、主引擎不是 Claude（OpenAI 相容端點）→ 回空字串＝沿用主引擎，不把 claude id 送去別家
+//   - 是別名、主引擎是 OpenAI（gpt- 開頭）→ 對應的 GPT-5.6 家族 id
+//   - 是別名、主引擎是其他相容端點（本地 llama 等，沒有等級家族）→ 回空字串＝沿用主引擎，不送別家的 id
 func ResolveModelAlias(model, current string) string {
-	id, ok := subagentAliases[strings.ToLower(strings.TrimSpace(model))]
+	alias := strings.ToLower(strings.TrimSpace(model))
+	id, ok := subagentAliases[alias]
 	if !ok {
 		return model
 	}
-	if !isClaudeModel(current) {
+	switch {
+	case isClaudeModel(current):
+		return id
+	case strings.HasPrefix(current, "gpt-"):
+		return openAISubagentAliases[alias]
+	default:
 		return ""
 	}
-	return id
 }
 
 // IsSubagentAlias 回報 model 是不是可接受的子 agent 等級別名（haiku／sonnet／opus）。

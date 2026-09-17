@@ -438,9 +438,9 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 	// 子 agent 選模型 / effort：provider 支援 Configurable 且有指定時，用換了 model/輸出上限的變體
 	// （成本仍記進同一 session）；不支援則沿用主引擎 provider（靜默忽略）。
 	prov := e.provider
-	model := provider.ResolveModelAlias(task.Model, e.provider.ModelName()) // haiku／sonnet／opus → 實際 id；主引擎非 Claude 就沿用
+	model := provider.ResolveModelAlias(task.Model, e.provider.ModelName()) // haiku／sonnet／opus → 實際 id；沒有等級家族就沿用
 	if model == "" && task.Model != "" {
-		log.Printf("[Subagent] ℹ️ 主引擎 %s 不是 Claude，忽略子 agent 模型等級 %q、沿用主引擎\n", e.provider.ModelName(), task.Model)
+		log.Printf("[Subagent] ℹ️ 主引擎 %s 沒有對應的模型等級家族，忽略子 agent 模型等級 %q、沿用主引擎\n", e.provider.ModelName(), task.Model)
 	}
 	if model != "" || task.MaxTokens > 0 {
 		if cfg, ok := e.provider.(provider.Configurable); ok {

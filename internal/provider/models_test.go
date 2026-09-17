@@ -123,7 +123,10 @@ func TestResolveModelAlias(t *testing.T) {
 		{"haiku", "claude-opus-5", "claude-haiku-4-5"},
 		{"Sonnet", "claude-opus-5", "claude-sonnet-5"},
 		{"opus", "claude-haiku-4-5", "claude-opus-5"},
-		{"haiku", "gpt-4o-mini", ""},                            // 主引擎不是 Claude：沿用主引擎，不送 claude id 去別家
+		{"haiku", "gpt-5.6-sol", "gpt-5.6-luna"}, // 主引擎是 OpenAI：對應 GPT-5.6 家族的同等級
+		{"sonnet", "gpt-4o-mini", "gpt-5.6-terra"},
+		{"opus", "gpt-5.6-luna", "gpt-5.6-sol"},
+		{"haiku", "llama3.1:8b", ""},                            // 本地相容端點沒有等級家族：沿用主引擎，不送別家的 id
 		{"claude-opus-4-8", "claude-opus-5", "claude-opus-4-8"}, // 定義裡寫的完整 id 原樣通過
 		{"", "claude-opus-5", ""},
 	}
