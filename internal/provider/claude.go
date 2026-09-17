@@ -60,7 +60,7 @@ func (p *ClaudeProvider) ModelName() string {
 func (p *ClaudeProvider) Configure(model string, maxTokens int) LLMProvider {
 	if model != "" && !isClaudeModel(model) {
 		cfg := openAIConfigFromEnv()
-		cfg.Model = model
+		cfg.Model, cfg.MaxTokens = model, maxTokens
 		return NewOpenAIProvider(cfg)
 	}
 	np := *p

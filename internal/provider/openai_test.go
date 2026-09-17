@@ -268,3 +268,37 @@ func TestOpenAIProvider_ReasoningEffortFromEnv(t *testing.T) {
 		t.Errorf("沒設 OPENAI_REASONING_EFFORT 時不該送 reasoning_effort，實際送了 %v", v)
 	}
 }
+
+// 具名 agent 的 effort 經 Configure 傳入輸出上限；OpenAI 相容路徑先前靜默丟掉。有值才送
+// max_completion_tokens（推理模型已不收 max_tokens），沒值不送、由端點決定。
+func TestOpenAIProvider_EffortSendsMaxCompletionTokens(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	msgs := []schema.Message{{Role: schema.RoleUser, Content: "hi"}}
+	base := NewOpenAIProvider(openAIConfigFromEnv())
+
+	cases := []struct {
+		name string
+		p    LLMProvider
+		want any
+	}{
+		{"主引擎未設上限", base, nil},
+		{"effort=high（8192）", base.Configure("", 8192), float64(8192)},
+		{"Claude 主引擎路由到 OpenAI 模型", (&ClaudeProvider{model: "claude-opus-5"}).Configure("gpt-5.6-sol", 4096), float64(4096)},
+	}
+	for _, c := range cases {
+		if _, err := c.p.Generate(context.Background(), msgs, nil); err != nil {
+			t.Fatalf("%s: Generate 失敗: %v", c.name, err)
+		}
+		if got := body["max_completion_tokens"]; got != c.want {
+			t.Errorf("%s: max_completion_tokens = %v，want %v", c.name, got, c.want)
+		}
+	}
+}

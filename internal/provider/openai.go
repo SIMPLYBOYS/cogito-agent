@@ -41,7 +41,10 @@ type OpenAIConfig struct {
 	// ReasoningEffort 非空才送 reasoning_effort（none/low/medium/high…）；空＝不送、由端點決定。
 	// 不能預設送：非推理模型與多數本地端點收到這個欄位會拒收。
 	ReasoningEffort string
-	HTTPClient      *http.Client
+	// MaxTokens >0 才送 max_completion_tokens（具名 agent 的 effort 經 Configure 傳入）；0＝由端點決定。
+	// 用 max_completion_tokens 而非 max_tokens：OpenAI 推理模型已不收 max_tokens。
+	MaxTokens  int
+	HTTPClient *http.Client
 }
 
 func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
@@ -65,8 +68,7 @@ func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
 func (p *OpenAIProvider) ModelName() string     { return p.cfg.Model }
 func (p *OpenAIProvider) MaxContextTokens() int { return p.cfg.MaxContextTokens }
 
-// Configure 回傳換了 model 的變體（沿用同一端點/金鑰/HTTP client）。maxTokens 目前不套用——
-// 此 provider 的請求未送 max_tokens（由端點自行決定），effort 對 OpenAI 相容路徑靜默忽略。
+// Configure 回傳換了 model / 輸出上限的變體（沿用同一端點/金鑰/HTTP client）。
 //
 // 指定 claude- 模型（內建審查類具名 agent 都寫 claude-opus-4-8）：有 ANTHROPIC_API_KEY 就改走 Claude；
 // 沒有就沿用本端點的模型——把 claude id 送去別家只會換來一次必然失敗的呼叫，而 NewClaudeProvider
@@ -82,6 +84,9 @@ func (p *OpenAIProvider) Configure(model string, maxTokens int) LLMProvider {
 	cfg := p.cfg // 值拷貝（含 HTTPClient 指標，沿用同一 client）
 	if model != "" {
 		cfg.Model = model
+	}
+	if maxTokens > 0 {
+		cfg.MaxTokens = maxTokens
 	}
 	return NewOpenAIProvider(cfg)
 }
@@ -114,10 +119,11 @@ type oaiTool struct {
 }
 
 type oaiRequest struct {
-	Model           string       `json:"model"`
-	Messages        []oaiMessage `json:"messages"`
-	Tools           []oaiTool    `json:"tools,omitempty"`
-	ReasoningEffort string       `json:"reasoning_effort,omitempty"`
+	Model               string       `json:"model"`
+	Messages            []oaiMessage `json:"messages"`
+	Tools               []oaiTool    `json:"tools,omitempty"`
+	ReasoningEffort     string       `json:"reasoning_effort,omitempty"`
+	MaxCompletionTokens int          `json:"max_completion_tokens,omitempty"`
 }
 
 type oaiResponse struct {
@@ -187,7 +193,8 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		return nil, fmt.Errorf("缺少 OPENAI_API_KEY（OpenAI 相容 provider）")
 	}
 
-	reqBody := oaiRequest{Model: p.cfg.Model, Messages: toOpenAIMessages(msgs), ReasoningEffort: p.cfg.ReasoningEffort}
+	reqBody := oaiRequest{Model: p.cfg.Model, Messages: toOpenAIMessages(msgs),
+		ReasoningEffort: p.cfg.ReasoningEffort, MaxCompletionTokens: p.cfg.MaxTokens}
 	if len(availableTools) > 0 {
 		reqBody.Tools = toOpenAITools(availableTools)
 	}
