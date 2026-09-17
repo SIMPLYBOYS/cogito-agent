@@ -40,6 +40,7 @@ func openAIConfigFromEnv() OpenAIConfig {
 		APIKey:           os.Getenv("OPENAI_API_KEY"),
 		Model:            envDefault("OPENAI_MODEL", "gpt-4o-mini"),
 		MaxContextTokens: envInt("OPENAI_MAX_CONTEXT_TOKENS", 128000),
+		ReasoningEffort:  strings.TrimSpace(os.Getenv("OPENAI_REASONING_EFFORT")),
 	}
 }
 

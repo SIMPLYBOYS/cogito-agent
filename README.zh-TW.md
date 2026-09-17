@@ -713,6 +713,9 @@ export COGITO_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 export OPENAI_BASE_URL=https://api.openai.com/v1   # 或 http://localhost:8000/v1 等
 export OPENAI_MODEL=gpt-4o-mini
+# 可選：有設才送 reasoning_effort。在 chat completions 上不允許「工具＋推理」的推理模型
+# （如 gpt-5.6-sol）要設 none；非推理模型請留空
+# export OPENAI_REASONING_EFFORT=none
 go run ./cmd/claw-cli -prompt "..."
 ```
 

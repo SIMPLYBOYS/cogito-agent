@@ -38,7 +38,10 @@ type OpenAIConfig struct {
 	APIKey           string
 	Model            string // 預設 gpt-4o-mini
 	MaxContextTokens int    // 預設 128000
-	HTTPClient       *http.Client
+	// ReasoningEffort 非空才送 reasoning_effort（none/low/medium/high…）；空＝不送、由端點決定。
+	// 不能預設送：非推理模型與多數本地端點收到這個欄位會拒收。
+	ReasoningEffort string
+	HTTPClient      *http.Client
 }
 
 func NewOpenAIProvider(cfg OpenAIConfig) *OpenAIProvider {
@@ -111,9 +114,10 @@ type oaiTool struct {
 }
 
 type oaiRequest struct {
-	Model    string       `json:"model"`
-	Messages []oaiMessage `json:"messages"`
-	Tools    []oaiTool    `json:"tools,omitempty"`
+	Model           string       `json:"model"`
+	Messages        []oaiMessage `json:"messages"`
+	Tools           []oaiTool    `json:"tools,omitempty"`
+	ReasoningEffort string       `json:"reasoning_effort,omitempty"`
 }
 
 type oaiResponse struct {
@@ -183,7 +187,7 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		return nil, fmt.Errorf("缺少 OPENAI_API_KEY（OpenAI 相容 provider）")
 	}
 
-	reqBody := oaiRequest{Model: p.cfg.Model, Messages: toOpenAIMessages(msgs)}
+	reqBody := oaiRequest{Model: p.cfg.Model, Messages: toOpenAIMessages(msgs), ReasoningEffort: p.cfg.ReasoningEffort}
 	if len(availableTools) > 0 {
 		reqBody.Tools = toOpenAITools(availableTools)
 	}

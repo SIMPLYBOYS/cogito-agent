@@ -230,3 +230,39 @@ func TestOpenAIConfigure_ClaudeModel(t *testing.T) {
 		t.Fatalf("有 Anthropic 金鑰時應改走 Claude（claude-opus-4-8, maxTokens 2048），got %+v ok=%v", cp, ok)
 	}
 }
+
+// gpt-5.6-sol 在 /v1/chat/completions 上「工具＋推理」不能同時開（HTTP 400：Function tools with
+// reasoning_effort are not supported）。OPENAI_REASONING_EFFORT 有設才送 reasoning_effort；沒設就
+// 【不送】——gpt-4o-mini 這類非推理模型與多數本地端點收到這個欄位會拒收。
+func TestOpenAIProvider_ReasoningEffortFromEnv(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body = nil
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}]}`)
+	}))
+	defer srv.Close()
+	t.Setenv("OPENAI_API_KEY", "k")
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	msgs := []schema.Message{{Role: schema.RoleUser, Content: "hi"}}
+	tools := []schema.ToolDefinition{{Name: "bash", InputSchema: map[string]any{"type": "object"}}}
+
+	t.Setenv("OPENAI_REASONING_EFFORT", "none")
+	p := NewOpenAIProvider(openAIConfigFromEnv())
+	for name, prov := range map[string]LLMProvider{"主引擎": p, "Configure 換模型後": p.Configure("gpt-5.6-sol", 0)} {
+		if _, err := prov.Generate(context.Background(), msgs, tools); err != nil {
+			t.Fatalf("%s Generate 失敗: %v", name, err)
+		}
+		if body["reasoning_effort"] != "none" {
+			t.Errorf("%s：設了 OPENAI_REASONING_EFFORT=none，請求卻帶 reasoning_effort=%v", name, body["reasoning_effort"])
+		}
+	}
+
+	t.Setenv("OPENAI_REASONING_EFFORT", "")
+	if _, err := NewOpenAIProvider(openAIConfigFromEnv()).Generate(context.Background(), msgs, tools); err != nil {
+		t.Fatalf("Generate 失敗: %v", err)
+	}
+	if v, has := body["reasoning_effort"]; has {
+		t.Errorf("沒設 OPENAI_REASONING_EFFORT 時不該送 reasoning_effort，實際送了 %v", v)
+	}
+}

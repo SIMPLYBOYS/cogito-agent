@@ -717,6 +717,9 @@ export COGITO_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 export OPENAI_BASE_URL=https://api.openai.com/v1   # or http://localhost:8000/v1, etc.
 export OPENAI_MODEL=gpt-4o-mini
+# optional: sent as reasoning_effort only when set. Reasoning models that reject tools plus
+# reasoning on chat completions (e.g. gpt-5.6-sol) need "none"; leave unset for non-reasoning models
+# export OPENAI_REASONING_EFFORT=none
 go run ./cmd/claw-cli -prompt "..."
 ```
 
