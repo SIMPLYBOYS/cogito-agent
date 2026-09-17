@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -300,5 +301,74 @@ func TestOpenAIProvider_EffortSendsMaxCompletionTokens(t *testing.T) {
 		if got := body["max_completion_tokens"]; got != c.want {
 			t.Errorf("%s: max_completion_tokens = %v，want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// 面板內嵌 chat 靠 StreamingProvider 逐字顯示；OpenAI 相容路徑先前沒有實作，只能等整段回完。
+// 串流要做到三件事：文字增量即時吐給 onDelta、分散在多個片段的 tool call 參數拼回完整 JSON、
+// 最後的 usage 片段（stream_options.include_usage）照一次性 Generate 的語意正規化。
+func TestOpenAIProvider_GenerateStream(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []string{
+			`{"choices":[{"delta":{"role":"assistant","content":"你"}}]}`,
+			`{"choices":[{"delta":{"content":"好"}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"pa"}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"th\":\"a.go\"}"}}]}}]}`,
+			`{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":4}}}`,
+		} {
+			io.WriteString(w, "data: "+chunk+"\n\n")
+		}
+		io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	var p LLMProvider = NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", Model: "gpt-5.6-sol", HTTPClient: srv.Client()})
+	sp, ok := p.(StreamingProvider)
+	if !ok {
+		t.Fatal("OpenAIProvider 沒實作 StreamingProvider：面板 chat 無法逐字串流")
+	}
+	var deltas []string
+	msg, err := sp.GenerateStream(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}},
+		[]schema.ToolDefinition{{Name: "read_file", InputSchema: map[string]any{"type": "object"}}},
+		func(d string) { deltas = append(deltas, d) })
+	if err != nil {
+		t.Fatalf("GenerateStream 失敗: %v", err)
+	}
+	if body["stream"] != true {
+		t.Errorf("請求應帶 stream:true，got %v", body["stream"])
+	}
+	if so, _ := body["stream_options"].(map[string]any); so["include_usage"] != true {
+		t.Errorf("請求應帶 stream_options.include_usage:true（否則拿不到 usage、成本與校準全失效），got %v", body["stream_options"])
+	}
+	if strings.Join(deltas, "") != "你好" || len(deltas) != 2 || msg.Content != "你好" {
+		t.Errorf("文字增量應逐片吐出並組回完整內容：deltas=%q content=%q", deltas, msg.Content)
+	}
+	if len(msg.ToolCalls) != 1 || msg.ToolCalls[0].ID != "call_1" || msg.ToolCalls[0].Name != "read_file" ||
+		string(msg.ToolCalls[0].Arguments) != `{"path":"a.go"}` {
+		t.Errorf("分片的 tool call 應拼回完整參數: %+v", msg.ToolCalls)
+	}
+	if msg.Usage == nil || msg.Usage.PromptTokens != 6 || msg.Usage.CacheReadTokens != 4 || msg.Usage.CompletionTokens != 5 {
+		t.Errorf("usage 應正規化成 PromptTokens=6（10−4 快取）、CacheRead=4、Completion=5: %+v", msg.Usage)
+	}
+}
+
+// 串流請求被拒（例如 400）時要回錯誤、帶出 API 的錯誤訊息，而不是回一則空訊息假裝成功。
+func TestOpenAIProvider_GenerateStreamAPIError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":{"message":"Function tools with reasoning_effort are not supported"}}`)
+	}))
+	defer srv.Close()
+	var p LLMProvider = NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", Model: "x", HTTPClient: srv.Client()})
+	sp, ok := p.(StreamingProvider)
+	if !ok {
+		t.Fatal("OpenAIProvider 沒實作 StreamingProvider")
+	}
+	_, err := sp.GenerateStream(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "reasoning_effort are not supported") {
+		t.Fatalf("400 應回錯誤並帶出 API 訊息，got %v", err)
 	}
 }
