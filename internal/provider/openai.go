@@ -261,10 +261,12 @@ func (p *OpenAIProvider) Generate(ctx context.Context, msgs []schema.Message, av
 		})
 	}
 	if parsed.Usage.PromptTokens > 0 || parsed.Usage.CompletionTokens > 0 {
+		cached := parsed.Usage.PromptTokensDetails.CachedTokens
 		result.Usage = &schema.Usage{
-			PromptTokens:     parsed.Usage.PromptTokens,
+			// prompt_tokens 含 cached_tokens；系統約定 PromptTokens 不含快取（見 schema.Usage），不扣會重複計價。
+			PromptTokens:     parsed.Usage.PromptTokens - cached,
 			CompletionTokens: parsed.Usage.CompletionTokens,
-			CacheReadTokens:  parsed.Usage.PromptTokensDetails.CachedTokens,
+			CacheReadTokens:  cached,
 		}
 	}
 	return result, nil

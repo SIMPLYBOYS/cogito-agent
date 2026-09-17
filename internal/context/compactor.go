@@ -44,10 +44,12 @@ func NewCompactor(maxContextTokens int, watermark float64, retainLastMsgs int) *
 	}
 }
 
-// Calibrate 用一次真實 API 回傳的 PromptTokens 與當時送出的消息，更新位元組/Token 比。
+// Calibrate 用一次真實 API 回傳的 Usage 與當時送出的消息，更新位元組/Token 比。
+// 取 Usage.InputTokens()（含快取讀寫）：快取命中時 PromptTokens 可能只剩個位數，拿它校準會把比值推到上限。
 // 注意：sentMsgs 僅含消息（不含 tools schema），而 promptTokens 含 tools 開銷，故估出的
 // bytes/token 略偏小、傾向「提早一點壓縮」——這是安全方向。
-func (c *Compactor) Calibrate(sentMsgs []schema.Message, promptTokens int) {
+func (c *Compactor) Calibrate(sentMsgs []schema.Message, usage schema.Usage) {
+	promptTokens := usage.InputTokens()
 	if promptTokens <= 0 {
 		return
 	}

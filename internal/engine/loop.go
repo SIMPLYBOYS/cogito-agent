@@ -312,7 +312,7 @@ func (e *AgentEngine) Run(ctx context.Context, session *ctxpkg.Session, reporter
 
 		// 自校準：用本輪真實 PromptTokens 與實際送出的上下文，更新壓縮器的 byte/token 估算比。
 		if actionResp.Usage != nil {
-			e.compactor.Calibrate(compactedContext, actionResp.Usage.PromptTokens)
+			e.compactor.Calibrate(compactedContext, *actionResp.Usage)
 		}
 
 		// 【核心修正】：把 thinking 與 action 合併成單一 assistant 消息進 session，
@@ -490,7 +490,7 @@ func (e *AgentEngine) RunSub(ctx context.Context, task tools.SubTask) (string, e
 			return "", fmt.Errorf("子 agent推理失敗: %w", err)
 		}
 		if actionResp.Usage != nil {
-			e.compactor.Calibrate(compactedContext, actionResp.Usage.PromptTokens)
+			e.compactor.Calibrate(compactedContext, *actionResp.Usage)
 		}
 
 		contextHistory = append(contextHistory, *actionResp)

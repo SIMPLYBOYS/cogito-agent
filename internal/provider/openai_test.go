@@ -69,8 +69,10 @@ func TestOpenAIProvider_MapsRolesToolsAndParsesResponse(t *testing.T) {
 	if resp.ToolCalls[0].Name != "read_file" || string(resp.ToolCalls[0].Arguments) != `{"path":"x"}` {
 		t.Errorf("tool_call 解析錯誤: %+v", resp.ToolCalls[0])
 	}
-	if resp.Usage == nil || resp.Usage.PromptTokens != 10 || resp.Usage.CacheReadTokens != 3 {
-		t.Errorf("usage 解析錯誤: %+v", resp.Usage)
+	// OpenAI 的 prompt_tokens【含】快取命中的 cached_tokens；系統約定 PromptTokens 不含快取
+	// （計價另以 0.1x 算 CacheReadTokens、面板以 PromptTokens+CacheRead 算總輸入），不扣就重複計價。
+	if resp.Usage == nil || resp.Usage.PromptTokens != 7 || resp.Usage.CacheReadTokens != 3 || resp.Usage.InputTokens() != 10 {
+		t.Errorf("usage 應正規化成 PromptTokens=7（10−3 快取）、CacheRead=3、總輸入 10: %+v", resp.Usage)
 	}
 }
 

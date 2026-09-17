@@ -44,9 +44,9 @@ func TestCompactor_CalibrateShiftsEstimate(t *testing.T) {
 	c := NewCompactor(200000, 0.75, 6)
 	msgs := []schema.Message{{Role: schema.RoleUser, Content: strings.Repeat("x", 3000)}}
 
-	before := c.estimatedTokens(msgs) // 預設 3.0 byte/token → 1000
-	c.Calibrate(msgs, 3000)           // 量測 1.0；EWMA → 2.0
-	after := c.estimatedTokens(msgs)  // 3000/2.0 → 1500
+	before := c.estimatedTokens(msgs)                   // 預設 3.0 byte/token → 1000
+	c.Calibrate(msgs, schema.Usage{PromptTokens: 3000}) // 量測 1.0；EWMA → 2.0
+	after := c.estimatedTokens(msgs)                    // 3000/2.0 → 1500
 
 	if after <= before {
 		t.Errorf("校準到更小的 byte/token 後，同內容 token 估算應變大：before=%d after=%d", before, after)
@@ -58,8 +58,8 @@ func TestCompactor_CalibrateIgnoresInvalid(t *testing.T) {
 	c := NewCompactor(200000, 0.75, 6)
 	msgs := []schema.Message{{Role: schema.RoleUser, Content: strings.Repeat("x", 3000)}}
 	before := c.estimatedTokens(msgs)
-	c.Calibrate(msgs, 0)
-	c.Calibrate(nil, 100)
+	c.Calibrate(msgs, schema.Usage{})
+	c.Calibrate(nil, schema.Usage{PromptTokens: 100})
 	if got := c.estimatedTokens(msgs); got != before {
 		t.Errorf("無效校準不應改變估算：before=%d after=%d", before, got)
 	}
@@ -94,5 +94,19 @@ func TestCompact_RecentToolResultRuneSafe(t *testing.T) {
 	}
 	if !strings.Contains(got, "中間") {
 		t.Error("應含截斷標記")
+	}
+}
+
+// 快取命中時，Claude 的 PromptTokens（input_tokens）不含快取讀取，可能只剩個位數；OpenAI 在
+// provider 層也正規化成同一語意。若只拿 PromptTokens 校準，byte/token 比會被推到上限 10，
+// 估算 token 少算好幾倍，壓縮在真正逼近窗口之後才觸發。校準要用【全部】輸入。
+func TestCompactor_CalibrateCountsCachedInput(t *testing.T) {
+	c := NewCompactor(200000, 0.75, 6)
+	msgs := []schema.Message{{Role: schema.RoleUser, Content: strings.Repeat("x", 3000)}}
+	usage := schema.Usage{PromptTokens: 2, CacheReadTokens: 2000, CacheCreationTokens: 998} // 實際輸入 3000 tk
+
+	c.Calibrate(msgs, usage)
+	if c.bytesPerToken > 3.0 {
+		t.Fatalf("快取命中時 byte/token 被推到 %.2f（實際 3000 byte / 3000 tk = 1.0，EWMA 應落在 2.0）", c.bytesPerToken)
 	}
 }
