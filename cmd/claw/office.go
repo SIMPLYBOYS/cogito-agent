@@ -108,7 +108,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 }
 
 // officeCapsHandler 回報某頻道實際掛上的工具與技能（唯讀）。像素辦公室的名冊用它顯示
-// officeModelsHandler 回「現在真正能用哪些模型」。清單來自 provider 本人（Anthropic 的
+// officeModelsHandler 回「現在真正能用哪些模型」。清單來自 provider 本人（Anthropic 或 OpenAI 相容端點的
 // /v1/models，帶 TTL 快取），問不到就降級成【計價表的鍵】——那張表至少是我們保證算得出
 // 錢的集合。source 欄位講清楚這份清單是哪來的，別讓降級變成無聲的。
 //

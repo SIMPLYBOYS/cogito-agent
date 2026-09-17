@@ -10,6 +10,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +92,46 @@ func (p *OpenAIProvider) Configure(model string, maxTokens int) LLMProvider {
 		cfg.MaxTokens = maxTokens
 	}
 	return NewOpenAIProvider(cfg)
+}
+
+// nonChatModel 認出 /v1/models 裡的非對話模型（embedding、語音、繪圖、審核…）。
+// ponytail: 子字串排除表，OpenAI 推出新類型的非對話模型時要補；誤放進來只是選單多一項、選了會失敗。
+var nonChatModel = []string{"embedding", "whisper", "tts", "dall-e", "moderation", "transcribe", "sora", "image", "audio", "realtime"}
+
+// ListModels 問 GET {base}/models，只留對話模型、依 id 排序。這個端點不回窗口大小，Window 留 0
+// （壓縮水位仍看 OPENAI_MAX_CONTEXT_TOKENS）。
+func (p *OpenAIProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.cfg.BaseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+p.cfg.APIKey)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("列模型失敗: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("列模型失敗（HTTP %d）: %s", resp.StatusCode, truncate(string(raw), 300))
+	}
+	var parsed struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil, fmt.Errorf("解析模型清單失敗: %w", err)
+	}
+	var out []ModelInfo
+	for _, m := range parsed.Data {
+		if m.ID == "" || slices.ContainsFunc(nonChatModel, func(s string) bool { return strings.Contains(m.ID, s) }) {
+			continue
+		}
+		out = append(out, ModelInfo{ID: m.ID, Name: m.ID})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 // ---- wire types（OpenAI chat-completions）----

@@ -372,3 +372,39 @@ func TestOpenAIProvider_GenerateStreamAPIError(t *testing.T) {
 		t.Fatalf("400 應回錯誤並帶出 API 訊息，got %v", err)
 	}
 }
+
+// office 的人設模型選單：provider 不實作 ModelLister 時退回內建計價表，而那張表只有 Claude——
+// 只走 OpenAI 的部署會在選單裡看到一排選了也不會生效的 claude 模型。/v1/models 混著 embedding、
+// 語音、繪圖等非對話模型，選它們當人設只會失敗，要濾掉。
+func TestOpenAIProvider_ListModels(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		io.WriteString(w, `{"object":"list","data":[
+			{"id":"gpt-5.6-terra","object":"model"},{"id":"text-embedding-3-small","object":"model"},
+			{"id":"whisper-1","object":"model"},{"id":"gpt-5.6-sol","object":"model"},
+			{"id":"tts-1","object":"model"},{"id":"dall-e-3","object":"model"},
+			{"id":"omni-moderation-latest","object":"model"},{"id":"gpt-5.6-luna","object":"model"}]}`)
+	}))
+	defer srv.Close()
+
+	var p LLMProvider = NewOpenAIProvider(OpenAIConfig{BaseURL: srv.URL, APIKey: "k", HTTPClient: srv.Client()})
+	l, ok := p.(ModelLister)
+	if !ok {
+		t.Fatal("OpenAIProvider 沒實作 ModelLister：office 選單只會列出內建計價表裡的 claude 模型")
+	}
+	got, err := l.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels 失敗: %v", err)
+	}
+	var ids []string
+	for _, m := range got {
+		ids = append(ids, m.ID)
+	}
+	if want := "gpt-5.6-luna,gpt-5.6-sol,gpt-5.6-terra"; strings.Join(ids, ",") != want {
+		t.Errorf("應只留對話模型並排序：got %v want %s", ids, want)
+	}
+	if gotPath != "/models" || gotAuth != "Bearer k" {
+		t.Errorf("應以金鑰打 GET {base}/models，got path=%q auth=%q", gotPath, gotAuth)
+	}
+}
