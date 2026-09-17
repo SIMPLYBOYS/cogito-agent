@@ -25,6 +25,7 @@ import (
 	"github.com/joho/godotenv"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 )
 
 func main() {
@@ -35,6 +36,9 @@ func main() {
 	sessions := flag.String("sessions", os.Getenv("COGITO_SESSION_DIR"), "session 目錄（預設取自 COGITO_SESSION_DIR）")
 	workspace := flag.String("workspace", "./workspace", "workspace 根目錄（找 .claw/ 的提案佇列用）")
 	flag.Parse()
+	// 自訂單價（<workspace>/.claw/pricing.json）：與 bot 同一份。沒這行，內嵌 chat 的記帳與 /runs 的
+	// 逐步成本都只認內建表，bot 那邊登記過的模型在面板上仍被當成未登記估價。
+	observability.SetPricingRoot(*workspace)
 
 	insecure := os.Getenv("COGITO_DASH_INSECURE") == "1"
 	if deny := checkBindSafety(*addr, insecure); deny != "" {
