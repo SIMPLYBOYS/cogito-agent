@@ -622,7 +622,8 @@ python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench
 ### 跑分與儀表板
 
 ```bash
-# 1) 跑分（真實 API、需 ANTHROPIC_API_KEY）並輸出 JSON 報告
+# 1) 跑分（真實 API）並輸出 JSON 報告。-model 決定 provider：claude- 開頭需 ANTHROPIC_API_KEY，
+#    其他（如 gpt-5.6-luna）走 OpenAI 相容端點、需 OPENAI_API_KEY
 go run ./cmd/bench -model claude-haiku-4-5 -out ./bench-reports
 # CI 門檻：通過率低於 0.8 即以非 0 退出碼結束 → 讓 CI job 失敗
 go run ./cmd/bench -out ./bench-reports -min-pass-rate 0.8
@@ -649,7 +650,7 @@ go run ./cmd/dashboard -dir ./bench-reports   # → http://localhost:8090
 # 離線 dry-run：印出每個實例的 Setup/Task/Validate 計畫——不呼叫 LLM、不 clone、不花錢
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -dry-run
 
-# 真跑（需 ANTHROPIC_API_KEY；會 clone repo + 跑測試，逐題計成本）
+# 真跑（需 -model 對應的金鑰；會 clone repo + 跑測試，逐題計成本）
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 ```
 

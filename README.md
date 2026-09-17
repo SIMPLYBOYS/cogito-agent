@@ -625,7 +625,8 @@ The tool therefore puts the **sample floor before the p-value**: `n < 10` (reusi
 ### Benchmarks & dashboards
 
 ```bash
-# 1) Run the suite (real API, needs ANTHROPIC_API_KEY) and emit a JSON report
+# 1) Run the suite (real API) and emit a JSON report. -model picks the provider: claude-* needs ANTHROPIC_API_KEY,
+#    any other id (e.g. gpt-5.6-luna) goes to the OpenAI-compatible endpoint and needs OPENAI_API_KEY
 go run ./cmd/bench -model claude-haiku-4-5 -out ./bench-reports
 # CI gate: pass rate below 0.8 exits non-zero → fails the CI job
 go run ./cmd/bench -out ./bench-reports -min-pass-rate 0.8
@@ -652,7 +653,7 @@ The same eval framework runs [SWE-bench](https://www.swebench.com/) directly: ea
 # Offline dry-run: print each instance's Setup/Task/Validate plan — no LLM, no clone, no cost
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -dry-run
 
-# Real run (needs ANTHROPIC_API_KEY; clones repos + runs tests, cost tracked per instance)
+# Real run (needs the key for -model; clones repos + runs tests, cost tracked per instance)
 go run ./cmd/bench -swebench path/to/swe.jsonl -limit 5 -out ./bench-reports
 ```
 

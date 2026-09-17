@@ -166,7 +166,7 @@ func (b *BenchmarkRunner) runSingleTest(ctx context.Context, tc TestCase) TestRe
 			break
 		}
 		// 失敗 → 反思出一條教訓，回注下一次。反思失敗不致命，照樣重試。
-		reflectProvider := provider.NewClaudeProvider(b.modelName)
+		reflectProvider := modelProvider(b.modelName)
 		lesson, err := ReflectOnFailure(ctx, reflectProvider, tc.TaskPrompt, history, failOut)
 		if err != nil {
 			log.Printf("    ⚠️ 反思失敗（仍會重試）: %v", err)
@@ -195,7 +195,7 @@ func (b *BenchmarkRunner) runOnce(ctx context.Context, tc TestCase, taskPrompt s
 		}
 	}
 
-	realProvider := provider.NewClaudeProvider(b.modelName)
+	realProvider := modelProvider(b.modelName)
 	session := ctxpkg.NewSession(tc.ID, workDir)
 	trackedProvider := observability.NewCostTracker(realProvider, b.modelName, session)
 
@@ -249,4 +249,15 @@ func (b *BenchmarkRunner) runOnce(ctx context.Context, tc TestCase, taskPrompt s
 		TestCaseID: tc.ID, Passed: true, TotalCostUSD: session.TotalCostUSD,
 		DurationMs: duration, TurnCount: rep.turns, ToolErrorCount: rep.toolErrors,
 	}, session.GetWorkingMemory(0), ""
+}
+
+// modelProvider 依模型 id 建 provider（claude- 走 Anthropic，其他走 OpenAI 相容端點）。入口（cmd/bench）
+// 開跑前已用 provider.ForModel 驗過金鑰；走到這裡還缺金鑰是接線錯誤，照舊 panic——與先前
+// NewClaudeProvider 缺金鑰的行為一致。
+func modelProvider(model string) provider.LLMProvider {
+	p, err := provider.ForModel(model)
+	if err != nil {
+		panic(err)
+	}
+	return p
 }

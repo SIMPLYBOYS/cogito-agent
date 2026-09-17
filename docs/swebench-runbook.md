@@ -16,7 +16,7 @@ python3 scripts/fetch_swebench_lite.py -n 5 --offset 150 -o requests.jsonl
 ```
 先不花錢檢視管線：`go run ./cmd/bench -swebench lite.jsonl -limit 3 -dry-run`。
 
-## 1. 生成 predictions（cogito，需 ANTHROPIC_API_KEY）
+## 1. 生成 predictions（cogito，需 `-model` 對應的金鑰：claude- 用 ANTHROPIC_API_KEY，其他用 OPENAI_API_KEY）
 ```bash
 go run ./cmd/bench \
   -swebench lite.jsonl -limit 10 \

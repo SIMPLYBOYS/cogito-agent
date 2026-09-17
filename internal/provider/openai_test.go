@@ -408,3 +408,34 @@ func TestOpenAIProvider_ListModels(t *testing.T) {
 		t.Errorf("應以金鑰打 GET {base}/models，got path=%q auth=%q", gotPath, gotAuth)
 	}
 }
+
+// bench 跑分、A/B、SWE-bench 生成、ingest -llm 以「模型」為參數，先前一律 NewClaudeProvider：
+// 只有 OpenAI 金鑰時不能用，而且缺 Anthropic 金鑰會直接 panic。ForModel 依模型 id 選 provider，
+// 缺金鑰回一句看得懂的錯誤。
+func TestForModel(t *testing.T) {
+	var gotModel, gotAuth string
+	srv := okServer(t, &gotModel, &gotAuth)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "oai-key")
+
+	if _, err := ForModel("claude-haiku-4-5"); err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
+		t.Errorf("claude 模型缺 Anthropic 金鑰應回錯誤（而不是 panic），got %v", err)
+	}
+
+	p, err := ForModel("gpt-5.6-luna")
+	if err != nil {
+		t.Fatalf("gpt 模型有 OpenAI 金鑰應建得出 provider: %v", err)
+	}
+	if _, err := p.Generate(context.Background(), []schema.Message{{Role: schema.RoleUser, Content: "hi"}}, nil); err != nil {
+		t.Fatalf("Generate 失敗: %v", err)
+	}
+	if gotModel != "gpt-5.6-luna" || gotAuth != "Bearer oai-key" {
+		t.Errorf("請求應送到 OpenAI 相容端點：model=%q auth=%q", gotModel, gotAuth)
+	}
+
+	t.Setenv("OPENAI_API_KEY", "")
+	if _, err := ForModel("gpt-5.6-luna"); err == nil || !strings.Contains(err.Error(), "OPENAI_API_KEY") {
+		t.Errorf("gpt 模型缺 OpenAI 金鑰應回錯誤，got %v", err)
+	}
+}

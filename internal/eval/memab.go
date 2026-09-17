@@ -12,7 +12,6 @@ import (
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
-	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/tools"
 )
@@ -65,7 +64,7 @@ func runWithMemory(ctx context.Context, tc TestCase, memoryRecord, model, label 
 		}
 	}
 
-	p := provider.NewClaudeProvider(model)
+	p := modelProvider(model)
 	session := ctxpkg.NewSession("memab-"+label, workDir)
 	tracked := observability.NewCostTracker(p, model, session)
 

@@ -1,7 +1,7 @@
 // cmd/ingest 把 markdown 目錄 ingest 成知識圖譜，並可選地用 LLM 抽 typed 關係（gated）。
 //
 //	-src X            結構式 ingest（確定性、不花錢）：md → 節點 + edges.jsonl
-//	-llm             對 root 內節點跑 LLM typed 關係抽取 → 寫【提案邊】（需 ANTHROPIC_API_KEY）
+//	-llm             對 root 內節點跑 LLM typed 關係抽取 → 寫【提案邊】（需 -model 對應的金鑰）
 //	-review-edges    印出待審的提案邊
 //	-apply-edges     提案邊過 gate（信心/幻覺/去重/封頂）後併入生效的 edges.jsonl
 //
@@ -24,7 +24,7 @@ import (
 func main() {
 	src := flag.String("src", "", "結構式 ingest 的 markdown 目錄（遞迴所有 .md）")
 	root := flag.String("root", ".", "記憶根目錄：記錄→<root>/.claw/memory，邊→<root>/.claw/kg/edges.jsonl")
-	llm := flag.Bool("llm", false, "對 root 內記憶節點跑 LLM typed 關係抽取 → 寫提案邊（需 ANTHROPIC_API_KEY）")
+	llm := flag.Bool("llm", false, "對 root 內記憶節點跑 LLM typed 關係抽取 → 寫提案邊（需 -model 對應的金鑰：claude- 走 Anthropic，其他走 OpenAI 相容端點）")
 	reviewEdges := flag.Bool("review-edges", false, "印出待審的提案邊")
 	applyEdges := flag.Bool("apply-edges", false, "提案邊過 gate 後併入 edges.jsonl")
 	embed := flag.Bool("embed", false, "為 root 內節點建向量快取(.claw/kg/embeddings.jsonl)，供 recall 語意選種子（需 COGITO_EMBED_MODEL + 端點）")
@@ -148,7 +148,11 @@ func main() {
 
 	case *llm:
 		_ = godotenv.Load()
-		n, err := evolve.NewRelationExtractor(provider.NewClaudeProvider(*model), *root).Extract(context.Background())
+		prov, err := provider.ForModel(*model)
+		if err != nil {
+			log.Fatalf("LLM 關係抽取無法開始: %v", err)
+		}
+		n, err := evolve.NewRelationExtractor(prov, *root).Extract(context.Background())
 		if err != nil {
 			log.Fatalf("LLM 關係抽取失敗: %v", err)
 		}

@@ -33,6 +33,24 @@ func FromEnv() (LLMProvider, string, error) {
 	}
 }
 
+// ForModel 依模型 id 建 provider：claude- 開頭走 Anthropic，其他走 OpenAI 相容端點（OPENAI_*）。
+// 給以「模型」為參數的工具用（bench 跑分、A/B、SWE-bench 生成、ingest -llm）；常駐入口仍走 FromEnv。
+// 缺對應金鑰回錯誤：NewClaudeProvider 缺金鑰會 panic，工具入口該給一句看得懂的話。
+func ForModel(model string) (LLMProvider, error) {
+	if isClaudeModel(model) {
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			return nil, fmt.Errorf("模型 %s 需要 ANTHROPIC_API_KEY", model)
+		}
+		return NewClaudeProvider(model), nil
+	}
+	cfg := openAIConfigFromEnv()
+	if cfg.APIKey == "" {
+		return nil, fmt.Errorf("模型 %s 走 OpenAI 相容端點，需要 OPENAI_API_KEY", model)
+	}
+	cfg.Model = model
+	return NewOpenAIProvider(cfg), nil
+}
+
 // openAIConfigFromEnv 讀 OpenAI 相容端點的設定。主引擎是 Claude、但指定了非 Claude 模型時也走這份。
 func openAIConfigFromEnv() OpenAIConfig {
 	return OpenAIConfig{

@@ -43,7 +43,10 @@ func GeneratePrediction(ctx context.Context, ins SWEInstance, opts SWEOptions, m
 		return Prediction{}, fmt.Errorf("clone/checkout 失敗: %w", err)
 	}
 
-	p := provider.NewClaudeProvider(model)
+	p, err := provider.ForModel(model)
+	if err != nil {
+		return Prediction{}, err
+	}
 	session := ctxpkg.NewSession("swegen-"+sanitizeID(ins.InstanceID), workDir)
 	tracked := observability.NewCostTracker(p, model, session)
 

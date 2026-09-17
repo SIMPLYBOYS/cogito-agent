@@ -16,13 +16,14 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/eval"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/evolve"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/joho/godotenv"
 )
 
 func main() {
 	_ = godotenv.Load()
 
-	model := flag.String("model", "claude-haiku-4-5", "跑分使用的模型（便宜起見預設 haiku）")
+	model := flag.String("model", "claude-haiku-4-5", "跑分使用的模型（便宜起見預設 haiku）；claude- 走 Anthropic，其他（如 gpt-5.6-luna）走 OpenAI 相容端點")
 	outDir := flag.String("out", "", "輸出 JSON 報告的目錄（空＝不輸出）；檔名為 bench-<unixtime>.json")
 	minPassRate := flag.Float64("min-pass-rate", 0, "通過率門檻 0..1；低於則以非 0 退出碼結束（CI 用，0＝不檢查）")
 	reflexion := flag.Int("reflexion", 1, "Reflexion 重試上限：>1 時用例失敗會反思出教訓、帶教訓重試（每次重試多花 API）")
@@ -33,8 +34,8 @@ func main() {
 	sweRepoPrefix := flag.String("swe-repo-prefix", "", "clone 來源前綴，覆蓋預設 https://github.com/（可指向本地映像快取或本地 repo 加速/離線）")
 	sweTestRunner := flag.String("swe-test-runner", "", "覆蓋驗證階段的測試命令前綴（預設 python -m pytest -q；如 django 用 tests/runtests.py、或指向 venv 內的 python）")
 	dryRun := flag.Bool("dry-run", false, "只載入並印出將執行的用例計畫（Setup/Task/Validate），不呼叫 LLM、不 clone、不花錢")
-	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 ANTHROPIC_API_KEY）")
-	skillAB := flag.Bool("skill-ab", false, "技能任務影響 A/B：同一任務在『無/有綁定技能』下各跑一次，量化技能的行為價值（需 ANTHROPIC_API_KEY）")
+	memAB := flag.Bool("mem-ab", false, "記憶任務影響 A/B：同一任務在『無/有相關記憶』下各跑一次，比較回合/成本（需 -model 對應的金鑰）")
+	skillAB := flag.Bool("skill-ab", false, "技能任務影響 A/B：同一任務在『無/有綁定技能』下各跑一次，量化技能的行為價值（需 -model 對應的金鑰）")
 	abN := flag.Int("ab-n", 1, "A/B 消融重複幾次配對（目前 -skill-ab 支援）；>1 時輸出 2×2 表與 Fisher 精確檢定 p 值。要下結論建議 n≥20")
 	predictions := flag.String("predictions", "", "SWE-bench 生成模式：對 -swebench 的實例跑 agent → 輸出官方 predictions JSONL 到此路徑（交給官方 harness 評測）")
 	flag.Parse()
@@ -44,9 +45,7 @@ func main() {
 		if *swebench == "" {
 			log.Fatal("-predictions 需搭配 -swebench <資料檔>")
 		}
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			log.Fatal("生成 predictions 需 ANTHROPIC_API_KEY")
-		}
+		requireModelKey(*model)
 		instances, err := eval.LoadSWEBench(*swebench)
 		if err != nil {
 			log.Fatalf("載入 SWE-bench 失敗: %v", err)
@@ -74,9 +73,7 @@ func main() {
 
 	// 記憶 Level 2 A/B：用內建情境跑「無記憶 vs 有記憶」，量化記憶對任務的影響。
 	if *memAB {
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			log.Fatal("記憶 A/B 需 ANTHROPIC_API_KEY")
-		}
+		requireModelKey(*model)
 		tc, mem := eval.MemoryABScenario()
 		fmt.Print(eval.RunMemoryAB(context.Background(), tc, mem, *model).Render())
 		return
@@ -84,9 +81,7 @@ func main() {
 
 	// 技能 Level 2 A/B：用內建情境跑「無技能 vs 綁定技能」，量化技能的【行為】價值（結構把關之外）。
 	if *skillAB {
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			log.Fatal("技能 A/B 需 ANTHROPIC_API_KEY")
-		}
+		requireModelKey(*model)
 		tc, doc, name := eval.SkillABScenario()
 		if *abN <= 1 {
 			fmt.Print(eval.RunSkillAB(context.Background(), tc, doc, name, *model).Render())
@@ -134,9 +129,7 @@ func main() {
 		return
 	}
 
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		log.Fatal("請先在 .env 或環境變數中設置 ANTHROPIC_API_KEY 進行跑分測試")
-	}
+	requireModelKey(*model)
 
 	// 跑分是真實 API 呼叫、要花錢：預設選最便宜的 Claude 模型（對應書本"省點錢"的取捨）。
 	// 想測更強能力可換 -model claude-opus-4-8。
@@ -350,4 +343,12 @@ func writeReport(dir string, report *eval.SuiteReport) error {
 	}
 	log.Printf("[bench] 📄 報告已寫入 %s", path)
 	return nil
+}
+
+// requireModelKey 在開跑前確認 -model 對應的金鑰在（claude- 要 ANTHROPIC_API_KEY，其他要 OPENAI_API_KEY）。
+// 跑分是真金白銀的 API 呼叫，缺金鑰要在第一個用例之前就講清楚，而不是跑到一半 panic。
+func requireModelKey(model string) {
+	if _, err := provider.ForModel(model); err != nil {
+		log.Fatalf("無法開跑：%v", err)
+	}
 }

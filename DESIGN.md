@@ -95,7 +95,7 @@
 
 ### 8. Provider 抽象
 - **決定**：`LLMProvider` 介面（[provider/](internal/provider/)）+ `FromEnv`。預設 Claude（官方 SDK）；`COGITO_PROVIDER=openai` 走**手寫**的 OpenAI 相容 client（不加重依賴），`OPENAI_BASE_URL` 可指 vLLM/Ollama/OpenRouter/Groq——一招拿到廣度。OTLP 認證 header 由 `LANGFUSE_*` 金鑰自動派生（單一真相源，不手編 base64 而漂移）。
-- **scoped**：bench 跑分仍 Claude-only；Gemini 經 OpenAI 相容間接支援、無原生。
+- **scoped**：bench 跑分／A-B／SWE-bench 生成依 `-model` 選 provider（`provider.ForModel`：claude- 走 Anthropic、其他走 OpenAI 相容端點），但已發表的評測數字都是 Claude 跑的；Gemini 經 OpenAI 相容間接支援、無原生；OpenAI 路徑只走 chat completions（未接 Responses API，推理＋工具不能同開的模型要設 `OPENAI_REASONING_EFFORT=none`）。
 
 ### 9. 部署形態
 - **決定**：單一 Go binary、近零依賴、**手寫** MCP/JSON-RPC client（stdio + Streamable HTTP，無第三方 SDK）。self-hosted、Anthropic 優先。
