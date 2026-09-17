@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"slices"
@@ -463,22 +464,33 @@ func toUsage(u oaiUsage) *schema.Usage {
 	}
 }
 
-// sleepBackoff 在重試前退避等待：優先用伺服器的 Retry-After，否則指數退避（0.5s、1s、2s…），封頂
-// maxBackoff。等待期間尊重 ctx 取消——回傳 false 表示 ctx 已取消，呼叫端應中止。
+// sleepBackoff 在重試前退避等待（時間見 backoffDelay）。等待期間尊重 ctx 取消——回傳 false 表示
+// ctx 已取消，呼叫端應中止。
 func sleepBackoff(ctx context.Context, attempt int, retryAfter time.Duration) bool {
-	d := retryAfter
-	if d <= 0 {
-		d = time.Duration(500*(1<<attempt)) * time.Millisecond
-	}
-	if d > maxBackoff {
-		d = maxBackoff
-	}
 	select {
-	case <-time.After(d):
+	case <-time.After(backoffDelay(attempt, retryAfter)):
 		return true
 	case <-ctx.Done():
 		return false
 	}
+}
+
+// backoffDelay 算重試前的等待時間，帶隨機擾動：同時被限流的請求若算出一樣的時間，會在同一瞬間
+// 一起重試、再一起被限流。
+//   - 伺服器給了 Retry-After：在 [Retry-After, 1.5×Retry-After] 之間取，不早於伺服器要求。
+//   - 否則指數退避（0.5s、1s、2s…）：在 [基準/2, 基準] 之間取。
+//
+// 兩者都封頂 maxBackoff（唯一會早於 Retry-After 的情況）：寧可早一點再試一次，也不讓伺服器回一個
+// 巨大的值把任務卡死。
+func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
+	var d time.Duration
+	if retryAfter > 0 {
+		d = retryAfter + time.Duration(rand.Int64N(int64(retryAfter/2)+1))
+	} else {
+		base := min(time.Duration(500*(1<<min(attempt, 16)))*time.Millisecond, maxBackoff)
+		d = base/2 + time.Duration(rand.Int64N(int64(base/2)+1))
+	}
+	return min(d, maxBackoff)
 }
 
 // parseRetryAfter 解析 Retry-After 標頭的秒數形式（OpenAI 與多數相容端點用此形式）；非秒數（HTTP 日期）

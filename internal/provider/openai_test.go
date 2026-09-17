@@ -439,3 +439,27 @@ func TestForModel(t *testing.T) {
 		t.Errorf("gpt 模型缺 OpenAI 金鑰應回錯誤，got %v", err)
 	}
 }
+
+// 退避要有隨機擾動：同時被限流的請求若算出一模一樣的等待時間，會在同一瞬間一起重試、再一起被限流。
+// 伺服器給了 Retry-After 時只往後擾動，絕不早於伺服器要求的時間。
+func TestBackoffDelay_Jitter(t *testing.T) {
+	seen := map[time.Duration]bool{}
+	for range 200 {
+		d := backoffDelay(2, 0) // 指數基準 2s
+		if d < time.Second || d > 2*time.Second {
+			t.Fatalf("attempt 2 的退避應落在 [1s, 2s]，got %v", d)
+		}
+		seen[d] = true
+
+		r := backoffDelay(0, 4*time.Second)
+		if r < 4*time.Second || r > 6*time.Second {
+			t.Fatalf("Retry-After=4s 的退避應落在 [4s, 6s]（不早於伺服器要求），got %v", r)
+		}
+		if c := backoffDelay(20, 0); c > maxBackoff {
+			t.Fatalf("退避不得超過上限 %v，got %v", maxBackoff, c)
+		}
+	}
+	if len(seen) < 10 {
+		t.Errorf("200 次退避只出現 %d 種值：沒有隨機擾動，並發失敗的請求會同步重試", len(seen))
+	}
+}
