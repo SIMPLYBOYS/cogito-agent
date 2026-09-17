@@ -197,7 +197,7 @@ func (b *BenchmarkRunner) runOnce(ctx context.Context, tc TestCase, taskPrompt s
 
 	realProvider := modelProvider(b.modelName)
 	session := ctxpkg.NewSession(tc.ID, workDir)
-	trackedProvider := observability.NewCostTracker(realProvider, b.modelName, session)
+	trackedProvider := observability.NewCostTracker(realProvider, session)
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))

@@ -6,11 +6,16 @@ import (
 	"time"
 
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 )
 
 // stubProvider 回傳固定 Usage 的假 provider，用於離線驗證計費邏輯（不打真實 API）。
-type stubProvider struct{ prompt, completion int }
+// model 是它自稱在跑的模型——CostTracker 依它計價。
+type stubProvider struct {
+	prompt, completion int
+	model              string
+}
 
 func (s *stubProvider) Generate(ctx context.Context, msgs []schema.Message, tools []schema.ToolDefinition) (*schema.Message, error) {
 	return &schema.Message{
@@ -21,7 +26,7 @@ func (s *stubProvider) Generate(ctx context.Context, msgs []schema.Message, tool
 }
 
 func (s *stubProvider) MaxContextTokens() int { return 200000 }
-func (s *stubProvider) ModelName() string     { return "stub-model" }
+func (s *stubProvider) ModelName() string     { return s.model }
 
 func approxEq(a, b float64) bool {
 	d := a - b
@@ -34,12 +39,12 @@ func approxEq(a, b float64) bool {
 // 驗證 engine factory 的核心保證：每個會話各記各的賬，互不汙染。
 func TestCostTracker_PerSessionAccounting(t *testing.T) {
 	ctx := context.Background()
-	stub := &stubProvider{prompt: 1000, completion: 2000}
+	stub := &stubProvider{prompt: 1000, completion: 2000, model: "claude-opus-4-8"}
 
 	sessA := ctxpkg.NewSession("chA", "/tmp")
 	sessB := ctxpkg.NewSession("chB", "/tmp")
-	trackerA := NewCostTracker(stub, "claude-opus-4-8", sessA)
-	trackerB := NewCostTracker(stub, "claude-opus-4-8", sessB)
+	trackerA := NewCostTracker(stub, sessA)
+	trackerB := NewCostTracker(stub, sessB)
 
 	// A 調兩次，B 調一次
 	_, _ = trackerA.Generate(ctx, nil, nil)
@@ -65,7 +70,7 @@ func TestCostTracker_PerSessionAccounting(t *testing.T) {
 // 這是安全修補：舊行為靜默 0 會讓 MaxCostUSD 熔斷對未登記模型完全失效。
 func TestCostTracker_UnknownModelUsesFallbackPrice(t *testing.T) {
 	sess := ctxpkg.NewSession("x", "/tmp")
-	tr := NewCostTracker(&stubProvider{prompt: 100, completion: 100}, "unknown-model", sess)
+	tr := NewCostTracker(&stubProvider{prompt: 100, completion: 100, model: "unknown-model"}, sess)
 	_, _ = tr.Generate(context.Background(), nil, nil)
 
 	// fallback 預設 in $5 / out $25 每百萬 → (100*5 + 100*25)/1e6 = 0.003
@@ -87,7 +92,7 @@ func TestCostTracker_UnknownModelUsesFallbackPrice(t *testing.T) {
 // 「哪一輪突然變慢」在面板、replay、session 檔上全都查不到——資料量得到卻救不回來，
 // 是最容易長期沒人發現的那種缺失（沒有人會為「看不到的東西」開 bug）。
 func TestCostTracker_LatencyPersistedInUsage(t *testing.T) {
-	tr := &CostTracker{modelName: "claude-opus-4-8"} // session 為 nil：account 有防護
+	tr := &CostTracker{nextProvider: &stubProvider{model: "claude-opus-4-8"}} // session 為 nil：account 有防護
 	msg := &schema.Message{Role: schema.RoleAssistant,
 		Usage: &schema.Usage{PromptTokens: 10, CompletionTokens: 5}}
 
@@ -100,7 +105,7 @@ func TestCostTracker_LatencyPersistedInUsage(t *testing.T) {
 
 // 沒有 Usage 的回應不能讓 account 崩掉（provider 沒回 usage 是既有的合法情況）。
 func TestCostTracker_NoUsageDoesNotPanic(t *testing.T) {
-	tr := &CostTracker{modelName: "claude-opus-4-8"}
+	tr := &CostTracker{nextProvider: &stubProvider{model: "claude-opus-4-8"}}
 	tr.account(&schema.Message{Role: schema.RoleAssistant}, time.Second)
 }
 
@@ -135,5 +140,32 @@ func TestPricingIgnoresDateSuffix(t *testing.T) {
 	}
 	if plain != 1.0 {
 		t.Errorf("haiku 每百萬輸入 tk 應為 $1.00，得到 $%.4f（走了 fallback？）", plain)
+	}
+}
+
+// ignoringProvider 模擬「切換要求沒被滿足」：Configure 忽略指定的模型、回傳自己（例如 OpenAI 主引擎在
+// 缺 Anthropic 金鑰時忽略 claude- 模型）。實際跑的永遠是 model 欄位那個。
+type ignoringProvider struct{ model string }
+
+func (p *ignoringProvider) Generate(context.Context, []schema.Message, []schema.ToolDefinition) (*schema.Message, error) {
+	return &schema.Message{Role: schema.RoleAssistant, Usage: &schema.Usage{PromptTokens: 1_000_000}}, nil
+}
+func (p *ignoringProvider) MaxContextTokens() int                      { return 200000 }
+func (p *ignoringProvider) ModelName() string                          { return p.model }
+func (p *ignoringProvider) Configure(string, int) provider.LLMProvider { return p }
+
+// 計價要跟著【實際在跑】的模型，不是被要求的模型。否則切換沒被滿足時，成本、按模型的用量切片
+// 與 MaxCostUSD 熔斷全都依錯的模型計算。
+func TestCostTracker_ConfigurePricesActualModel(t *testing.T) {
+	sess := ctxpkg.NewSession("cfg", "/tmp")
+	tr := NewCostTracker(&ignoringProvider{model: "claude-haiku-4-5"}, sess)
+
+	sub := tr.Configure("claude-opus-5", 0) // 要求 opus，內層忽略、實際仍是 haiku
+	if _, err := sub.Generate(context.Background(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	// haiku-4-5：$1／百萬輸入；若誤以 opus-5（$5）計價會是 5.0
+	if got := sess.CostUSD(); !approxEq(got, 1.0) {
+		t.Errorf("實際跑 haiku 卻依被要求的模型計價：cost=$%.4f，want $1.0000", got)
 	}
 }

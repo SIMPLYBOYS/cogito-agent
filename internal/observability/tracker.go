@@ -84,14 +84,15 @@ func CostOf(model string, u schema.Usage) float64 {
 // 在轉調真實 provider 前後計時、抽取 Token 消耗、計算費用並累加進 Session。引擎對此毫不知情。
 type CostTracker struct {
 	nextProvider provider.LLMProvider
-	modelName    string
 	session      *ctxpkg.Session
 }
 
-func NewCostTracker(next provider.LLMProvider, modelName string, session *ctxpkg.Session) *CostTracker {
+// NewCostTracker 包住一個 provider。計價、未登記警告與「用過哪個模型」一律問 next.ModelName()，
+// 不另收模型名稱：由呼叫端另外傳一個名字，provider 沒照切換要求做時（例如缺 Anthropic 金鑰而沿用原模型）
+// 成本、按模型的用量切片與 MaxCostUSD 熔斷就會依錯的模型計算。
+func NewCostTracker(next provider.LLMProvider, session *ctxpkg.Session) *CostTracker {
 	return &CostTracker{
 		nextProvider: next,
-		modelName:    modelName,
 		session:      session,
 	}
 }
@@ -107,17 +108,13 @@ func (t *CostTracker) ModelName() string {
 }
 
 // Configure 讓子 agent 選模型/effort 仍保有成本追蹤：配置內層 provider 後重新包一層 CostTracker，
-// 以新模型名計價、記進同一 session。內層不支援配置則原樣回傳（model/effort 靜默忽略）。
+// 記進同一 session；計價跟著配置後【實際】的模型。內層不支援配置則原樣回傳（model/effort 靜默忽略）。
 func (t *CostTracker) Configure(model string, maxTokens int) provider.LLMProvider {
 	cfg, ok := t.nextProvider.(provider.Configurable)
 	if !ok {
 		return t
 	}
-	newModel := model
-	if newModel == "" {
-		newModel = t.modelName
-	}
-	return NewCostTracker(cfg.Configure(model, maxTokens), newModel, t.session)
+	return NewCostTracker(cfg.Configure(model, maxTokens), t.session)
 }
 
 func (t *CostTracker) Generate(ctx context.Context, msgs []schema.Message, availableTools []schema.ToolDefinition) (*schema.Message, error) {
@@ -150,6 +147,7 @@ func (t *CostTracker) GenerateStream(ctx context.Context, msgs []schema.Message,
 
 // account 對一次成功回應計價、記錄 log 與 session 用量。Generate 與 GenerateStream 共用。
 func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
+	model := t.nextProvider.ModelName()
 	if respMsg.Usage != nil {
 		// 先把耗時寫進 Usage 再做其他事：它跟這則訊息一起落盤，log 印完就沒了。
 		respMsg.Usage.LatencyMS = latency.Milliseconds()
@@ -158,20 +156,20 @@ func (t *CostTracker) account(respMsg *schema.Message, latency time.Duration) {
 		cacheRead := respMsg.Usage.CacheReadTokens
 		cacheCreation := respMsg.Usage.CacheCreationTokens
 
-		if !IsRegistered(t.modelName) {
+		if !IsRegistered(model) {
 			// 未登記模型：CostOf 會走 fallback 估價，讓成本熔斷仍生效（而非靜默 0）。每個 model 只警告一次。
-			if _, dup := warnedModels.LoadOrStore(t.modelName, true); !dup {
-				log.Printf("[Tracker] ⚠️ 模型 %q 未登記定價，改用 fallback 估價（in $%.1f / out $%.1f 每百萬 tk）；如需精確請在 PricingModel 登記或設 COGITO_PRICE_INPUT_USD/COGITO_PRICE_OUTPUT_USD。\n", t.modelName, fallbackInputPrice, fallbackOutputPrice)
+			if _, dup := warnedModels.LoadOrStore(model, true); !dup {
+				log.Printf("[Tracker] ⚠️ 模型 %q 未登記定價，改用 fallback 估價（in $%.1f / out $%.1f 每百萬 tk）；如需精確請在 PricingModel 登記或設 COGITO_PRICE_INPUT_USD/COGITO_PRICE_OUTPUT_USD。\n", model, fallbackInputPrice, fallbackOutputPrice)
 			}
 		}
-		cost := CostOf(t.modelName, *respMsg.Usage)
+		cost := CostOf(model, *respMsg.Usage)
 
 		log.Printf("[Tracker] 📊 API 呼叫完成 | 耗時: %v | 輸入: %d tk (快取讀 %d / 寫 %d) | 輸出: %d tk | 花費: $%.6f\n",
 			latency, promptTokens, cacheRead, cacheCreation, completionTokens, cost)
 
 		if t.session != nil {
 			t.session.RecordUsage(promptTokens, completionTokens, cost)
-			t.session.SetModelUsed(t.modelName) // 記實際用過的模型（供用量按模型切片；只在變更時落盤）
+			t.session.SetModelUsed(model) // 記實際用過的模型（供用量按模型切片；只在變更時落盤）
 			// 用 CostUSD() 在鎖保護下讀取，避免與並發 RecordUsage 對裸欄位 TotalCostUSD 的 data race。
 			log.Printf("[Tracker] 💰 當前會話 (%s) 累計花費: $%.6f\n", t.session.ID, t.session.CostUSD())
 		}

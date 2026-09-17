@@ -57,7 +57,7 @@ func runWithSkill(ctx context.Context, tc TestCase, skillDoc, skillName, model, 
 
 	p := modelProvider(model)
 	session := ctxpkg.NewSession("skillab-"+label, workDir)
-	tracked := observability.NewCostTracker(p, model, session)
+	tracked := observability.NewCostTracker(p, session)
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))

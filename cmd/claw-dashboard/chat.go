@@ -49,13 +49,13 @@ type chatRunner struct {
 // newChatRunner 組裝 operator agent。呼叫端須先對 GlobalSessionMgr.SetStore（讓 operator session
 // 落地、且唯讀視圖看得到）。provider 缺 key 會回錯——由呼叫端決定「停用 chat 但保留唯讀面板」。
 func newChatRunner(workDir string) (*chatRunner, error) {
-	realProvider, modelName, err := provider.FromEnv()
+	realProvider, _, err := provider.FromEnv()
 	if err != nil {
 		return nil, err
 	}
 	sess := ctxpkg.GlobalSessionMgr.GetOrCreate(operatorSessionID, workDir)
 	sess.SetRunning(false) // 清除上次硬砍/關閉遺留的 running 旗標——剛啟動的面板不可能有進行中的 operator run
-	tracked := observability.NewCostTracker(realProvider, modelName, sess)
+	tracked := observability.NewCostTracker(realProvider, sess)
 	executor := sandbox.FromEnv()
 
 	registry := tools.NewRegistry()

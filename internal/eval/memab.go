@@ -66,7 +66,7 @@ func runWithMemory(ctx context.Context, tc TestCase, memoryRecord, model, label 
 
 	p := modelProvider(model)
 	session := ctxpkg.NewSession("memab-"+label, workDir)
-	tracked := observability.NewCostTracker(p, model, session)
+	tracked := observability.NewCostTracker(p, session)
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))

@@ -164,14 +164,14 @@ func main() {
 		registry.Use(timing)   // 內層：只量工具本身執行耗時
 
 		// per-channel 模型覆蓋（`model <id>` 指令）：session 設了就用 Configurable 換模型；
-		// CostTracker 以生效模型名計價。未設或 provider 不支援則沿用啟動預設。
-		effProvider, effModel := llmProvider, modelName
+		// CostTracker 依換完後【實際】的模型計價。未設或 provider 不支援則沿用啟動預設。
+		effProvider := llmProvider
 		if m := sess.Model(); m != "" {
 			if cfg, ok := llmProvider.(provider.Configurable); ok {
-				effProvider, effModel = cfg.Configure(m, 0), m
+				effProvider = cfg.Configure(m, 0)
 			}
 		}
-		tracked := observability.NewCostTracker(effProvider, effModel, sess)
+		tracked := observability.NewCostTracker(effProvider, sess)
 		// 對話式建構子＝滾動摘要 + history 有界化（bench/一次性任務走 NewAgentEngine 預設關，保持確定性）。
 		eng := engine.NewConversationalEngine(tracked, registry, false)
 		// per-channel Plan Mode：由該頻道 session 的切換狀態決定（`plan on`/`plan off`）；預設關，

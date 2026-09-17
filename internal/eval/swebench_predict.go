@@ -48,7 +48,7 @@ func GeneratePrediction(ctx context.Context, ins SWEInstance, opts SWEOptions, m
 		return Prediction{}, err
 	}
 	session := ctxpkg.NewSession("swegen-"+sanitizeID(ins.InstanceID), workDir)
-	tracked := observability.NewCostTracker(p, model, session)
+	tracked := observability.NewCostTracker(p, session)
 
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewReadFileTool(workDir))

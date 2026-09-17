@@ -91,7 +91,7 @@ func main() {
 	observability.SetPricingRoot(workDir) // 自訂單價：<workDir>/.claw/pricing.json（內建表當預設）
 
 	// 用 CostTracker 包裹 provider 自動記賬；trace 由 engine.Run 內部自動導出
-	trackedProvider := observability.NewCostTracker(realProvider, modelName, sess)
+	trackedProvider := observability.NewCostTracker(realProvider, sess)
 	// 背景反思用便宜模型（COGITO_REFLECT_MODEL）；未設＝沿用主 provider。CostTracker 的
 	// Configure 會重新包一層，故換模型後成本仍記進同一 session。
 	reflectProv := provider.ReflectProvider(trackedProvider)
