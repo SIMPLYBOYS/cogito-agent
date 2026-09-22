@@ -68,6 +68,15 @@ type AgentEngine struct {
 // factory 裡按頻道組裝的（MCP、背景任務、自我進化都是條件式掛載），任何寫死的列表都會走鐘。
 func (e *AgentEngine) AvailableTools() []schema.ToolDefinition { return e.registry.GetAvailableTools() }
 
+// StopBackground 收掉這具引擎的工具在背景留下的工作（背景子 agent、背景指令），/stop 用；回報收了什麼
+// （例：「2 個背景子 agent」）。取消 Run 的 context 碰不到它們——它們刻意不綁在工具呼叫的 context 上。
+func (e *AgentEngine) StopBackground() []string {
+	if s, ok := e.registry.(interface{ StopBackground() []string }); ok {
+		return s.StopBackground()
+	}
+	return nil
+}
+
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
 	return &AgentEngine{
 		provider:           p,

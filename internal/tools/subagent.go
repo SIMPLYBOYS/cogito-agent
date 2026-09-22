@@ -91,6 +91,14 @@ func NewSubagentTool(runner AgentRunner, subagentRegistry Registry, reporter int
 // 與本工具共用同一 SubagentManager。cmd 端把它們一併註冊，模型才查得到 background=true 委派的結果。
 func (t *SubagentTool) BackgroundTools() []BaseTool { return t.subMgr.Tools() }
 
+// StopBackground：/stop 時叫停這一輪派出去的背景子 agent（見 BackgroundStopper）。
+func (t *SubagentTool) StopBackground() string {
+	if n := t.subMgr.CancelAll(); n > 0 {
+		return fmt.Sprintf("%d 個背景子 agent", n)
+	}
+	return ""
+}
+
 // WithWorktreeIsolation 開啟 worktree 隔離能力：baseWorkDir＝session 工作區，regFactory 依目錄建工具超集
 // （與傳入 subagentRegistry 同款，但 rooted 在指定目錄）。未呼叫則 isolation:worktree 降級為共享工作區。
 func (t *SubagentTool) WithWorktreeIsolation(baseWorkDir string, regFactory func(workDir string) Registry) *SubagentTool {

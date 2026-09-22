@@ -186,3 +186,28 @@ func TestSubagentManager_AwaitAllDoesNotLeakGoroutines(t *testing.T) {
 		t.Fatalf("await 回來後殘留 %d 個 goroutine（等待前 %d）", n-base, base)
 	}
 }
+
+// ctxRunner 的 RunSub 一直跑到 context 被取消——替身「還在呼叫工具、燒錢」的背景子 agent。
+type ctxRunner struct{}
+
+func (ctxRunner) RunSub(ctx context.Context, _ SubTask) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+// /stop 要叫得停背景子 agent。先前 Spawn 用 context.Background()，主任務停了它照樣跑到程式關閉
+// （2026-09-23 查核：「中止後不再出現新的工具呼叫」不成立）。
+func TestSubagentManager_CancelAllStopsRunning(t *testing.T) {
+	m := NewSubagentManager(ctxRunner{})
+	id, err := m.Spawn(SubTask{}, "explorer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := m.CancelAll(); n != 1 {
+		t.Errorf("CancelAll 應回報叫停 1 個，got %d", n)
+	}
+	waitFor(t, func() bool { return strings.Contains(m.Result(id), "已結束") }, "CancelAll 後背景子 agent 應收手")
+	if n := m.CancelAll(); n != 0 {
+		t.Errorf("已經停了的不該再算一次，got %d", n)
+	}
+}

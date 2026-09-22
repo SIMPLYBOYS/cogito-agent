@@ -37,3 +37,24 @@ func TestTaskManager_KillAllSparesFinishedTaskGroup(t *testing.T) {
 		t.Errorf("正常結束的任務不該因 KillAll 改標成已被終止：%s", out)
 	}
 }
+
+// /stop 收背景指令走註冊表：bash_background 是 BackgroundStopper，收掉還在跑的並回報幾個。
+// 先前 /stop 只取消主任務，背景指令要等整個程式關閉（KillAll）才收。
+func TestRegistry_StopBackgroundKillsTasks(t *testing.T) {
+	tm := NewTaskManager(sandbox.HostExecutor{}, t.TempDir())
+	reg := NewRegistry()
+	for _, tt := range NewTaskTools(tm) {
+		reg.Register(tt)
+	}
+	id, err := tm.Start("sleep 30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reg.(interface{ StopBackground() []string }).StopBackground()
+	if len(got) != 1 || got[0] != "1 個背景指令" {
+		t.Fatalf("應回報收掉 1 個背景指令，got %q", got)
+	}
+	if out, _ := tm.Output(id); !strings.Contains(out, "已被終止") {
+		t.Errorf("背景指令應被終止：%s", out)
+	}
+}

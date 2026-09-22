@@ -23,6 +23,14 @@ func NewTaskTools(tm *TaskManager) []BaseTool {
 
 type bashBackgroundTool struct{ tm *TaskManager }
 
+// StopBackground：/stop 時收掉這一輪起的背景指令（見 BackgroundStopper）。TaskManager 是每輪一個，關掉它不影響下一輪。
+func (t *bashBackgroundTool) StopBackground() string {
+	if n := t.tm.KillAll(); n > 0 {
+		return fmt.Sprintf("%d 個背景指令", n)
+	}
+	return ""
+}
+
 func (t *bashBackgroundTool) Name() string { return "bash_background" }
 
 func (t *bashBackgroundTool) Definition() schema.ToolDefinition {

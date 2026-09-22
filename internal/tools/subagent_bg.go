@@ -36,10 +36,24 @@ type SubagentManager struct {
 	subs   map[string]*bgSubState
 	seq    int
 	runner AgentRunner
+	// 背景子 agent 的 context：不跟 spawn 那次工具呼叫走（工具一回傳它就結束了），跟 /stop 走（見 CancelAll）。
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewSubagentManager(runner AgentRunner) *SubagentManager {
-	return &SubagentManager{subs: make(map[string]*bgSubState), runner: runner}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &SubagentManager{subs: make(map[string]*bgSubState), runner: runner, ctx: ctx, cancel: cancel}
+}
+
+// CancelAll 叫停所有還在跑的背景子 agent（/stop 用），回報叫停了幾個。之前 /stop 只取消主任務，
+// 背景子 agent 照樣呼叫工具、燒錢到程式關閉（2026-09-23 查核）。它們在當下那一步跑完後收手；之後再 Spawn 的一起動就是取消。
+func (m *SubagentManager) CancelAll() int {
+	m.mu.Lock()
+	n := m.runningCount()
+	m.mu.Unlock()
+	m.cancel()
+	return n
 }
 
 func (m *SubagentManager) runningCount() int {
@@ -98,7 +112,7 @@ func (m *SubagentManager) Spawn(task SubTask, label string) (string, error) {
 	m.mu.Unlock()
 
 	go func() {
-		result, err := m.runner.RunSub(context.Background(), task) // 背景：獨立 context、不受主任務取消影響
+		result, err := m.runner.RunSub(m.ctx, task) // 背景：不受 spawn 那次工具呼叫結束影響，/stop 才收（CancelAll）
 		st.mu.Lock()
 		st.done, st.result, st.err = true, result, err
 		st.mu.Unlock()

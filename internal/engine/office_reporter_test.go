@@ -331,3 +331,24 @@ func TestLongMessageNotCutAt2000(t *testing.T) {
 		t.Fatalf("3000 字訊息的尾巴被砍掉了（長度=%d）", len([]rune(got.Label)))
 	}
 }
+
+// 被 /stop 中止要送 label "stopped"，不是 error——先前從頻道按 /stop，辦公室收到的是一筆「context canceled」失敗。
+func TestOfficeReporterStoppedIsNotError(t *testing.T) {
+	var mu sync.Mutex
+	var got []officeEvent
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		var ev officeEvent
+		_ = json.NewDecoder(r.Body).Decode(&ev)
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	r := NewOfficeReporter(srv.URL, "p07")
+	r.End(TaskEnd{Err: context.Canceled, Stopped: "slack 送來的 /stop；一併收掉 1 個背景子 agent"})
+	r.Close()
+	if len(got) != 1 || got[0].Label != "stopped" || !strings.Contains(got[0].Detail, "背景子 agent") {
+		t.Fatalf("中止應送 stopped 並帶上收掉了什麼：%+v", got)
+	}
+}

@@ -401,6 +401,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	// COGITO_OFFICE_URL 設定時，引擎事件同步投影到像素辦公室（unity_demo 橋）。convID 直接當
 	// 事件的 agent 身分——橋端把未知 id 動態指派給閒置 NPC（黏性映射，同頻道固定同員工）。
 	var taskErr error // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
+	var stopNote string // 被 /stop 中止時：誰送的、一併收掉了什麼（辦公室記成中止，不是錯誤）
 	if office := newOfficeReporter(convID); office != nil {
 		office.Begin(prompt, workDir)
 		// done 帶本次真實花費增量——外殼收工列印的數字與聊天端「本次花費 $x」是同一份帳
@@ -408,7 +409,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		defer func() {
 			m := session.ModelUsed()
 			office.End(engine.TaskEnd{Err: taskErr, CostUSD: session.CostUSD() - startCost,
-				Model: m, CostEst: m != "" && !observability.IsRegistered(m)})
+				Model: m, CostEst: m != "" && !observability.IsRegistered(m), Stopped: stopNote})
 			office.Close()
 		}()
 		rep = engine.MultiReporter{rep, office}
@@ -467,7 +468,14 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		if errors.Is(err, context.Canceled) {
 			session.ClearResume()
 			taskErr = err
-			SendMessage(convID, fmt.Sprintf("🛑 已中止本次任務（本次花費 $%.4f）。", session.CostUSD()-startCost))
+			// 背景子 agent、背景指令不綁在 Run 的 context 上，取消主任務碰不到它們——要明著收，
+			// 否則「停了」之後它們照樣呼叫工具到程式關閉（2026-09-23 小美查核）。
+			bg := ""
+			if left := eng.StopBackground(); len(left) > 0 {
+				bg = "；一併收掉 " + strings.Join(left, "、")
+			}
+			stopNote = c.platform + " 送來的 /stop" + bg
+			SendMessage(convID, fmt.Sprintf("🛑 已中止本次任務%s（本次花費 $%.4f）。", bg, session.CostUSD()-startCost))
 			return
 		}
 		if c.autoResume && attempt < maxAutoResume && isRecoverableErr(err) {

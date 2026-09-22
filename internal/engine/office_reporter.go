@@ -61,6 +61,9 @@ type TaskEnd struct {
 	CostUSD float64 // 本次花費（呼叫端算增量）；≤0＝未知，不送
 	Model   string  // 主 agent 實際跑的模型；空＝未知，不送
 	CostEst bool    // 上面那筆花費的單價是估的（模型未登記定價）
+	// Stopped 非空＝被 /stop 中止：誰送的、一併收掉了什麼。送 label "stopped"——辦公室記成中止，
+	// 不是一筆看不懂的「context canceled」錯誤（先前從頻道按 /stop，看板上就是一次莫名的失敗）。
+	Stopped string
 }
 
 type OfficeReporter struct {
@@ -254,7 +257,10 @@ func (r *OfficeReporter) End(e TaskEnd) {
 	if e.CostUSD > 0 {
 		ev.Cost, ev.CostEst = e.CostUSD, e.CostEst
 	}
-	if e.Err != nil {
+	switch {
+	case e.Stopped != "":
+		ev.Label, ev.Detail = "stopped", schema.TruncRunes(e.Stopped, 120, "…")
+	case e.Err != nil:
 		ev.Label, ev.Detail = "error", schema.TruncRunes(e.Err.Error(), 120, "…")
 	}
 	r.pushEv(ev)

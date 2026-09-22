@@ -295,10 +295,10 @@ func (tm *TaskManager) List() string {
 	return string(b)
 }
 
-// KillAll 終止所有任務並等它們收屍（cmd 優雅關閉時呼叫，避免殘留孤兒行程）。
+// KillAll 終止所有任務並等它們收屍（cmd 優雅關閉、/stop 時呼叫，避免殘留孤兒行程），回報真的砍掉了幾個（已結束的不算）。
 // 回來時每個任務的 Wait 都已返回——管線的寫入端全死了，才代表整棵樹真的收掉；
 // 只 cancel 的話 bash 死了、孫行程還握著管線和埠口活著。
-func (tm *TaskManager) KillAll() {
+func (tm *TaskManager) KillAll() (killed int) {
 	tm.mu.Lock()
 	tm.closed = true
 	tm.mu.Unlock()
@@ -316,7 +316,9 @@ func (tm *TaskManager) KillAll() {
 	tm.mu.Lock()
 	all := make([]*taskState, 0, len(tm.tasks))
 	for _, ts := range tm.tasks {
-		ts.kill()
+		if !ts.kill() {
+			killed++
+		}
 		all = append(all, ts)
 	}
 	tm.mu.Unlock()
@@ -325,7 +327,8 @@ func (tm *TaskManager) KillAll() {
 		select {
 		case <-ts.exited:
 		case <-deadline.Done():
-			return
+			return killed
 		}
 	}
+	return killed
 }
