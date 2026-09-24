@@ -149,3 +149,36 @@ func TestWebToolsSecretExfilNeedsApproval(t *testing.T) {
 		t.Error("正常查詢不該被攔")
 	}
 }
+
+// 同頻道多個待審：裸口令一個都不放行（稽核 #5），各自還在等；帶 ID 只放行那一個。
+func TestApprovalManager_ResolveByChannel_MultiRefuses(t *testing.T) {
+	m := &ApprovalManager{pendingTasks: map[string]*pendingTask{}}
+	a := make(chan ApprovalResult, 1)
+	b := make(chan ApprovalResult, 1)
+	m.pendingTasks["bait"] = &pendingTask{ch: a, channelID: "chX"}
+	m.pendingTasks["evil"] = &pendingTask{ch: b, channelID: "chX"}
+	if n := m.ResolveByChannel("chX", true, "ok"); n != 2 {
+		t.Fatalf("want count 2, got %d", n)
+	}
+	select {
+	case <-a:
+		t.Fatal("bare approve resolved a task while 2 were pending")
+	case <-b:
+		t.Fatal("bare approve resolved a task while 2 were pending")
+	default:
+	}
+	if len(m.pendingTasks) != 2 {
+		t.Fatalf("both tasks must still be pending, got %d", len(m.pendingTasks))
+	}
+	if !m.ResolveApproval("bait", true, "ok") {
+		t.Fatal("approve by ID should resolve that one")
+	}
+	if r := <-a; !r.Allowed {
+		t.Fatal("bait should be allowed")
+	}
+	select {
+	case <-b:
+		t.Fatal("approving one ID must not touch the other")
+	default:
+	}
+}

@@ -1264,11 +1264,8 @@ func (c *Core) tryResolveApproval(convID, userID, text string) bool {
 	case n == 0:
 		SendMessage(convID, "ℹ️ 當前沒有待審批的操作。")
 	case n > 1:
-		verb := "批准"
-		if !allowed {
-			verb = "拒絕"
-		}
-		SendMessage(convID, fmt.Sprintf("已對本頻道 %d 個待審批操作執行%s。", n, verb))
+		SendMessage(convID, fmt.Sprintf("⚠️ 本頻道有 %d 個待審批操作，裸 approve／reject 不會一次全部處理——"+
+			"請看過每一張，逐一回覆 `approve <任務 ID>` 或 `reject <任務 ID>`（ID 在每張審批卡上）。", n))
 	}
 	return true
 }

@@ -99,18 +99,26 @@ func (m *ApprovalManager) ResolveApproval(taskID string, allowed bool, reason st
 	return true
 }
 
-// ResolveByChannel 喚醒某頻道下所有等待中的審批（弱點修補①：裸 approve/reject 無需手打長 taskID）。
-// 回傳處理的數量。
+// ResolveByChannel 讓裸 approve/reject 免打長 taskID（弱點修補①）——但只在本頻道【恰好一個】待審時生效。
+// 回傳本頻道待審的數量；大於 1 時什麼都不做。
+//
+// 以前是全部一起放行：引擎一輪會平行跑多個工具呼叫，N 個高危呼叫就是 N 張卡，而人通常只看了其中一張
+// （pixel-office 稽核 #5：誘餌指令搭配一個惡意指令，一句 approve 全過）。一次只能決定你看過的那一張。
 func (m *ApprovalManager) ResolveByChannel(channelID string, allowed bool, reason string) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var only *pendingTask
+	var onlyID string
 	count := 0
 	for id, pt := range m.pendingTasks {
 		if pt.channelID == channelID {
-			delete(m.pendingTasks, id)
-			pt.ch <- ApprovalResult{Allowed: allowed, Reason: reason}
+			only, onlyID = pt, id
 			count++
 		}
+	}
+	if count == 1 {
+		delete(m.pendingTasks, onlyID)
+		only.ch <- ApprovalResult{Allowed: allowed, Reason: reason}
 	}
 	return count
 }
