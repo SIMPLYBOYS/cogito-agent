@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -15,6 +14,7 @@ import (
 	"github.com/SIMPLYBOYS/cogito-agent/internal/chatbot"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/cmdutil"
 	ctxpkg "github.com/SIMPLYBOYS/cogito-agent/internal/context"
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/mcp"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/observability"
 	"github.com/SIMPLYBOYS/cogito-agent/internal/provider"
@@ -64,7 +64,7 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 		}
 		// agent 帶完整 conv 身分（office:p17）——與 OfficeReporter 事件同一把鍵，橋端同路解析
 		b, _ := json.Marshal(map[string]string{"agent": "office:" + channelID, "text": text})
-		resp, err := client.Post(bridge+"/office/chat", "application/json", bytes.NewReader(b))
+		resp, err := engine.PostOffice(client, bridge+"/office/chat", b)
 		if err == nil {
 			resp.Body.Close()
 		}

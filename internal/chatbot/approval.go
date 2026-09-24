@@ -1,7 +1,6 @@
 package chatbot
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/SIMPLYBOYS/cogito-agent/internal/engine"
 )
 
 // ApprovalManager 是 channel-based 的全域審批單例：危險工具呼叫在 WaitForApproval 處阻塞，
@@ -248,7 +249,7 @@ func mirrorApprovalToOffice(convID, notice string) {
 	go func() {
 		b, _ := json.Marshal(map[string]string{"agent": convID, "text": notice})
 		client := &http.Client{Timeout: 3 * time.Second}
-		resp, err := client.Post(strings.TrimRight(url, "/")+"/office/chat", "application/json", bytes.NewReader(b))
+		resp, err := engine.PostOffice(client, strings.TrimRight(url, "/")+"/office/chat", b)
 		if err != nil {
 			log.Printf("[Approval] 辦公室鏡射失敗（不影響審批）：%v", err)
 			return

@@ -16,7 +16,6 @@ package engine
 // 狀態機事件走獨立佇列（見 isCritical），泡泡事件維持滿了就丟。
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -168,7 +167,7 @@ func (r *OfficeReporter) send(endpoint string) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	post := func(ev officeEvent) {
 		b, _ := json.Marshal(ev)
-		resp, err := client.Post(endpoint, "application/json", bytes.NewReader(b))
+		resp, err := PostOffice(client, endpoint, b)
 		if err != nil {
 			return // 橋不在線：靜默丟
 		}
