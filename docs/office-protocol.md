@@ -12,11 +12,13 @@
 
 | 方向 | 端點 | 誰呼叫 | 認證 |
 |---|---|---|---|
-| agent → 橋 | `POST {COGITO_OFFICE_URL}/office/event` | `OfficeReporter`（執行事件投影） | 無 |
-| agent → 橋 | `POST {COGITO_OFFICE_URL}/office/chat` | bot 的出訊（完成／失敗／審批卡） | 無 |
+| agent → 橋 | `POST {COGITO_OFFICE_URL}/office/event` | `OfficeReporter`（執行事件投影） | `X-Office-Token` |
+| agent → 橋 | `POST {COGITO_OFFICE_URL}/office/chat` | bot 的出訊（完成／失敗／審批卡） | `X-Office-Token` |
 | 橋 → agent | `POST {COGITO_HTTP_ADDR}/task` | 橋的 Web 外殼（派工） | `Authorization: Bearer {COGITO_HTTP_TOKEN}` |
 
-前兩個沒有認證，因為它們只往**你自己指定的** `COGITO_OFFICE_URL` 送；第三個能執行任意任務，
+前兩個帶橋的 token（`engine.PostOffice` 自動帶）：橋只收本機、而且要 token——擋掉打得到 127.0.0.1 卻讀不到你檔案的東西
+（同機其他使用者、被騙去發請求的本機服務）。token 來源：`COGITO_OFFICE_TOKEN`，否則 `OFFICE_TOKEN_FILE`，否則橋第一次啟動
+產生的 `~/.pixel-office/token`——同一台機器上通常什麼都不用設。第三個能執行任意任務，
 故有 token ＋ 預設只准 loopback（見 [.env.example](../.env.example) 的 office 區塊）。
 
 ---

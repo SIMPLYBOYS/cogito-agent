@@ -26,6 +26,12 @@
 
 ▶ 完整版（高畫質、可暫停）：[docs/brag.mp4](docs/brag.mp4)　—— 危險命令審批攔截 → 成本/trace → 自我進化但需你放行。
 
+## Pixel Office：這個引擎的舞台
+
+[pixel-office](https://github.com/SIMPLYBOYS/pixel-office) 把 cogito 的工作投影成一間像素辦公室：工具呼叫、審批、收工，
+變成員工走回座位、頭上掛著倒數站在老闆門口等你簽核、交出報告——高危操作也在那裡直接核准。cogito 是引擎，
+Pixel Office 是你看它工作的地方。`COGITO_OFFICE_URL` 指到橋即可（同一台機器上 token 會自動帶）。協定見 [docs/office-protocol.md](docs/office-protocol.md)。
+
 ## Features
 
 **核心引擎**
@@ -322,6 +328,7 @@ cp .env.example .env
 | `COGITO_MEMORY_AUTOAPPLY` | （選填）`1`＝提案記憶中【四判準全中】的自動放行：①純風格不改決策行為（LLM 判，fail-closed）②純新增（刪改永遠人審）③單行 ≤100 字 ④與既有記憶零衝突。放行的掛 **72 小時撤回窗**（`undo memory` 一鍵撤回），且**一提案一 git commit**（workspace 是 git repo 時；revert 即回滾單條）。其餘照舊留給人審 |
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | （選填）知識圖譜用 embedding 選種子（OpenAI 相容 `/embeddings`）；不設＝`recall` 用關鍵字選種子。設了要跑 `ingest -embed` 建向量快取 |
 | `COGITO_OFFICE_URL` | （選填）像素辦公室橋位址；設了才把執行事件投影過去。協定見 [docs/office-protocol.md](docs/office-protocol.md) |
+| `COGITO_OFFICE_TOKEN` | （選填）橋的 token，以 `X-Office-Token` 送出。通常不用設：會讀橋第一次啟動產生的 `~/.pixel-office/token` |
 | `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | （選填）office **HTTP 派工入口**，兩個都設才開。⚠️ 它能執行**任意任務**，故預設**只准 loopback**——非 loopback 會拒開並提示（逃生門 `COGITO_HTTP_INSECURE=1`，但遠端建議改走 SSH tunnel） |
 | `COGITO_HTTP_USER` | （選填）派工者身分（預設 `office-web`），須列在 `COGITO_ALLOWED_USERS`。**office 平台不再繼承 `ALLOWED` 為 `ADMIN`**：這個身分永遠沒有審批權，「持 token 者可自我放行」的洞已封 |
 | `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | （選填）**審批身分**（預設 `office-boss`）與它專用的 token。派工與審批是【兩把鑰匙】：橋送 approve/reject 時帶 `X-Approver-Token`，才以 approver 身分進 Core；審批身分**只能** approve/reject（拿它派工回 403）。approver 須同時列在 `COGITO_ALLOWED_USERS` 與 `COGITO_ADMIN_USERS`（建議 `office:office-boss`）。兩把 token 相同會被視為未分離、審批權停用 |

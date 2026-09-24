@@ -28,6 +28,13 @@ Think of it as a **digital employee embedded in your team**: it lives in your IM
 
 ▶ Full version (HD, pausable): [docs/brag.mp4](docs/brag.mp4). It shows a dangerous command intercepted for approval, the cost/trace view, and self-evolution waiting for your sign-off.
 
+## Pixel Office: the stage for this engine
+
+[pixel-office](https://github.com/SIMPLYBOYS/pixel-office) projects cogito's work into a pixel-art office. Tool calls, approvals and
+finished tasks show up as employees walking to their desks, waiting at the boss's door with a countdown over their head, or handing
+in a report, and you approve high-risk operations right there. cogito is the engine; Pixel Office is where you watch it work.
+Point `COGITO_OFFICE_URL` at the bridge (the token is picked up automatically on the same machine). Protocol: [docs/office-protocol.md](docs/office-protocol.md).
+
 ## Features
 
 **Core engine**
@@ -324,6 +331,7 @@ Variables:
 | `COGITO_MEMORY_AUTOAPPLY` | (optional) `1` = auto-approve proposed memories that pass **all four criteria**: ① style-only, no decision-behavior change (LLM-judged, fail-closed) ② purely additive (updates/deletes always go to a human) ③ single line ≤100 chars ④ zero conflict with existing memories. Auto-approved entries get a **72-hour undo window** (`undo memory`) and **one git commit per proposal** (when the workspace is a git repo; revert = single-entry rollback). Everything else still goes to a human |
 | `COGITO_EMBED_MODEL` / `COGITO_EMBED_BASE_URL` / `COGITO_EMBED_API_KEY` | (optional) Embedding-based seed selection for the knowledge graph (OpenAI-compatible `/embeddings`); unset = `recall` seeds by keyword. When set, run `ingest -embed` to build the vector cache |
 | `COGITO_OFFICE_URL` | (optional) Pixel-office bridge address; execution events are projected there when set. Protocol: [docs/office-protocol.md](docs/office-protocol.md) |
+| `COGITO_OFFICE_TOKEN` | (optional) The bridge's token, sent as `X-Office-Token`. Usually leave unset: it's read from `~/.pixel-office/token`, which the bridge creates on first start |
 | `COGITO_HTTP_ADDR` / `COGITO_HTTP_TOKEN` | (optional) The office **HTTP task-dispatch entrypoint**; opens only when both are set. ⚠️ It can execute **arbitrary tasks**, so it binds **loopback only** by default; non-loopback refuses to start with a hint (escape hatch `COGITO_HTTP_INSECURE=1`, but use an SSH tunnel for remote access instead) |
 | `COGITO_HTTP_USER` | (optional) The dispatcher identity (default `office-web`); must be listed in `COGITO_ALLOWED_USERS`. **The office platform no longer inherits `ALLOWED` as `ADMIN`**: this identity never has approval rights, which closes the "token holder can self-approve" hole |
 | `COGITO_HTTP_APPROVER` / `COGITO_HTTP_APPROVER_TOKEN` | (optional) The **approver identity** (default `office-boss`) and its dedicated token. Dispatch and approval are **two keys**: the bridge sends approve/reject with `X-Approver-Token` to enter Core as the approver; the approver identity can **only** approve/reject (dispatching with it returns 403). The approver must be listed in both `COGITO_ALLOWED_USERS` and `COGITO_ADMIN_USERS` (recommended: `office:office-boss`). Identical tokens are treated as non-separated and approval is disabled |
