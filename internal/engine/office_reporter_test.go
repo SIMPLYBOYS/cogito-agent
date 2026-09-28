@@ -52,6 +52,11 @@ func TestOfficeReporterContract(t *testing.T) {
 		t.Fatalf("事件數 %d != %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
+		// run／eid 是每次執行才產生的亂數：驗「有帶」，比對內容時拿掉（專屬測試見 TestOfficeReporterRunAndEid）
+		if got[i].Run == "" || got[i].Eid == "" {
+			t.Errorf("事件 %d 缺 run／eid：%+v", i, got[i])
+		}
+		got[i].Run, got[i].Eid = "", ""
 		if got[i] != want[i] {
 			t.Errorf("事件 %d: got %+v want %+v", i, got[i], want[i])
 		}
@@ -350,5 +355,48 @@ func TestOfficeReporterStoppedIsNotError(t *testing.T) {
 	r.Close()
 	if len(got) != 1 || got[0].Label != "stopped" || !strings.Contains(got[0].Detail, "背景子 agent") {
 		t.Fatalf("中止應送 stopped 並帶上收掉了什麼：%+v", got)
+	}
+}
+
+// 每個事件都帶這次執行的 run 與唯一的 eid；兩次執行的 run 不同（橋靠它擋舊任務晚到的事件、靠 eid 去重）。
+func TestOfficeReporterRunAndEid(t *testing.T) {
+	var mu sync.Mutex
+	var got []officeEvent
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var ev officeEvent
+		_ = json.NewDecoder(req.Body).Decode(&ev)
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	}))
+	defer srv.Close()
+
+	a := NewOfficeReporter(srv.URL, "p17")
+	a.push("start", "第一件", "")
+	a.push("tool", "read_file", "a.go")
+	a.push("done", "ok", "")
+	a.Close()
+	b := NewOfficeReporter(srv.URL, "p17")
+	b.push("start", "第二件", "")
+	b.Close()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 4 {
+		t.Fatalf("want 4 events, got %d", len(got))
+	}
+	run := got[0].Run
+	if run == "" || got[1].Run != run || got[2].Run != run {
+		t.Fatalf("one execution must share one run id: %+v", got[:3])
+	}
+	if got[3].Run == run {
+		t.Fatalf("a new execution must get a new run id, both were %q", run)
+	}
+	seen := map[string]bool{}
+	for _, ev := range got {
+		if ev.Eid == "" || seen[ev.Eid] || !strings.HasPrefix(ev.Eid, ev.Run+"-") {
+			t.Fatalf("eid must be unique and prefixed by its run: %+v", ev)
+		}
+		seen[ev.Eid] = true
 	}
 }

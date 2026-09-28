@@ -17,6 +17,8 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -51,6 +53,11 @@ type officeEvent struct {
 	// token 數是真的，但乘上去的單價是猜的——可能差好幾倍（把 haiku 當 opus 就貴五倍）。
 	// 不標出來的話，估計值長得跟實價一模一樣，那是另一種「假的成功」。
 	CostEst bool `json:"cost_est,omitempty"`
+	// Run 是這一次任務執行的 id（一個 reporter＝一次執行，建立時產生）。橋拿它認卡：舊任務中止後才到的
+	// done 帶著舊的 run，碰不到老闆接著派的新卡（pixel-office 的 Paperclip 比較筆記 P0／第一批）。
+	Run string `json:"run,omitempty"`
+	// Eid 是事件的唯一 id（run＋序號）。同一筆重送時橋只算一次——不重複開卡、不重複記用量。
+	Eid string `json:"eid,omitempty"`
 }
 
 // TaskEnd 是一次任務收尾的事實集合。用結構而不是一路加參數——這是第四個欄位了，
@@ -67,6 +74,8 @@ type TaskEnd struct {
 
 type OfficeReporter struct {
 	agent string
+	run   string // 這一次執行的 id；見 officeEvent.Run
+	seq   int    // 事件序號（在 mu 裡遞增），組成 Eid
 	ch    chan officeEvent
 	done  chan struct{}
 	// quit 是收工訊號。【刻意不關 ch】——關了的話，任何 Close 之後才到的事件都會讓 push panic
@@ -122,12 +131,22 @@ func isCritical(kind, label string) bool {
 func NewOfficeReporter(url, agent string) *OfficeReporter {
 	r := &OfficeReporter{
 		agent: agent,
+		run:   newRunID(),
 		done:  make(chan struct{}),
 		quit:  make(chan struct{}),
 		wake:  make(chan struct{}, 1),
 	}
 	go r.send(strings.TrimRight(url, "/") + "/office/event")
 	return r
+}
+
+// newRunID 產生一次執行的 id。拿不到亂數（幾乎不會）就退回時間戳——寧可不那麼唯一，也不讓投影卡住引擎。
+func newRunID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("t%x", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 // closeDrainBudget 是 Close 等待緩衝排空的【總】預算。橋健康時排空是毫秒級、橋不在線時連線秒拒，
@@ -231,6 +250,8 @@ func (r *OfficeReporter) pushEv(ev officeEvent) {
 		r.mu.Unlock()
 		return // 泡泡滿了就丟（這類掉幀真的無害）
 	}
+	r.seq++
+	ev.Run, ev.Eid = r.run, fmt.Sprintf("%s-%d", r.run, r.seq)
 	r.queue = append(r.queue, ev)
 	r.mu.Unlock()
 
