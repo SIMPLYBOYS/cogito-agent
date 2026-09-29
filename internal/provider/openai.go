@@ -95,6 +95,14 @@ func (p *OpenAIProvider) Configure(model string, maxTokens int) LLMProvider {
 	return NewOpenAIProvider(cfg)
 }
 
+// WithEffort 回傳帶了 reasoning_effort 的變體（值拷貝，沿用同一端點/金鑰/HTTP client）。
+// 蓋過 OPENAI_REASONING_EFFORT（那是整個行程的預設；這是頻道的覆蓋）。
+func (p *OpenAIProvider) WithEffort(effort string) LLMProvider {
+	cfg := p.cfg
+	cfg.ReasoningEffort = effort
+	return NewOpenAIProvider(cfg)
+}
+
 // nonChatModel 認出 /v1/models 裡的非對話模型（embedding、語音、繪圖、審核…）。
 // ponytail: 子字串排除表，OpenAI 推出新類型的非對話模型時要補；誤放進來只是選單多一項、選了會失敗。
 var nonChatModel = []string{"embedding", "whisper", "tts", "dall-e", "moderation", "transcribe", "sora", "image", "audio", "realtime"}

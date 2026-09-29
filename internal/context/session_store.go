@@ -24,6 +24,7 @@ type SessionSnapshot struct {
 	Summary    string           `json:"summary,omitempty"`
 	PlanMode   bool             `json:"plan_mode,omitempty"`
 	Model      string           `json:"model,omitempty"`       // per-channel 模型覆蓋（`model <id>`）
+	Effort     string           `json:"effort,omitempty"`      // per-channel 思考力度覆蓋（辦公室派工帶的 effort）
 	ModelUsed  string           `json:"model_used,omitempty"`  // 實際跑過的（最近一次）模型 id，供用量按模型切片
 	Goal       string           `json:"goal,omitempty"`        // 持久目標（`goal <text>`）
 	GoalPaused bool             `json:"goal_paused,omitempty"` // 暫停自動續跑（保留目標）

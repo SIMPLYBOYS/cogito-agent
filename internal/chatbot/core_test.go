@@ -199,6 +199,27 @@ func TestSteerCommand(t *testing.T) {
 	}
 }
 
+// SetChannelEffort：跟 SetChannelModel 同一套——reset/default 清掉；其餘轉小寫照設；怪字直接不收（它要原樣進 API 請求）。
+func TestSetChannelEffort(t *testing.T) {
+	c := NewCore("efforttest", t.TempDir(), nil, func(string, string) {})
+	conv := "efforttest:chanE"
+	c.SetChannelEffort("chanE", " High ")
+	if got := c.sessionFor(conv).Effort(); got != "high" {
+		t.Errorf("設定失敗（該去空白、轉小寫）: %q", got)
+	}
+	c.SetChannelEffort("chanE", `max","x":"y`)
+	if got := c.sessionFor(conv).Effort(); got != "high" {
+		t.Errorf("怪字不該收，也不該動到現有設定: %q", got)
+	}
+	for _, word := range []string{"reset", "DEFAULT"} {
+		c.SetChannelEffort("chanE", "max")
+		c.SetChannelEffort("chanE", word)
+		if got := c.sessionFor(conv).Effort(); got != "" {
+			t.Errorf("%q 應清掉（空），got %q", word, got)
+		}
+	}
+}
+
 // SetChannelModel：reset/default 與聊天端 `model reset` 同義（收回覆蓋），
 // 其餘字串照設。外殼靠這個把臨時覆蓋還原——空字串在 HTTP 入口是「不要動」，不能混用。
 func TestSetChannelModel(t *testing.T) {

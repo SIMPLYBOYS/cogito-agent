@@ -400,7 +400,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 	var rep engine.Reporter = &reporter{convID: convID}
 	// COGITO_OFFICE_URL 設定時，引擎事件同步投影到像素辦公室（unity_demo 橋）。convID 直接當
 	// 事件的 agent 身分——橋端把未知 id 動態指派給閒置 NPC（黏性映射，同頻道固定同員工）。
-	var taskErr error // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
+	var taskErr error   // office 收工泡要知道結局；終局失敗出口賦值、defer 讀取
 	var stopNote string // 被 /stop 中止時：誰送的、一併收掉了什麼（辦公室記成中止，不是錯誤）
 	if office := newOfficeReporter(convID); office != nil {
 		office.Begin(prompt, workDir)
@@ -560,6 +560,38 @@ func (c *Core) SetChannelModel(channelID, model string) {
 		m = ""
 	}
 	c.sessionFor(c.convID(channelID)).SetModel(m)
+}
+
+// SetChannelEffort 設定某個頻道的思考力度（low/medium/high/xhigh/max…）。跟 SetChannelModel 同一套：
+// 辦公室把它當【員工的屬性】，派工時帶上；`reset`／`default`＝清掉、回到不送（由模型自己決定）。
+// 只收小寫英文字：它會原樣進 API 請求（Anthropic output_config.effort、OpenAI reasoning_effort）；
+// 型號收不收由 provider 判斷（Claude 照 /v1/models 的 capabilities，不收就不送）。
+func (c *Core) SetChannelEffort(channelID, effort string) {
+	e := strings.ToLower(strings.TrimSpace(effort))
+	if e == "reset" || e == "default" {
+		e = ""
+	}
+	if !validEffort(e) {
+		log.Printf("[Core] 忽略不認得的思考力度 %q（頻道 %s）", effort, channelID)
+		return
+	}
+	c.sessionFor(c.convID(channelID)).SetEffort(e)
+}
+
+// validEffort：空（清除）或 2–10 個小寫英文字母。
+func validEffort(e string) bool {
+	if e == "" {
+		return true
+	}
+	if len(e) < 2 || len(e) > 10 {
+		return false
+	}
+	for _, r := range e {
+		if r < 'a' || r > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 // ResumeInterrupted 在行程啟動時掃描持久化的 session，把「上次被硬砍（OOM/SIGKILL/斷電）、任務仍

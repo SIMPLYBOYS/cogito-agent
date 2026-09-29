@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
+	"strings"
 
 	"github.com/SIMPLYBOYS/cogito-agent/internal/schema"
 	"github.com/anthropics/anthropic-sdk-go"
@@ -15,7 +17,8 @@ import (
 type ClaudeProvider struct {
 	client    anthropic.Client
 	model     string
-	maxTokens int // 0＝用預設 4096；供 effort 調整子 agent 輸出上限
+	maxTokens int    // 0＝用預設 4096；供 effort 調整子 agent 輸出上限
+	effort    string // 思考力度（output_config.effort）；空＝不送。見 WithEffort／effortFor
 }
 
 // NewClaudeProvider 走 Anthropic 官方端點（https://api.anthropic.com）。
@@ -106,6 +109,43 @@ func (p *ClaudeProvider) GenerateStream(ctx context.Context, msgs []schema.Messa
 
 // buildParams 把統一歷史 + 工具定義組成 Anthropic 請求參數（含 prompt caching 斷點）。Generate 與
 // GenerateStream 共用，確保串流與非串流的請求構造完全一致。
+// WithEffort 回傳帶了思考力度的變體（值拷貝，共用同一 client）。Configure 也是值拷貝，所以子 agent 會沿用。
+func (p *ClaudeProvider) WithEffort(effort string) LLMProvider {
+	np := *p
+	np.effort = effort
+	return &np
+}
+
+// effortFor 回傳這次要送的 effort：【型號收才送】——Haiku 4.5、Sonnet 4.5 收到 effort 直接 400，
+// Opus 4.5 只收到 high。收不收看 /v1/models 的 capabilities.effort（models.go 的 effortsOf）；
+// 清單還沒抓回來時，已知不收的不送、其他照送（啟動後頭幾秒才會走到這條）。
+func (p *ClaudeProvider) effortFor() string {
+	if p.effort == "" {
+		return ""
+	}
+	if levels, known := effortsOf(p.model); known {
+		if slices.Contains(levels, p.effort) {
+			return p.effort
+		}
+		return ""
+	}
+	if effortUnsupported(p.model) {
+		return ""
+	}
+	return p.effort
+}
+
+// effortUnsupported：清單還沒到手時的後備判斷——已知不收 effort 的型號。
+// ponytail: 前綴表，只在啟動後清單抓回來之前用得到；之後一律以官方 capabilities 為準
+func effortUnsupported(model string) bool {
+	for _, pre := range []string{"claude-haiku", "claude-sonnet-4-5", "claude-sonnet-4-0", "claude-opus-4-0", "claude-opus-4-1", "claude-3"} {
+		if strings.HasPrefix(model, pre) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *ClaudeProvider) buildParams(msgs []schema.Message, availableTools []schema.ToolDefinition) anthropic.MessageNewParams {
 	anthropicMsgs, systemPrompt := buildAnthropicMessages(msgs)
 
@@ -152,6 +192,9 @@ func (p *ClaudeProvider) buildParams(msgs []schema.Message, availableTools []sch
 		Model:     anthropic.Model(p.model),
 		MaxTokens: maxTokens,
 		Messages:  anthropicMsgs,
+	}
+	if e := p.effortFor(); e != "" {
+		params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(e)}
 	}
 
 	// Prompt caching：系統提示與工具列表是同一 session 多輪間不變的前綴，標上 ephemeral 快取

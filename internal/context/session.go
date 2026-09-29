@@ -28,6 +28,9 @@ type Session struct {
 	// model 是本會話（頻道）的模型覆蓋——per-channel 切換（`model <id>`），空＝沿用啟動預設。
 	// factory 建引擎時讀它，經 provider.Configurable 換模型（便宜任務走小模型、推理走大模型）。
 	model string
+	// effort 是本會話（頻道）的思考力度覆蓋（low/medium/high/xhigh/max…），空＝不送、由模型自己決定。
+	// 像素辦公室派工時帶（員工的屬性，跟 model 同一套）；factory 建引擎時經 provider.EffortSetter 套上。
+	effort string
 	// modelUsed 是本 session 實際（最近一次）跑在哪個模型 id，由 CostTracker 計費時記錄。與 model
 	// 不同：沒設覆蓋時 model 為空，但 modelUsed 仍記得跑在哪個模型——這才是「用量按模型切片」該用的欄位。
 	modelUsed string
@@ -77,6 +80,7 @@ func newSessionFromSnapshot(snap *SessionSnapshot, store SessionStore) *Session 
 		summary:               snap.Summary,
 		planMode:              snap.PlanMode,
 		model:                 snap.Model,
+		effort:                snap.Effort,
 		modelUsed:             snap.ModelUsed,
 		goal:                  snap.Goal,
 		goalPaused:            snap.GoalPaused,
@@ -102,6 +106,7 @@ func (s *Session) snapshotLocked() *SessionSnapshot {
 		Summary:               s.summary,
 		PlanMode:              s.planMode,
 		Model:                 s.model,
+		Effort:                s.effort,
 		ModelUsed:             s.modelUsed,
 		Goal:                  s.goal,
 		GoalPaused:            s.goalPaused,
@@ -331,6 +336,22 @@ func (s *Session) SetModel(model string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.model = model
+	s.UpdatedAt = time.Now()
+	s.persistLocked()
+}
+
+// Effort 回傳本會話的思考力度覆蓋（空＝不送）。
+func (s *Session) Effort() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.effort
+}
+
+// SetEffort 設定本會話的思考力度覆蓋並落盤（空字串＝清除）。
+func (s *Session) SetEffort(effort string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.effort = effort
 	s.UpdatedAt = time.Now()
 	s.persistLocked()
 }

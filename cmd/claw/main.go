@@ -171,6 +171,12 @@ func main() {
 				effProvider = cfg.Configure(m, 0)
 			}
 		}
+		// per-channel 思考力度（辦公室派工帶的 effort）：provider 支援才套；Claude 還會看型號收不收（不收就不送）。
+		if e := sess.Effort(); e != "" {
+			if es, ok := effProvider.(provider.EffortSetter); ok {
+				effProvider = es.WithEffort(e)
+			}
+		}
 		tracked := observability.NewCostTracker(effProvider, sess)
 		// 對話式建構子＝滾動摘要 + history 有界化（bench/一次性任務走 NewAgentEngine 預設關，保持確定性）。
 		eng := engine.NewConversationalEngine(tracked, registry, false)

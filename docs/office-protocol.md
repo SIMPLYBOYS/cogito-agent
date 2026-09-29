@@ -68,7 +68,9 @@ false 時不送。橋端要把它標出來（外殼顯示成 `~$0.9000`）——
 
 ### `GET /models`
 
-回「現在真正能用哪些模型」：`{"models":[{"id","name"}],"source":"live"|"pricing"}`。
+回「現在真正能用哪些模型」：`{"models":[{"id","name","window","efforts"}],"source":"live"|"pricing"}`。
+`efforts`（選填）是這個模型收的思考力度，照低到高排（例 `["low","medium","high","xhigh","max"]`；
+來自 Anthropic `/v1/models` 的 `capabilities.effort`）。沒有這個鍵＝不知道；空陣列＝明確不收。
 `live` ＝來自 provider 本人（Anthropic 的 `/v1/models`，帶 6 小時快取）；`pricing` ＝問不到，
 降級成計價表的鍵。**降級要看得見**——外殼據此告訴使用者這份清單可能過期。
 需要 token（與 `/capabilities` 同一把）。
@@ -78,6 +80,11 @@ false 時不送。橋端要把它標出來（外殼顯示成 `~$0.9000`）——
 派工端可帶 `model`（string，選填）：設定該頻道之後要用的模型（等同聊天端的 `model <id>`
 指令），下一個任務生效。**空或不帶＝不動現有設定**——每次派工都覆蓋會把使用者用指令
 選的那個無聲蓋掉。像素辦公室把它當「員工的屬性」用（persona 的 `model:` 欄位）。
+
+也可帶 `effort`（string，選填）：該頻道之後的思考力度（`low`／`medium`／`high`／`xhigh`／`max`…），規則同 `model`：
+空或不帶＝不動；`reset`／`default`＝清掉（回到不送、由模型自己決定）；只收 2–10 個小寫英文字母，其他忽略。
+Claude 模型送 `output_config.effort`——**型號收才送**（照 `/models` 的 `efforts`；Haiku 4.5 這類不收的直接略過，
+不然整個任務會 400）；OpenAI 相容端點送 `reasoning_effort`，蓋過 `OPENAI_REASONING_EFFORT`。子 agent 沿用頻道的 effort。
 
 超長內容以 `…`（U+2026）結尾。長度單位是**字元（rune）不是位元組**。
 

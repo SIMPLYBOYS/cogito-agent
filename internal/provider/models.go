@@ -11,6 +11,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"regexp"
 	"strings"
@@ -27,6 +28,39 @@ type ModelInfo struct {
 	// Window 是這個模型的真實輸入窗口（max_input_tokens）。壓縮水位靠它算——
 	// 寫死一個數字會在窗口變大時默默浪費、在變小時直接讓任務失敗。
 	Window int `json:"window,omitempty"`
+	// Efforts 是這個模型收的思考力度（capabilities.effort 裡 supported 的那幾級，照 low→max 排）。
+	// nil＝不知道（清單沒給）；空＝明確不收。辦公室的選單照它列，ClaudeProvider 照它決定送不送。
+	Efforts []string `json:"efforts,omitempty"`
+}
+
+// effortOrder 是思考力度由低到高的順序（官方沒保證 JSON 鍵的順序，選單要照這個排）。
+var effortOrder = []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+
+// effortLevels 從 capabilities.effort 的原始 JSON 取出收哪幾級：
+// {"supported":true,"low":{"supported":true},…,"xhigh":{"supported":true}}。SDK 的結構只列了 low～max，
+// 新的等級（xhigh）在 ExtraFields 裡——所以直接解原始 JSON，不靠 SDK 的欄位。沒給＝nil（不知道）。
+func effortLevels(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	var caps map[string]json.RawMessage
+	if json.Unmarshal([]byte(raw), &caps) != nil {
+		return nil
+	}
+	var on bool
+	if json.Unmarshal(caps["supported"], &on) != nil || !on {
+		return []string{}
+	}
+	out := []string{}
+	for _, lv := range effortOrder {
+		var s struct {
+			Supported bool `json:"supported"`
+		}
+		if v, ok := caps[lv]; ok && json.Unmarshal(v, &s) == nil && s.Supported {
+			out = append(out, lv)
+		}
+	}
+	return out
 }
 
 // ModelLister 是「能列出可用模型」的【可選】能力。provider 不支援就不實作——
@@ -41,7 +75,8 @@ func (p *ClaudeProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	it := p.client.Models.ListAutoPaging(ctx, anthropic.ModelListParams{})
 	for it.Next() {
 		m := it.Current()
-		out = append(out, ModelInfo{ID: m.ID, Name: m.DisplayName, Window: int(m.MaxInputTokens)})
+		out = append(out, ModelInfo{ID: m.ID, Name: m.DisplayName, Window: int(m.MaxInputTokens),
+			Efforts: effortLevels(m.Capabilities.Effort.RawJSON())})
 	}
 	return out, it.Err()
 }
@@ -65,6 +100,7 @@ var datedID = regexp.MustCompile(`-\d{8}$`)
 var (
 	windowsMu      sync.Mutex
 	windows        map[string]int
+	efforts        map[string][]string // 模型 → 收的思考力度（跟 windows 同一次抓、同一把鎖）
 	windowsAt      time.Time
 	windowsLoading bool // 防止同時多個任務各抓一次
 )
@@ -99,15 +135,22 @@ func (p *ClaudeProvider) refreshWindows() {
 		return
 	}
 	m := map[string]int{}
+	ef := map[string][]string{}
 	for _, info := range got {
 		m[info.ID] = info.Window
+		if info.Efforts != nil {
+			ef[info.ID] = info.Efforts
+		}
 		// 使用者可能設 claude-haiku-4-5，而官方 id 是 claude-haiku-4-5-20251001
 		// （實測：舊模型的真實 id 本來就帶日期），兩種寫法都要查得到。
 		if k := datedID.ReplaceAllString(info.ID, ""); k != info.ID {
 			m[k] = info.Window
+			if info.Efforts != nil {
+				ef[k] = info.Efforts
+			}
 		}
 	}
-	windows = m
+	windows, efforts = m, ef
 	log.Printf("[provider] 模型窗口已更新（%d 個）", len(got))
 }
 
@@ -130,6 +173,18 @@ func (p *ClaudeProvider) windowOf(model string) int {
 		return w
 	}
 	return windows[datedID.ReplaceAllString(model, "")]
+}
+
+// effortsOf 查這個模型收哪幾級思考力度；known=false＝清單裡沒有它（或清單還沒抓回來）。
+// 不自己觸發抓取：windowOf 每個任務都會走到、會負責讓清單保持新鮮。
+func effortsOf(model string) (levels []string, known bool) {
+	windowsMu.Lock()
+	defer windowsMu.Unlock()
+	if l, ok := efforts[model]; ok {
+		return l, true
+	}
+	l, ok := efforts[datedID.ReplaceAllString(model, "")]
+	return l, ok
 }
 
 // CachedLister 給 ListModels 加一層 TTL 快取。取不到新的就沿用舊的（過期也照給）——

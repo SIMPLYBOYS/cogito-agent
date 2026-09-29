@@ -24,3 +24,11 @@ type LLMProvider interface {
 type Configurable interface {
 	Configure(model string, maxTokens int) LLMProvider
 }
+
+// EffortSetter 是【可選】介面：回傳帶了思考力度（effort）的 provider 變體（原 provider 不變）。
+// 供頻道的 effort 覆蓋（辦公室派工時帶的，session.Effort）。空字串＝不送、由模型自己決定。
+// Claude 送 output_config.effort（型號收才送，見 ClaudeProvider.effortFor）；OpenAI 相容送 reasoning_effort。
+// provider 未實作時靜默忽略——effort 是加值，不是前提。
+type EffortSetter interface {
+	WithEffort(effort string) LLMProvider
+}

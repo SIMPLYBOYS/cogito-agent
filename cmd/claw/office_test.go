@@ -39,7 +39,7 @@ func TestOfficeTaskHandler(t *testing.T) {
 	h := officeTaskHandler("s3cret", "office-web", func(channelID, userID, text string) {
 		dispatched++
 		gotChannel, gotUser, gotText = channelID, userID, text
-	}, func(channelID, model string) { models[channelID] = model })
+	}, func(channelID, model string) { models[channelID] = model }, nil)
 
 	do := func(method, auth, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "/task", strings.NewReader(body))
@@ -141,7 +141,7 @@ func TestOfficeTaskHandler_Model(t *testing.T) {
 	models := map[string]string{}
 	calls := 0
 	h := officeTaskHandler("s3cret", "office-web", func(string, string, string) {},
-		func(channelID, model string) { models[channelID] = model; calls++ })
+		func(channelID, model string) { models[channelID] = model; calls++ }, nil)
 
 	post := func(body string) {
 		r := httptest.NewRequest(http.MethodPost, "/task", strings.NewReader(body))
@@ -155,5 +155,26 @@ func TestOfficeTaskHandler_Model(t *testing.T) {
 	post(`{"agent":"p19","text":"再做一件"}`)
 	if calls != 1 {
 		t.Errorf("沒帶 model 不該動現有設定（會蓋掉 `model` 指令設的），呼叫了 %d 次", calls)
+	}
+}
+
+// 思考力度跟模型同一套：帶了就設到該頻道；沒帶【不動】現有設定。
+func TestOfficeTaskHandler_Effort(t *testing.T) {
+	efforts := map[string]string{}
+	calls := 0
+	h := officeTaskHandler("s3cret", "office-web", func(string, string, string) {}, nil,
+		func(channelID, effort string) { efforts[channelID] = effort; calls++ })
+	post := func(body string) {
+		r := httptest.NewRequest(http.MethodPost, "/task", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer s3cret")
+		h(httptest.NewRecorder(), r)
+	}
+	post(`{"agent":"p19","text":"想深一點","effort":"xhigh"}`)
+	if efforts["p19"] != "xhigh" {
+		t.Errorf("帶了 effort 應設到該頻道，got %q", efforts["p19"])
+	}
+	post(`{"agent":"p19","text":"再做一件"}`)
+	if calls != 1 {
+		t.Errorf("沒帶 effort 不該動現有設定，呼叫了 %d 次", calls)
 	}
 }

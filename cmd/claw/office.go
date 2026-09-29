@@ -86,7 +86,8 @@ func startOfficeHTTP(factory chatbot.EngineFactory, rootDir string, hooks chatbo
 	core.ResumeInterrupted() // 跨重啟續跑（需 AUTO_RESUME + SESSION_DIR），同 Slack/TG
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/task", officeTaskHandlerSoD(token, user, approver, approverToken, core.Dispatch, core.SetChannelModel))
+	mux.HandleFunc("/task", officeTaskHandlerSoD(token, user, approver, approverToken, core.Dispatch, core.SetChannelModel,
+		core.SetChannelEffort))
 	mux.HandleFunc("/capabilities", officeCapsHandler(token, core.Capabilities, gw))
 	mux.HandleFunc("/models", officeModelsHandler(token, llm))
 	// 顯式 timeout：預設的 http.Server 沒有任何讀寫上限，一條慢連線就能長期佔著（Slowloris）。
@@ -194,8 +195,8 @@ func officeBindDenied(addr string, insecure bool) bool {
 // officeTaskHandler 是 /task 的處理器。dispatch 以參數注入（而非直接吃 *Core）純為可單測——
 // 這是全系統最強的一道入口（能跑任意 bash／寫檔），auth 與輸入把關值得有測試釘住。
 func officeTaskHandler(token, user string, dispatch func(channelID, userID, text string),
-	setModel func(channelID, model string)) http.HandlerFunc {
-	return officeTaskHandlerSoD(token, user, "", "", dispatch, setModel)
+	setModel, setEffort func(channelID, value string)) http.HandlerFunc {
+	return officeTaskHandlerSoD(token, user, "", "", dispatch, setModel, setEffort)
 }
 
 // officeTaskHandlerSoD 是帶職務分離的 /task：
@@ -206,7 +207,7 @@ func officeTaskHandler(token, user string, dispatch func(channelID, userID, text
 //
 // approverToken 為空＝這個入口沒有審批權（X-Approver-Token 一律當錯）。
 func officeTaskHandlerSoD(token, user, approver, approverToken string, dispatch func(channelID, userID, text string),
-	setModel func(channelID, model string)) http.HandlerFunc {
+	setModel, setEffort func(channelID, value string)) http.HandlerFunc {
 	wantAuth := []byte("Bearer " + token)
 	wantApprover := []byte(approverToken)
 	isDecision := func(text string) bool {
@@ -225,7 +226,8 @@ func officeTaskHandlerSoD(token, user, approver, approverToken string, dispatch 
 		}
 		// Model 可選：辦公室把「用哪個模型」當成【員工的屬性】（persona 的 model 欄位），
 		// 派工時一起帶過來。空＝不動這個頻道現有的設定（可能是聊天端 `model` 指令設的）。
-		var in struct{ Agent, Text, Model string }
+		// Effort 可選：思考力度，同一套（空＝不動；reset＝清掉）。
+		var in struct{ Agent, Text, Model, Effort string }
 		// 限制請求體，避免一個大 body 就吃掉記憶體（任務文字 1 MB 綽綽有餘）。
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&in); err != nil || in.Agent == "" || in.Text == "" {
 			http.Error(w, `need {"agent","text"}`, http.StatusBadRequest)
@@ -233,6 +235,9 @@ func officeTaskHandlerSoD(token, user, approver, approverToken string, dispatch 
 		}
 		if in.Model != "" && setModel != nil {
 			setModel(in.Agent, in.Model) // 下一個任務（也就是這個）生效
+		}
+		if in.Effort != "" && setEffort != nil {
+			setEffort(in.Agent, in.Effort)
 		}
 		who := user
 		if at := r.Header.Get("X-Approver-Token"); at != "" {
