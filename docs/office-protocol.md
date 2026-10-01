@@ -110,6 +110,17 @@ Claude 模型送 `output_config.effort`——**型號收才送**（照 `/models`
 任務完成／失敗訊息、審批卡都走這裡，顯示在 Web 工作串。`agent` 同上（命名空間化）。
 **此端點目前沒有 `v` 欄位**——它只有一個穩定欄位組，未來若需演進會跟進。
 
+審批卡多帶一個 `approval` 物件，**橋只認這個欄位開審批卡**（pixel-office 稽核 #10）：
+
+```json
+{ "agent": "office:p17", "text": "⚠️ *高危操作審批請求*\n…",
+  "approval": { "tool": "bash", "params": "{\"command\":\"rm -rf build\"}", "task_id": "call_abc", "timeout_s": 300 } }
+```
+
+`text` 只給人看。沒有 `approval`、文字卻以審批標頭開頭的訊息（例如模型照樣板打出來的回覆）照一般訊息顯示，
+不開卡，橋記一筆 `approval.spoofed`。所有平台的審批（含 Slack／Telegram 的鏡射）都由 `postApprovalToOffice` 送；
+office 平台的審批不再經 notify 送純文字。
+
 ---
 
 ## `POST /task` — 派工進 agent

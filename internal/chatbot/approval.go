@@ -58,15 +58,17 @@ func (m *ApprovalManager) WaitForApproval(taskID, channelID, toolName, args stri
 
 	notice := fmt.Sprintf("⚠️ *高危操作審批請求*\nAgent 試圖執行：\n• 工具: `%s`\n• 參數: `%s`\n任務 ID: `%s`\n👉 直接回復 `approve` / `reject` 即可（也可帶 ID：`approve %s`）。%.0f 分鐘內無響應將自動拒絕。",
 		toolName, args, taskID, taskID, timeout.Minutes())
-	if notify != nil {
+	office := strings.HasPrefix(channelID, "office:")
+	switch {
+	case notify != nil && !office:
 		notify(notice)
-	} else {
+	case notify == nil:
 		fmt.Printf("\n[需要審批 TaskID: %s]\n%s\n", taskID, notice)
 	}
-	// 像素辦公室鏡射：Slack/TG 的審批卡本來只送回原平台，辦公室畫面看不到——那位員工會停在
-	// 「工作中」但事件斷流，watchdog 到時把他判成失聯釋放掉，看起來像任務死了（其實在等人按核准）。
-	// office 平台不鏡射：它的 notify 本來就 POST 到同一個端點，鏡射會變兩張卡。
-	mirrorApprovalToOffice(channelID, notice)
+	// 像素辦公室一律收一份【帶審批欄位】的卡。office 平台的也走這裡、不走 notify（pixel-office 稽核 #10）：
+	// notify 送的是純文字，跟模型的回覆同一條路、同一個形狀，橋分不出真假——橋現在只認審批欄位。
+	// Slack/TG 的是鏡射：不送辦公室看不到，那位員工會停在「工作中」但事件斷流，被判失聯。
+	postApprovalToOffice(channelID, notice, toolName, args, taskID, timeout)
 
 	log.Printf("[Approval] 發送審批請求 (TaskID: %s, 頻道: %s)，協程掛起等待...\n", taskID, channelID)
 
@@ -238,16 +240,17 @@ func IsDangerousCommand(toolName string, args string) bool {
 	return false
 }
 
-// mirrorApprovalToOffice 把非 office 平台的審批卡鏡射一份到像素辦公室的橋（COGITO_OFFICE_URL）。
+// postApprovalToOffice 把審批卡送到像素辦公室的橋（COGITO_OFFICE_URL）：文字給人看，approval 欄位給橋認。
 // 送出即忘：辦公室是投影面，橋掛了不該拖累審批本身——獨立 goroutine + 短逾時，錯誤只記 log。
-// convID 原樣帶過去（如 slack:C999），橋據此標示這張審批的來源，不給誤按的核准鈕。
-func mirrorApprovalToOffice(convID, notice string) {
+// convID 原樣帶過去（如 office:p17、slack:C999），橋據此標示來源；非 office 的不給誤按的核准鈕。
+func postApprovalToOffice(convID, notice, tool, args, taskID string, timeout time.Duration) {
 	url := os.Getenv("COGITO_OFFICE_URL")
-	if url == "" || strings.HasPrefix(convID, "office:") {
-		return // office 平台的 notify 本來就送同一個端點，鏡射會變兩張卡
+	if url == "" {
+		return
 	}
 	go func() {
-		b, _ := json.Marshal(map[string]string{"agent": convID, "text": notice})
+		b, _ := json.Marshal(map[string]any{"agent": convID, "text": notice, "approval": map[string]any{
+			"tool": tool, "params": args, "task_id": taskID, "timeout_s": int(timeout.Seconds())}})
 		client := &http.Client{Timeout: 3 * time.Second}
 		resp, err := engine.PostOffice(client, strings.TrimRight(url, "/")+"/office/chat", b)
 		if err != nil {
