@@ -99,6 +99,9 @@ func (t *SubagentTool) StopBackground() string {
 	return ""
 }
 
+// RunningBackground：這一輪派出去、還沒結束的背景子 agent 數。
+func (t *SubagentTool) RunningBackground() int { return t.subMgr.Running() }
+
 // WithWorktreeIsolation 開啟 worktree 隔離能力：baseWorkDir＝session 工作區，regFactory 依目錄建工具超集
 // （與傳入 subagentRegistry 同款，但 rooted 在指定目錄）。未呼叫則 isolation:worktree 降級為共享工作區。
 func (t *SubagentTool) WithWorktreeIsolation(baseWorkDir string, regFactory func(workDir string) Registry) *SubagentTool {

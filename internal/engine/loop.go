@@ -77,6 +77,14 @@ func (e *AgentEngine) StopBackground() []string {
 	return nil
 }
 
+// RunningBackground 回報這具引擎的工具留在背景、還在跑的工作數（收工時大於 0＝要記下來給之後的 /stop）。
+func (e *AgentEngine) RunningBackground() int {
+	if r, ok := e.registry.(interface{ RunningBackground() int }); ok {
+		return r.RunningBackground()
+	}
+	return 0
+}
+
 func NewAgentEngine(p provider.LLMProvider, r tools.Registry, enableThinking bool, planMode bool) *AgentEngine {
 	return &AgentEngine{
 		provider:           p,

@@ -42,7 +42,21 @@ type Registry interface {
 // BackgroundStopper：握有「工具回傳後還在跑」的背景工作的工具（背景子 agent、背景指令）。/stop 時由
 // StopBackground 一起收掉，回報收了什麼（空字串＝沒有東西在跑）。沒有這一條，主任務停了，
 // 背景工作照樣跑到程式關閉——而下一輪是新的管理器，連 task_list 都看不到它們。
-type BackgroundStopper interface{ StopBackground() string }
+type BackgroundStopper interface {
+	StopBackground() string
+	// RunningBackground：還在跑的背景工作數。收工時大於 0 的那一輪要被記下來，之後的 /stop 才收得到（見 chatbot.keepLingering）。
+	RunningBackground() int
+}
+
+// RunningBackground 加總註冊表裡所有 BackgroundStopper 還在跑的背景工作。
+func (r *registryImpl) RunningBackground() (n int) {
+	for _, t := range r.tools {
+		if s, ok := t.(BackgroundStopper); ok {
+			n += s.RunningBackground()
+		}
+	}
+	return n
+}
 
 // StopBackground 收掉註冊表裡所有 BackgroundStopper 的背景工作，回報收了什麼（排序過，訊息穩定）。
 func (r *registryImpl) StopBackground() []string {

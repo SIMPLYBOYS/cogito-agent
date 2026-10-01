@@ -56,6 +56,13 @@ func (m *SubagentManager) CancelAll() int {
 	return n
 }
 
+// Running：還沒結束的背景子 agent 數（取鎖版的 runningCount）。
+func (m *SubagentManager) Running() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.runningCount()
+}
+
 func (m *SubagentManager) runningCount() int {
 	n := 0
 	for _, s := range m.subs {

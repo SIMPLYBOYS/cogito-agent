@@ -31,6 +31,8 @@ func (t *bashBackgroundTool) StopBackground() string {
 	return ""
 }
 
+func (t *bashBackgroundTool) RunningBackground() int { return t.tm.Running() }
+
 func (t *bashBackgroundTool) Name() string { return "bash_background" }
 
 func (t *bashBackgroundTool) Definition() schema.ToolDefinition {

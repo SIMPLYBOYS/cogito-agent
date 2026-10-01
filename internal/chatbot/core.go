@@ -150,10 +150,43 @@ func (c *Core) memoryDir(convID string) string {
 // 落盤（該 session 永久磚化），且 /stop 跨平台失效。workDir 路徑本就全域唯一（含 platform 前綴或
 // user_ 前綴），故共用一張表對既有 per-platform 行為零影響。與 senders / lastRoute 同一理由。
 var (
-	running   = map[string]context.CancelFunc{}
-	stopping  = map[string]bool{} // 已請求 /stop 但尚未收尾的頻道（見 stop 的註解）
+	running  = map[string]context.CancelFunc{}
+	stopping = map[string]bool{} // 已請求 /stop 但尚未收尾的頻道（見 stop 的註解）
+	// lingering：收工時還在背景跑東西（背景子 agent、背景指令）的那幾輪引擎，按 workDir 記。背景工作的管理器
+	// 是每輪一個，下一輪的引擎看不到它們；不記下來，主任務收工之後的 /stop 沒有任務可取消，它們就跑到 claw 關掉
+	// （cogito-agent#1 實測）。/stop 時一併收掉；背景自己跑完的，下次記帳時順手清掉。
+	lingering = map[string][]*engine.AgentEngine{}
 	runningMu sync.Mutex
 )
+
+// keepLingering：這一輪收工時若還有背景工作在跑，記下來給之後的 /stop。
+func keepLingering(workDir string, eng *engine.AgentEngine) {
+	if eng.RunningBackground() == 0 {
+		return
+	}
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	keep := []*engine.AgentEngine{eng}
+	for _, e := range lingering[workDir] {
+		if e.RunningBackground() > 0 {
+			keep = append(keep, e)
+		}
+	}
+	lingering[workDir] = keep
+}
+
+// stopLingering：收掉先前幾輪留在背景的工作，回報收了什麼。
+func stopLingering(workDir string) []string {
+	runningMu.Lock()
+	engs := lingering[workDir]
+	delete(lingering, workDir)
+	runningMu.Unlock()
+	var out []string
+	for _, e := range engs {
+		out = append(out, e.StopBackground()...)
+	}
+	return out
+}
 
 // NewCore 建核心並向全域 senders 註冊本平台的原生發送，使 SendMessage 路由可達。
 func NewCore(platform, workDir string, factory EngineFactory, rawSend func(channelID, text string)) *Core {
@@ -415,6 +448,7 @@ func (c *Core) handleAgentRun(ctx context.Context, convID, prompt string, goalTa
 		rep = engine.MultiReporter{rep, office}
 	}
 	eng := c.factory(session, rep)
+	defer keepLingering(workDir, eng) // 收工後還在背景跑的，記給之後的 /stop（被 /stop 中止的那一輪已經收過，數到 0 不記）
 
 	goalContinues := 0 // goal 任務驗收未過的自動續跑次數（封頂 maxGoalContinue）
 
@@ -720,9 +754,20 @@ func (c *Core) tryGetCommand(convID, text string) bool {
 func (c *Core) tryStopCommand(convID, text string) bool {
 	switch strings.ToLower(strings.TrimSpace(text)) {
 	case "stop", "/stop", "中止", "停":
-		if c.stop(c.channelWorkDir(convID)) {
-			SendMessage(convID, "🛑 已送出中止。目前這一步（模型呼叫或工具）跑完才會停——通常數秒、最長約一分鐘。停妥會再回報一次，在那之前請先別發新任務。")
-		} else {
+		wd := c.channelWorkDir(convID)
+		old := "" // 先前幾輪收工後還留在背景的：沒有任務可取消也要收
+		if left := stopLingering(wd); len(left) > 0 {
+			old = "先前任務留在背景的 " + strings.Join(left, "、") + " 已收掉"
+		}
+		switch {
+		case c.stop(wd):
+			if old != "" {
+				old = "（" + old + "）"
+			}
+			SendMessage(convID, "🛑 已送出中止"+old+"。目前這一步（模型呼叫或工具）跑完才會停——通常數秒、最長約一分鐘。停妥會再回報一次，在那之前請先別發新任務。")
+		case old != "":
+			SendMessage(convID, "🛑 目前沒有正在執行的任務；"+old+"。")
+		default:
 			SendMessage(convID, "ℹ️ 目前沒有正在執行的任務。")
 		}
 		return true

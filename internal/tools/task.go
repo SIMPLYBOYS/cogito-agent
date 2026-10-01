@@ -117,6 +117,13 @@ func (tm *TaskManager) pruneDoneLocked() {
 	}
 }
 
+// Running：還在跑的背景指令數，含正在 fork/exec 路上的（取鎖版的 runningCount）。
+func (tm *TaskManager) Running() int {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.runningCount() + tm.reserved
+}
+
 func (tm *TaskManager) runningCount() int {
 	n := 0
 	for _, t := range tm.tasks {
